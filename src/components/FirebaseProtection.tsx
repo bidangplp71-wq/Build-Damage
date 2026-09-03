@@ -1,5 +1,6 @@
 import React, { useState } from 'react';
 import { useApp } from '../context/AppContext';
+import { firebaseConfig, testFirebaseConnection } from '../services/firebase';
 import {
   Shield,
   ShieldCheck,
@@ -10,11 +11,36 @@ import {
   AlertTriangle,
   Flame,
   FileCode2,
+  Server,
+  RefreshCw,
 } from 'lucide-react';
 
 export const FirebaseProtection: React.FC = () => {
   const { showToast } = useApp();
   const [copied, setCopied] = useState(false);
+  const [copiedConfig, setCopiedConfig] = useState(false);
+  const [testingConnection, setTestingConnection] = useState(false);
+  const [connectionStatus, setConnectionStatus] = useState<string | null>(null);
+
+  const handleTestConnection = async () => {
+    setTestingConnection(true);
+    try {
+      const res = await testFirebaseConnection();
+      setConnectionStatus(res.message);
+      showToast(res.message, res.success ? 'success' : 'info');
+    } catch (e: any) {
+      setConnectionStatus(e?.message || 'Gagal terhubung');
+    } finally {
+      setTestingConnection(false);
+    }
+  };
+
+  const handleCopyConfig = () => {
+    navigator.clipboard.writeText(JSON.stringify(firebaseConfig, null, 2));
+    setCopiedConfig(true);
+    showToast('Konfigurasi Firebase berhasil disalin!', 'info');
+    setTimeout(() => setCopiedConfig(false), 2500);
+  };
 
   const firestoreRules = `rules_version = '2';
 service cloud.firestore {
@@ -116,6 +142,80 @@ service cloud.firestore {
         <div className="flex items-center gap-2 px-3 py-1.5 rounded-xl bg-emerald-50 border border-emerald-200 text-emerald-800 text-xs font-bold">
           <Flame className="w-4 h-4 text-amber-500" />
           <span>Firebase Protection: Enforced</span>
+        </div>
+      </div>
+
+      {/* Active Firebase Project Configuration Card */}
+      <div className="bg-white rounded-2xl border border-slate-200 shadow-xs p-6 space-y-4">
+        <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-3 pb-3 border-b border-slate-100">
+          <div className="flex items-center gap-3">
+            <div className="w-10 h-10 rounded-xl bg-amber-500/10 text-amber-600 flex items-center justify-center font-bold">
+              <Server className="w-5 h-5 text-amber-600" />
+            </div>
+            <div>
+              <div className="flex items-center gap-2">
+                <h3 className="text-sm font-bold text-slate-900">Proyek Firebase Aktif: simpkbg</h3>
+                <span className="px-2 py-0.5 rounded-full text-[10px] font-bold bg-emerald-100 text-emerald-800 border border-emerald-300">
+                  Terkonfigurasi
+                </span>
+              </div>
+              <p className="text-xs text-slate-500">
+                Kredensial Firebase SDK v7.20+ resmi SIM-PKBG
+              </p>
+            </div>
+          </div>
+
+          <div className="flex items-center gap-2">
+            <button
+              onClick={handleTestConnection}
+              disabled={testingConnection}
+              className="flex items-center gap-1.5 px-3 py-1.5 rounded-xl bg-indigo-50 hover:bg-indigo-100 text-indigo-700 text-xs font-bold transition-colors cursor-pointer disabled:opacity-50"
+            >
+              <RefreshCw className={`w-3.5 h-3.5 ${testingConnection ? 'animate-spin' : ''}`} />
+              <span>{testingConnection ? 'Memeriksa...' : 'Uji Koneksi'}</span>
+            </button>
+            <button
+              onClick={handleCopyConfig}
+              className="flex items-center gap-1.5 px-3 py-1.5 rounded-xl bg-slate-100 hover:bg-slate-200 text-slate-700 text-xs font-bold transition-colors cursor-pointer"
+            >
+              <Copy className="w-3.5 h-3.5" />
+              <span>{copiedConfig ? 'Tersalin!' : 'Salin Konfig'}</span>
+            </button>
+          </div>
+        </div>
+
+        {connectionStatus && (
+          <div className="p-3 rounded-xl bg-slate-50 border border-slate-200 text-xs font-medium text-slate-700 flex items-center gap-2">
+            <CheckCircle2 className="w-4 h-4 text-emerald-600 shrink-0" />
+            <span>{connectionStatus}</span>
+          </div>
+        )}
+
+        <div className="grid grid-cols-1 md:grid-cols-3 gap-3 text-xs">
+          <div className="p-3 rounded-xl bg-slate-50 border border-slate-200">
+            <span className="text-[10px] uppercase font-bold text-slate-400 block">Project ID</span>
+            <span className="font-mono font-bold text-slate-800">{firebaseConfig.projectId}</span>
+          </div>
+          <div className="p-3 rounded-xl bg-slate-50 border border-slate-200">
+            <span className="text-[10px] uppercase font-bold text-slate-400 block">Auth Domain</span>
+            <span className="font-mono text-slate-800 truncate block">{firebaseConfig.authDomain}</span>
+          </div>
+          <div className="p-3 rounded-xl bg-slate-50 border border-slate-200">
+            <span className="text-[10px] uppercase font-bold text-slate-400 block">App ID</span>
+            <span className="font-mono text-[11px] text-slate-800 truncate block">{firebaseConfig.appId}</span>
+          </div>
+          <div className="p-3 rounded-xl bg-slate-50 border border-slate-200">
+            <span className="text-[10px] uppercase font-bold text-slate-400 block">Storage Bucket</span>
+            <span className="font-mono text-[11px] text-slate-800 truncate block">{firebaseConfig.storageBucket}</span>
+          </div>
+          <div className="p-3 rounded-xl bg-slate-50 border border-slate-200">
+            <span className="text-[10px] uppercase font-bold text-slate-400 block">Messaging Sender ID</span>
+            <span className="font-mono text-[11px] text-slate-800">{firebaseConfig.messagingSenderId}</span>
+          </div>
+          <div className="p-3 rounded-xl bg-slate-50 border border-slate-200">
+            <span className="text-[10px] uppercase font-bold text-slate-400 block">Measurement ID</span>
+            <span className="font-mono text-[11px] text-slate-800">{firebaseConfig.measurementId}</span>
+          </div>
         </div>
       </div>
 
