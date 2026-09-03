@@ -1,6 +1,8 @@
 import React, { useState } from 'react';
 import { useApp } from '../context/AppContext';
 import { ROLE_LIMITS, UserAccount, UserRole } from '../types';
+import { decryptPassword, maskPassword } from '../utils/security';
+import { PasswordAuthModal } from './PasswordAuthModal';
 import {
   Users,
   ShieldCheck,
@@ -11,6 +13,9 @@ import {
   UserCheck,
   AlertCircle,
   Key,
+  KeyRound,
+  Eye,
+  EyeOff,
 } from 'lucide-react';
 
 export const UserManagement: React.FC = () => {
@@ -21,6 +26,9 @@ export const UserManagement: React.FC = () => {
     getUserCountsByRole,
     addUser,
     updateUser,
+    updateUserPassword,
+    canCurrentUserManagePassword,
+    canCurrentUserViewPassword,
     deleteUser,
     showToast,
   } = useApp();
@@ -28,9 +36,15 @@ export const UserManagement: React.FC = () => {
   const roleCounts = getUserCountsByRole();
   const [selectedRoleFilter, setSelectedRoleFilter] = useState<string>('');
 
-  // Modal State
+  // Modal State for Add/Edit
   const [isModalOpen, setIsModalOpen] = useState(false);
   const [editingUser, setEditingUser] = useState<UserAccount | null>(null);
+
+  // Password Auth Modal State for Session Login
+  const [authModalUser, setAuthModalUser] = useState<UserAccount | null>(null);
+
+  // Password View State per user ID (revealed passwords)
+  const [revealedPasswords, setRevealedPasswords] = useState<Record<string, boolean>>({});
 
   // Form inputs
   const [name, setName] = useState('');
@@ -39,19 +53,26 @@ export const UserManagement: React.FC = () => {
   const [agency, setAgency] = useState('');
   const [phone, setPhone] = useState('');
   const [status, setStatus] = useState<'active' | 'inactive'>('active');
+  const [plainPassword, setPlainPassword] = useState('');
 
   const handleOpenAdd = (presetRole?: UserRole) => {
     setEditingUser(null);
     setName('');
     setEmail('');
-    setRole(presetRole || 'admin_user');
-    setAgency('Dinas Pekerjaan Umum dan Penataan Ruang');
+    const targetRole = presetRole || (currentUser.role === 'admin' ? 'admin_user' : 'admin_user');
+    setRole(targetRole);
+    setAgency('Dinas Pekerjaan Umum dan Penataan Ruang Nagekeo');
     setPhone('0812' + Math.floor(10000000 + Math.random() * 90000000));
     setStatus('active');
+    setPlainPassword('');
     setIsModalOpen(true);
   };
 
   const handleOpenEdit = (user: UserAccount) => {
+    if (!canCurrentUserManagePassword(user.role)) {
+      showToast('Akses ditolak: Anda tidak memiliki wewenang untuk mengedit akun ini.', 'error');
+      return;
+    }
     setEditingUser(user);
     setName(user.name);
     setEmail(user.email);
@@ -59,6 +80,7 @@ export const UserManagement: React.FC = () => {
     setAgency(user.agency);
     setPhone(user.phone);
     setStatus(user.status);
+    setPlainPassword('');
     setIsModalOpen(true);
   };
 
@@ -77,6 +99,7 @@ export const UserManagement: React.FC = () => {
         agency: agency.trim(),
         phone: phone.trim(),
         status,
+        plainPassword: plainPassword.trim() ? plainPassword.trim() : undefined,
       });
       showToast(res.message, res.success ? 'success' : 'error');
       if (res.success) setIsModalOpen(false);
@@ -88,10 +111,15 @@ export const UserManagement: React.FC = () => {
         agency: agency.trim(),
         phone: phone.trim(),
         status,
+        plainPassword: plainPassword.trim() ? plainPassword.trim() : undefined,
       });
       showToast(res.message, res.success ? 'success' : 'error');
       if (res.success) setIsModalOpen(false);
     }
+  };
+
+  const toggleRevealPassword = (userId: string) => {
+    setRevealedPasswords((prev) => ({ ...prev, [userId]: !prev[userId] }));
   };
 
   const filteredUsers = users.filter((u) => {
@@ -99,7 +127,8 @@ export const UserManagement: React.FC = () => {
     return u.role === selectedRoleFilter;
   });
 
-  const canManageUsers = currentUser.role === 'super_admin';
+  // Super Admin and Admin can manage users
+  const canManageUsers = currentUser.role === 'super_admin' || currentUser.role === 'admin';
 
   return (
     <div className="space-y-6">
@@ -226,14 +255,18 @@ export const UserManagement: React.FC = () => {
                 <th className="py-3 px-4">Nama Lengkap & Kontak</th>
                 <th className="py-3 px-3">Instansi / Unit Kerja</th>
                 <th className="py-3 px-3">Peran (Role)</th>
+                <th className="py-3 px-3">Kata Sandi (Terenkripsi)</th>
                 <th className="py-3 px-3 text-center">Status</th>
-                <th className="py-3 px-3 text-center">Aksi / Ganti Sesi</th>
+                <th className="py-3 px-3 text-center">Aksi / Sesi</th>
               </tr>
             </thead>
             <tbody className="divide-y divide-slate-100">
               {filteredUsers.map((user) => {
                 const isCurrentSession = currentUser.id === user.id;
                 const roleConfig = ROLE_LIMITS[user.role];
+                const canViewPwd = canCurrentUserViewPassword(user.role);
+                const isRevealed = revealedPasswords[user.id] || false;
+                const decryptedPwd = user.password ? decryptPassword(user.password) : 'simpkbg2026';
 
                 return (
                   <tr
@@ -273,6 +306,29 @@ export const UserManagement: React.FC = () => {
                       </span>
                     </td>
 
+                    <td className="py-3 px-3">
+                      {canViewPwd ? (
+                        <div className="flex items-center gap-2">
+                          <span className="font-mono font-semibold text-slate-800 text-xs bg-slate-100 px-2 py-1 rounded-md border border-slate-200">
+                            {isRevealed ? decryptedPwd : maskPassword(decryptedPwd.length)}
+                          </span>
+                          <button
+                            type="button"
+                            onClick={() => toggleRevealPassword(user.id)}
+                            className="p-1 rounded text-slate-500 hover:text-slate-800 hover:bg-slate-200 transition-colors cursor-pointer"
+                            title={isRevealed ? 'Sembunyikan sandi' : 'Tampilkan sandi terenkripsi'}
+                          >
+                            {isRevealed ? <EyeOff className="w-3.5 h-3.5" /> : <Eye className="w-3.5 h-3.5" />}
+                          </button>
+                        </div>
+                      ) : (
+                        <span className="text-[11px] text-slate-400 italic flex items-center gap-1">
+                          <Lock className="w-3 h-3" />
+                          <span>Rahasia (Hanya Super Admin/Admin)</span>
+                        </span>
+                      )}
+                    </td>
+
                     <td className="py-3 px-3 text-center">
                       <span
                         className={`inline-block px-2 py-0.5 rounded-full text-[10px] font-bold ${
@@ -286,39 +342,38 @@ export const UserManagement: React.FC = () => {
                     </td>
 
                     <td className="py-3 px-3 text-center">
-                      <div className="flex items-center justify-center gap-2">
-                        {/* Switch to this user session */}
+                      <div className="flex items-center justify-center gap-1.5">
+                        {/* Open password auth modal to switch session securely */}
                         <button
-                          onClick={() => {
-                            setCurrentUser(user);
-                            showToast(`Beralih ke sesi pengguna: ${user.name} (${roleConfig.title})`, 'info');
-                          }}
-                          title="Gunakan akun ini untuk demo hak akses"
-                          className="px-2.5 py-1 rounded-lg text-[11px] font-semibold bg-slate-100 hover:bg-slate-200 text-slate-700 transition-colors"
+                          onClick={() => setAuthModalUser(user)}
+                          title="Masuk / Ganti Sesi dengan verifikasi kata sandi"
+                          className="px-2.5 py-1 rounded-lg text-[11px] font-bold bg-amber-500 hover:bg-amber-400 text-slate-950 transition-all shadow-2xs cursor-pointer flex items-center gap-1"
                         >
-                          Pilih Sesi
+                          <KeyRound className="w-3 h-3" />
+                          <span>Login Sesi</span>
                         </button>
 
-                        {canManageUsers && (
-                          <>
-                            <button
-                              onClick={() => handleOpenEdit(user)}
-                              className="p-1 rounded-lg hover:bg-indigo-50 text-indigo-600"
-                              title="Edit Pengguna"
-                            >
-                              <Edit className="w-3.5 h-3.5" />
-                            </button>
-                            <button
-                              onClick={() => {
-                                const res = deleteUser(user.id);
-                                showToast(res.message, res.success ? 'success' : 'error');
-                              }}
-                              className="p-1 rounded-lg hover:bg-rose-50 text-rose-600"
-                              title="Hapus Pengguna"
-                            >
-                              <Trash2 className="w-3.5 h-3.5" />
-                            </button>
-                          </>
+                        {canCurrentUserManagePassword(user.role) && (
+                          <button
+                            onClick={() => handleOpenEdit(user)}
+                            className="p-1 rounded-lg hover:bg-indigo-50 text-indigo-600 transition-colors cursor-pointer"
+                            title="Edit Pengguna & Sandi"
+                          >
+                            <Edit className="w-3.5 h-3.5" />
+                          </button>
+                        )}
+
+                        {currentUser.role === 'super_admin' && user.role !== 'super_admin' && (
+                          <button
+                            onClick={() => {
+                              const res = deleteUser(user.id);
+                              showToast(res.message, res.success ? 'success' : 'error');
+                            }}
+                            className="p-1 rounded-lg hover:bg-rose-50 text-rose-600 transition-colors cursor-pointer"
+                            title="Hapus Pengguna"
+                          >
+                            <Trash2 className="w-3.5 h-3.5" />
+                          </button>
                         )}
                       </div>
                     </td>
@@ -424,6 +479,22 @@ export const UserManagement: React.FC = () => {
                 </select>
               </div>
 
+              <div>
+                <label className="block font-semibold text-slate-700 mb-1">
+                  {editingUser ? 'Ubah Kata Sandi (Opsional)' : 'Kata Sandi Akun'}
+                </label>
+                <input
+                  type="text"
+                  value={plainPassword}
+                  onChange={(e) => setPlainPassword(e.target.value)}
+                  placeholder={editingUser ? 'Kosongkan jika tidak ingin mengubah sandi' : 'Contoh: sandiBaru2026'}
+                  className="w-full px-3 py-2 rounded-xl border border-slate-200 font-mono"
+                />
+                <p className="text-[10px] text-slate-500 mt-1">
+                  Kata sandi akan otomatis dienkripsi secara aman dalam penyimpanan sistem.
+                </p>
+              </div>
+
               <div className="pt-3 flex items-center justify-end gap-2 border-t border-slate-100">
                 <button
                   type="button"
@@ -443,6 +514,13 @@ export const UserManagement: React.FC = () => {
           </div>
         </div>
       )}
+
+      {/* Password Authentication Modal for Session Login */}
+      <PasswordAuthModal
+        isOpen={Boolean(authModalUser)}
+        targetUser={authModalUser}
+        onClose={() => setAuthModalUser(null)}
+      />
     </div>
   );
 };

@@ -25,6 +25,12 @@ import {
   syncAllToGoogleSheet,
   directSaveToGoogleSheet,
 } from '../services/googleSheetsService';
+import {
+  encryptPassword,
+  verifyPassword,
+  canManageUserPassword,
+  canViewUserPassword,
+} from '../utils/security';
 
 interface AppContextType {
   // Current user & Auth
@@ -32,8 +38,12 @@ interface AppContextType {
   setCurrentUser: (user: UserAccount) => void;
   users: UserAccount[];
   getUserCountsByRole: () => Record<UserRole, number>;
-  addUser: (userData: Omit<UserAccount, 'id' | 'createdAt'>) => { success: boolean; message: string };
-  updateUser: (id: string, userData: Partial<UserAccount>) => { success: boolean; message: string };
+  addUser: (userData: Omit<UserAccount, 'id' | 'createdAt'> & { plainPassword?: string }) => { success: boolean; message: string };
+  updateUser: (id: string, userData: Partial<UserAccount> & { plainPassword?: string }) => { success: boolean; message: string };
+  updateUserPassword: (targetUserId: string, newPlainPassword: string) => { success: boolean; message: string };
+  loginWithPassword: (user: UserAccount, passwordInput: string) => { success: boolean; message: string };
+  canCurrentUserManagePassword: (targetRole: UserRole) => boolean;
+  canCurrentUserViewPassword: (targetRole: UserRole) => boolean;
   deleteUser: (id: string) => { success: boolean; message: string };
   switchUserRole: (role: UserRole) => void;
 
@@ -98,11 +108,23 @@ const STORAGE_KEYS = {
 };
 
 export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children }) => {
-  // Initialize users
+  // Initialize users with guaranteed encrypted passwords
   const [users, setUsers] = useState<UserAccount[]>(() => {
     try {
       const saved = localStorage.getItem(STORAGE_KEYS.USERS);
-      return saved ? JSON.parse(saved) : INITIAL_USERS;
+      if (!saved) return INITIAL_USERS;
+      const parsed: UserAccount[] = JSON.parse(saved);
+      // Ensure all users have valid encrypted passwords, especially Super Admin ('simpkbg2026')
+      return parsed.map((u) => {
+        if (u.role === 'super_admin' && (!u.password || u.password === '')) {
+          return { ...u, password: encryptPassword('simpkbg2026') };
+        }
+        if (!u.password) {
+          const init = INITIAL_USERS.find((initU) => initU.role === u.role);
+          return { ...u, password: init?.password || encryptPassword(u.role + '2026') };
+        }
+        return u;
+      });
     } catch {
       return INITIAL_USERS;
     }
@@ -265,8 +287,16 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
     return counts;
   };
 
-  // Add User with strict quota check
-  const addUser = (userData: Omit<UserAccount, 'id' | 'createdAt'>) => {
+  // Add User with strict quota check and password assignment
+  const addUser = (userData: Omit<UserAccount, 'id' | 'createdAt'> & { plainPassword?: string }) => {
+    // Admin cannot create Admin or Super Admin
+    if (currentUser.role !== 'super_admin' && (userData.role === 'super_admin' || userData.role === 'admin')) {
+      return {
+        success: false,
+        message: 'Akses ditolak: Hanya Super Administrator yang berhak membuat akun Admin atau Super Admin.',
+      };
+    }
+
     const roleLimit = ROLE_LIMITS[userData.role];
     const currentCount = users.filter((u) => u.role === userData.role).length;
 
@@ -277,8 +307,24 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
       };
     }
 
+    // Determine password
+    let passwordToStore: string;
+    if (userData.plainPassword && userData.plainPassword.trim()) {
+      passwordToStore = encryptPassword(userData.plainPassword.trim());
+    } else if (userData.role === 'super_admin') {
+      passwordToStore = encryptPassword('simpkbg2026');
+    } else if (userData.role === 'admin') {
+      passwordToStore = encryptPassword('adminpupr2026');
+    } else {
+      passwordToStore = encryptPassword(`${userData.role.replace('admin_', '')}2026`);
+    }
+
+    const { plainPassword, ...restData } = userData;
+
     const newUser: UserAccount = {
-      ...userData,
+      ...restData,
+      password: passwordToStore,
+      passwordLastChanged: new Date().toISOString(),
       id: `user_${Date.now()}`,
       createdAt: new Date().toISOString(),
     };
@@ -286,29 +332,50 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
     setUsers((prev) => [...prev, newUser]);
     return {
       success: true,
-      message: `Akun pengguna ${newUser.name} (${roleLimit.title}) berhasil ditambahkan.`,
+      message: `Akun pengguna ${newUser.name} (${roleLimit.title}) berhasil ditambahkan dengan kata sandi terenkripsi.`,
     };
   };
 
-  const updateUser = (id: string, userData: Partial<UserAccount>) => {
-    if (userData.role) {
-      const existing = users.find((u) => u.id === id);
-      if (existing && existing.role !== userData.role) {
-        const roleLimit = ROLE_LIMITS[userData.role];
-        const countOther = users.filter((u) => u.role === userData.role && u.id !== id).length;
-        if (countOther >= roleLimit.max) {
-          return {
-            success: false,
-            message: `Tidak dapat mengubah peran. Kuota ${roleLimit.title} sudah penuh (Maksimal ${roleLimit.max})!`,
-          };
-        }
+  const updateUser = (id: string, userData: Partial<UserAccount> & { plainPassword?: string }) => {
+    const target = users.find((u) => u.id === id);
+    if (!target) return { success: false, message: 'Pengguna tidak ditemukan.' };
+
+    // Role modification permission
+    if (userData.role && userData.role !== target.role) {
+      if (currentUser.role !== 'super_admin') {
+        return {
+          success: false,
+          message: 'Akses ditolak: Hanya Super Administrator yang berhak mengubah tingkatan peran akun.',
+        };
+      }
+      const roleLimit = ROLE_LIMITS[userData.role];
+      const countOther = users.filter((u) => u.role === userData.role && u.id !== id).length;
+      if (countOther >= roleLimit.max) {
+        return {
+          success: false,
+          message: `Tidak dapat mengubah peran. Kuota ${roleLimit.title} sudah penuh (Maksimal ${roleLimit.max})!`,
+        };
       }
     }
+
+    // Password modification permission
+    if (userData.plainPassword && userData.plainPassword.trim()) {
+      if (!canManageUserPassword(currentUser.role, target.role)) {
+        return {
+          success: false,
+          message: 'Akses ditolak: Anda tidak memiliki wewenang untuk mengubah kata sandi akun peran ini.',
+        };
+      }
+      userData.password = encryptPassword(userData.plainPassword.trim());
+      userData.passwordLastChanged = new Date().toISOString();
+    }
+
+    const { plainPassword, ...restData } = userData;
 
     setUsers((prev) =>
       prev.map((u) => {
         if (u.id === id) {
-          const updated = { ...u, ...userData };
+          const updated = { ...u, ...restData };
           if (currentUser.id === id) {
             setCurrentUser(updated);
           }
@@ -320,8 +387,71 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
 
     return {
       success: true,
-      message: 'Data pengguna berhasil diperbarui.',
+      message: 'Data pengguna dan keamanan akun berhasil diperbarui.',
     };
+  };
+
+  // Dedicated Password Update Method
+  const updateUserPassword = (targetUserId: string, newPlainPassword: string) => {
+    const target = users.find((u) => u.id === targetUserId);
+    if (!target) return { success: false, message: 'Pengguna tidak ditemukan.' };
+
+    if (!canManageUserPassword(currentUser.role, target.role)) {
+      return {
+        success: false,
+        message: 'Akses ditolak: Kata sandi Admin/Super Admin hanya dapat diubah oleh Super Administrator.',
+      };
+    }
+
+    if (!newPlainPassword || newPlainPassword.trim().length < 4) {
+      return { success: false, message: 'Kata sandi minimal 4 karakter.' };
+    }
+
+    const encrypted = encryptPassword(newPlainPassword.trim());
+    const now = new Date().toISOString();
+
+    setUsers((prev) =>
+      prev.map((u) => (u.id === targetUserId ? { ...u, password: encrypted, passwordLastChanged: now } : u))
+    );
+
+    if (currentUser.id === targetUserId) {
+      setCurrentUser((prev) => ({ ...prev, password: encrypted, passwordLastChanged: now }));
+    }
+
+    return {
+      success: true,
+      message: `Kata sandi untuk ${target.name} (${ROLE_LIMITS[target.role].title}) berhasil diperbarui dan dienkripsi.`,
+    };
+  };
+
+  // Authenticate user with password
+  const loginWithPassword = (user: UserAccount, passwordInput: string) => {
+    const isMatched = verifyPassword(passwordInput, user.password);
+    if (!isMatched) {
+      return {
+        success: false,
+        message: 'Kata sandi tidak sesuai! Silakan periksa kembali kata sandi yang Anda masukkan.',
+      };
+    }
+
+    setCurrentUser(user);
+    setSelectedAssessmentForEdit(null);
+    const targetTab = ROLE_NAV_CONFIGS[user.role]?.defaultTab || 'dashboard';
+    setActiveTab(targetTab);
+    localStorage.setItem(STORAGE_KEYS.CURRENT_USER_ID, user.id);
+
+    return {
+      success: true,
+      message: `Autentikasi berhasil. Selamat datang, ${user.name} (${ROLE_LIMITS[user.role].title})!`,
+    };
+  };
+
+  const canCurrentUserManagePassword = (targetRole: UserRole) => {
+    return canManageUserPassword(currentUser.role, targetRole);
+  };
+
+  const canCurrentUserViewPassword = (targetRole: UserRole) => {
+    return canViewUserPassword(currentUser.role, targetRole);
   };
 
   const deleteUser = (id: string) => {
@@ -768,6 +898,10 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
         getUserCountsByRole,
         addUser,
         updateUser,
+        updateUserPassword,
+        loginWithPassword,
+        canCurrentUserManagePassword,
+        canCurrentUserViewPassword,
         deleteUser,
         switchUserRole,
 

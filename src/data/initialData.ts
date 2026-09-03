@@ -1,4 +1,5 @@
 import { BuildingAssessment, Kecamatan, Desa, UserAccount, GoogleSheetConfig, DukcapilRecord } from '../types';
+import { encryptPassword } from '../utils/security';
 
 export const INITIAL_KECAMATAN: Kecamatan[] = [
   {
@@ -106,6 +107,8 @@ export const INITIAL_USERS: UserAccount[] = [
     agency: 'Dinas Pekerjaan Umum dan Penataan Ruang Kabupaten Nagekeo',
     phone: '081234567890',
     status: 'active',
+    password: encryptPassword('simpkbg2026'),
+    passwordLastChanged: '2026-01-01T00:00:00Z',
     createdAt: '2026-01-01T00:00:00Z',
   },
   // Admin Utama: Dibatasi 3 (sekarang 1 aktif)
@@ -117,6 +120,8 @@ export const INITIAL_USERS: UserAccount[] = [
     agency: 'Bidang Cipta Karya & Tata Ruang PUPR',
     phone: '081234567891',
     status: 'active',
+    password: encryptPassword('adminpupr2026'),
+    passwordLastChanged: '2026-01-05T08:30:00Z',
     createdAt: '2026-01-05T08:30:00Z',
   },
   // Admin Verifikator: Dibatasi 15 (sekarang 1 aktif)
@@ -128,6 +133,8 @@ export const INITIAL_USERS: UserAccount[] = [
     agency: 'Tim Ahli Bangunan Gedung (TABG)',
     phone: '081234567893',
     status: 'active',
+    password: encryptPassword('tabgpupr2026'),
+    passwordLastChanged: '2026-01-10T10:00:00Z',
     createdAt: '2026-01-10T10:00:00Z',
   },
   // Admin User (Surveyor): Dibatasi 100 (sekarang 1 aktif)
@@ -139,6 +146,8 @@ export const INITIAL_USERS: UserAccount[] = [
     agency: 'Tim Reaksi Cepat Pascabencana PUPR',
     phone: '081398765431',
     status: 'active',
+    password: encryptPassword('surveyor2026'),
+    passwordLastChanged: '2026-01-15T07:45:00Z',
     createdAt: '2026-01-15T07:45:00Z',
   },
   // Admin Publik: Dibatasi 10 (sekarang 1 aktif)
@@ -150,6 +159,8 @@ export const INITIAL_USERS: UserAccount[] = [
     agency: 'Masyarakat & Forum Relawan Terbuka',
     phone: '082155443322',
     status: 'active',
+    password: encryptPassword('publik2026'),
+    passwordLastChanged: '2026-01-20T10:00:00Z',
     createdAt: '2026-01-20T10:00:00Z',
   },
 ];

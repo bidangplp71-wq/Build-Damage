@@ -135,6 +135,8 @@ export interface UserAccount {
   agency: string; // Dinas/Instansi
   phone: string;
   status: 'active' | 'inactive';
+  password?: string; // Encrypted password (ENC::...)
+  passwordLastChanged?: string;
   createdAt: string;
 }
 
