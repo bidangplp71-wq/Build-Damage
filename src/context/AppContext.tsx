@@ -44,6 +44,7 @@ interface AppContextType {
   updateUserPassword: (targetUserId: string, newPlainPassword: string) => { success: boolean; message: string };
   loginWithPassword: (user: UserAccount, passwordInput: string) => { success: boolean; message: string };
   loginByEmailPassword: (emailInput: string, passwordInput: string) => { success: boolean; message: string };
+  loginByNamePassword: (nameInput: string, passwordInput: string) => { success: boolean; message: string };
   logout: () => void;
   canCurrentUserManagePassword: (targetRole: UserRole) => boolean;
   canCurrentUserViewPassword: (targetRole: UserRole) => boolean;
@@ -474,6 +475,39 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
       return {
         success: false,
         message: 'Email belum terdaftar di sistem. Akses ditolak!',
+      };
+    }
+
+    const isMatched = verifyPassword(passwordInput, user.password);
+    if (!isMatched) {
+      return {
+        success: false,
+        message: 'Kata sandi tidak sesuai! Silakan periksa kembali.',
+      };
+    }
+
+    setCurrentUser(user);
+    setIsLoggedIn(true);
+    setIsSessionLocked(false);
+    setSelectedAssessmentForEdit(null);
+    localStorage.setItem(STORAGE_KEYS.CURRENT_USER_ID, user.id);
+    const targetTab = ROLE_NAV_CONFIGS[user.role]?.defaultTab || 'dashboard';
+    setActiveTab(targetTab);
+
+    return {
+      success: true,
+      message: `Autentikasi berhasil. Selamat datang, ${user.name} (${ROLE_LIMITS[user.role].title})!`,
+    };
+  };
+
+  const loginByNamePassword = (nameInput: string, passwordInput: string) => {
+    const nameQuery = nameInput.trim().toLowerCase();
+    const user = users.find((u) => u.name.toLowerCase() === nameQuery || u.name.toLowerCase().includes(nameQuery));
+
+    if (!user) {
+      return {
+        success: false,
+        message: 'Nama pengguna belum terdaftar di sistem. Akses ditolak!',
       };
     }
 
@@ -1009,6 +1043,7 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
         updateUserPassword,
         loginWithPassword,
         loginByEmailPassword,
+        loginByNamePassword,
         logout,
         canCurrentUserManagePassword,
         canCurrentUserViewPassword,

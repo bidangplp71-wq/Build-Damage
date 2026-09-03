@@ -5,7 +5,7 @@ import { ROLE_LIMITS, UserRole } from '../types';
 import {
   Building2,
   Lock,
-  Mail,
+  User,
   ShieldCheck,
   ShieldAlert,
   KeyRound,
@@ -17,8 +17,8 @@ import {
 } from 'lucide-react';
 
 export const LoginScreen: React.FC = () => {
-  const { loginByEmailPassword, showToast } = useApp();
-  const [emailInput, setEmailInput] = useState('');
+  const { loginByNamePassword, showToast } = useApp();
+  const [nameInput, setNameInput] = useState('');
   const [passwordInput, setPasswordInput] = useState('');
   const [showPassword, setShowPassword] = useState(false);
   const [errorMsg, setErrorMsg] = useState('');
@@ -26,8 +26,8 @@ export const LoginScreen: React.FC = () => {
 
   const handleLogin = (e: React.FormEvent) => {
     e.preventDefault();
-    if (!emailInput.trim() || !passwordInput.trim()) {
-      setErrorMsg('Email dan kata sandi wajib diisi.');
+    if (!nameInput.trim() || !passwordInput.trim()) {
+      setErrorMsg('Nama pengguna dan kata sandi wajib diisi.');
       return;
     }
 
@@ -35,7 +35,7 @@ export const LoginScreen: React.FC = () => {
     setErrorMsg('');
 
     setTimeout(() => {
-      const res = loginByEmailPassword(emailInput.trim(), passwordInput);
+      const res = loginByNamePassword(nameInput.trim(), passwordInput);
       setLoading(false);
       if (res.success) {
         showToast(res.message, 'success');
@@ -45,8 +45,8 @@ export const LoginScreen: React.FC = () => {
     }, 250);
   };
 
-  const handleQuickDemo = (email: string, pass: string) => {
-    setEmailInput(email);
+  const handleQuickDemo = (name: string, pass: string) => {
+    setNameInput(name);
     setPasswordInput(pass);
     setErrorMsg('');
   };
@@ -83,29 +83,29 @@ export const LoginScreen: React.FC = () => {
               <span>Autentikasi Akun Pengguna</span>
             </h2>
             <p className="text-xs text-slate-400 mt-0.5">
-              Masukkan email terdaftar dan kata sandi sesuai peran fungsional Anda.
+              Masukkan nama pengguna dan kata sandi sesuai peran fungsional Anda.
             </p>
           </div>
 
           <form onSubmit={handleLogin} className="space-y-4">
             <div>
               <label className="block text-xs font-semibold text-slate-300 mb-1.5">
-                Alamat Email Pengguna
+                Nama Pengguna
               </label>
               <div className="relative">
                 <div className="absolute inset-y-0 left-0 pl-3.5 flex items-center pointer-events-none text-slate-400">
-                  <Mail className="w-4 h-4" />
+                  <User className="w-4 h-4" />
                 </div>
                 <input
-                  type="email"
+                  type="text"
                   required
-                  value={emailInput}
+                  value={nameInput}
                   onChange={(e) => {
-                    setEmailInput(e.target.value);
+                    setNameInput(e.target.value);
                     if (errorMsg) setErrorMsg('');
                   }}
-                  placeholder="contoh: surveyor.pupr@nagekeokab.go.id"
-                  className="w-full pl-10 pr-4 py-3 bg-slate-950 border border-slate-800 rounded-xl text-sm text-white placeholder-slate-600 focus:outline-none focus:ring-2 focus:ring-amber-500 focus:border-amber-500 transition-all font-mono"
+                  placeholder="contoh: Vancy Djogo atau Admin Utama"
+                  className="w-full pl-10 pr-4 py-3 bg-slate-950 border border-slate-800 rounded-xl text-sm text-white placeholder-slate-600 focus:outline-none focus:ring-2 focus:ring-amber-500 focus:border-amber-500 transition-all font-medium"
                 />
               </div>
             </div>
@@ -176,7 +176,7 @@ export const LoginScreen: React.FC = () => {
                   <button
                     key={u.id}
                     type="button"
-                    onClick={() => handleQuickDemo(u.email, defaultPass)}
+                    onClick={() => handleQuickDemo(u.name, defaultPass)}
                     className="w-full text-left p-2.5 rounded-xl bg-slate-950 hover:bg-slate-800/80 border border-slate-800 transition-all flex items-center justify-between group cursor-pointer"
                   >
                     <div className="min-w-0">
