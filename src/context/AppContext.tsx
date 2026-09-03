@@ -34,6 +34,7 @@ import {
 
 interface AppContextType {
   // Current user & Auth
+  isLoggedIn: boolean;
   currentUser: UserAccount;
   setCurrentUser: (user: UserAccount) => void;
   users: UserAccount[];
@@ -42,6 +43,8 @@ interface AppContextType {
   updateUser: (id: string, userData: Partial<UserAccount> & { plainPassword?: string }) => { success: boolean; message: string };
   updateUserPassword: (targetUserId: string, newPlainPassword: string) => { success: boolean; message: string };
   loginWithPassword: (user: UserAccount, passwordInput: string) => { success: boolean; message: string };
+  loginByEmailPassword: (emailInput: string, passwordInput: string) => { success: boolean; message: string };
+  logout: () => void;
   canCurrentUserManagePassword: (targetRole: UserRole) => boolean;
   canCurrentUserViewPassword: (targetRole: UserRole) => boolean;
   deleteUser: (id: string) => { success: boolean; message: string };
@@ -136,6 +139,16 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
   });
 
   // Initialize current user
+  const [isLoggedIn, setIsLoggedIn] = useState<boolean>(() => {
+    try {
+      const savedUid = localStorage.getItem(STORAGE_KEYS.CURRENT_USER_ID);
+      const found = users.find((u) => u.id === savedUid);
+      return !!found;
+    } catch {
+      return false;
+    }
+  });
+
   const [currentUser, setCurrentUser] = useState<UserAccount>(() => {
     try {
       const savedUid = localStorage.getItem(STORAGE_KEYS.CURRENT_USER_ID);
@@ -440,6 +453,7 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
     }
 
     setCurrentUser(user);
+    setIsLoggedIn(true);
     setIsSessionLocked(false);
     setSelectedAssessmentForEdit(null);
     const targetTab = ROLE_NAV_CONFIGS[user.role]?.defaultTab || 'dashboard';
@@ -450,6 +464,45 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
       success: true,
       message: `Autentikasi berhasil. Selamat datang, ${user.name} (${ROLE_LIMITS[user.role].title})!`,
     };
+  };
+
+  const loginByEmailPassword = (emailInput: string, passwordInput: string) => {
+    const email = emailInput.trim().toLowerCase();
+    const user = users.find((u) => u.email.toLowerCase() === email);
+
+    if (!user) {
+      return {
+        success: false,
+        message: 'Email belum terdaftar di sistem. Akses ditolak!',
+      };
+    }
+
+    const isMatched = verifyPassword(passwordInput, user.password);
+    if (!isMatched) {
+      return {
+        success: false,
+        message: 'Kata sandi tidak sesuai! Silakan periksa kembali.',
+      };
+    }
+
+    setCurrentUser(user);
+    setIsLoggedIn(true);
+    setIsSessionLocked(false);
+    setSelectedAssessmentForEdit(null);
+    localStorage.setItem(STORAGE_KEYS.CURRENT_USER_ID, user.id);
+    const targetTab = ROLE_NAV_CONFIGS[user.role]?.defaultTab || 'dashboard';
+    setActiveTab(targetTab);
+
+    return {
+      success: true,
+      message: `Autentikasi berhasil. Selamat datang, ${user.name} (${ROLE_LIMITS[user.role].title})!`,
+    };
+  };
+
+  const logout = () => {
+    setIsLoggedIn(false);
+    localStorage.removeItem(STORAGE_KEYS.CURRENT_USER_ID);
+    showToast('Anda telah keluar dari sesi.', 'info');
   };
 
   // Session Inactivity Lock State & Methods (15 minutes standard timeout)
@@ -946,6 +999,7 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
   return (
     <AppContext.Provider
       value={{
+        isLoggedIn,
         currentUser,
         setCurrentUser,
         users,
@@ -954,6 +1008,8 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
         updateUser,
         updateUserPassword,
         loginWithPassword,
+        loginByEmailPassword,
+        logout,
         canCurrentUserManagePassword,
         canCurrentUserViewPassword,
         deleteUser,

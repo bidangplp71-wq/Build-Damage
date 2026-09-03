@@ -36,7 +36,7 @@ export const Navigation: React.FC<NavigationProps> = ({ mobileOpen, onCloseMobil
     switchUserRole,
     getUserCountsByRole,
     setSelectedAssessmentForEdit,
-    lockSession,
+    logout,
   } = useApp();
 
   const [roleMenuOpen, setRoleMenuOpen] = React.useState(false);
@@ -370,7 +370,7 @@ export const Navigation: React.FC<NavigationProps> = ({ mobileOpen, onCloseMobil
               <span>Sesi Aman</span>
             </span>
             <button
-              onClick={() => lockSession()}
+              onClick={() => logout()}
               className="text-rose-400 hover:text-rose-300 font-bold flex items-center gap-1 px-2 py-1 rounded bg-rose-500/10 hover:bg-rose-500/20 text-[11px] transition-colors cursor-pointer"
             >
               <LogOut className="w-3 h-3" />

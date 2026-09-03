@@ -27,7 +27,7 @@ export const Header: React.FC<HeaderProps> = ({ onToggleMobileNav }) => {
     showToast,
     setSelectedAssessmentForEdit,
     googleSheetConfig,
-    lockSession,
+    logout,
   } = useApp();
 
   const [roleDropdownOpen, setRoleDropdownOpen] = React.useState(false);
@@ -232,7 +232,7 @@ export const Header: React.FC<HeaderProps> = ({ onToggleMobileNav }) => {
                   <button
                     onClick={() => {
                       setRoleDropdownOpen(false);
-                      lockSession();
+                      logout();
                     }}
                     className="text-rose-400 hover:text-rose-300 font-bold flex items-center gap-1.5 px-3 py-1.5 rounded-lg bg-rose-500/10 hover:bg-rose-500/20 text-xs transition-colors cursor-pointer"
                   >

@@ -3,6 +3,7 @@ import { AppProvider, useApp } from './context/AppContext';
 import { ROLE_NAV_CONFIGS } from './types';
 import { Header } from './components/Header';
 import { Navigation } from './components/Navigation';
+import { LoginScreen } from './components/LoginScreen';
 import { DashboardAnalytics } from './components/DashboardAnalytics';
 import { AssessmentTable } from './components/AssessmentTable';
 import { AssessmentForm } from './components/AssessmentForm';
@@ -17,6 +18,7 @@ import { CheckCircle2, AlertCircle, Info, X, ShieldAlert } from 'lucide-react';
 
 const MainLayout: React.FC = () => {
   const {
+    isLoggedIn,
     activeTab,
     setActiveTab,
     currentUser,
@@ -27,6 +29,10 @@ const MainLayout: React.FC = () => {
   } = useApp();
 
   const [mobileNavOpen, setMobileNavOpen] = useState(false);
+
+  if (!isLoggedIn) {
+    return <LoginScreen />;
+  }
 
   // Tab guard: Ensure user cannot access tabs outside their role
   const roleConfig = ROLE_NAV_CONFIGS[currentUser.role];
