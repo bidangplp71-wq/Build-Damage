@@ -154,6 +154,7 @@ export const AssessmentForm: React.FC = () => {
 
   // Sub-components assessment
   const [components, setComponents] = useState<SubComponentAssessment[]>(getInitialSubComponents());
+  const [selectedComponentFilter, setSelectedComponentFilter] = useState<string>('all');
 
   // Photos State (Maksimal 10 Foto Visual per Bangunan)
   const [photos, setPhotos] = useState<BuildingPhoto[]>([]);
@@ -1528,34 +1529,53 @@ export const AssessmentForm: React.FC = () => {
 
       {/* SECTION 3: TABEL BOBOT & TINGKAT KERUSAKAN 8 KOMPONEN PUPR */}
       <div className="bg-white p-6 rounded-2xl border border-slate-200 shadow-xs space-y-4">
-        <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-2 border-b border-slate-100 pb-3">
+        <div className="flex flex-col md:flex-row md:items-center justify-between gap-3 border-b border-slate-100 pb-3">
           <div>
             <h3 className="text-sm font-bold text-slate-900 uppercase tracking-wider flex items-center gap-2">
               <Calculator className="w-4 h-4 text-amber-600" />
               <span>III. Analisis Cepat Tingkat Kerusakan Komponen Bangunan (Standar PUPR)</span>
             </h3>
             <p className="text-xs text-slate-500 mt-0.5">
-              Input persentase kerusakan teramati (0% - 100%) pada masing-masing sub-komponen bangunan
+              Pilih bagian komponen yang diamati melalui menu pilihan drop-down atau input persentase kerusakan (0% - 100%)
             </p>
           </div>
 
-          {/* Live damage badge */}
-          <div className="flex items-center gap-2 bg-slate-900 text-white px-4 py-2 rounded-xl">
-            <span className="text-xs text-slate-300">Total Kerusakan:</span>
-            <span className="text-base font-black text-amber-400">
-              {totalDamagePercent.toFixed(2)}%
-            </span>
-            <span
-              className={`text-[10px] font-bold px-2 py-0.5 rounded-full ${
-                damageClassification === 'Rusak Ringan'
-                  ? 'bg-emerald-500 text-slate-950'
-                  : damageClassification === 'Rusak Sedang'
-                  ? 'bg-amber-400 text-slate-950'
-                  : 'bg-rose-500 text-white'
-              }`}
-            >
-              {damageClassification}
-            </span>
+          <div className="flex items-center gap-2.5 flex-wrap">
+            {/* Dropdown Filter for Component Observation */}
+            <div className="flex items-center gap-1.5 bg-slate-50 border border-slate-200 rounded-xl px-3 py-1.5">
+              <span className="text-xs font-semibold text-slate-600">Filter Bagian:</span>
+              <select
+                value={selectedComponentFilter}
+                onChange={(e) => setSelectedComponentFilter(e.target.value)}
+                className="bg-transparent text-xs font-bold text-slate-900 focus:outline-none cursor-pointer"
+              >
+                <option value="all">Semua Komponen (8 Bagian)</option>
+                {Array.from(new Set(components.map((c) => c.componentName))).map((compName) => (
+                  <option key={compName} value={compName}>
+                    {compName}
+                  </option>
+                ))}
+              </select>
+            </div>
+
+            {/* Live damage badge */}
+            <div className="flex items-center gap-2 bg-slate-900 text-white px-3 py-1.5 rounded-xl">
+              <span className="text-xs text-slate-300">Total:</span>
+              <span className="text-sm font-black text-amber-400">
+                {totalDamagePercent.toFixed(2)}%
+              </span>
+              <span
+                className={`text-[10px] font-bold px-2 py-0.5 rounded-full ${
+                  damageClassification === 'Rusak Ringan'
+                    ? 'bg-emerald-500 text-slate-950'
+                    : damageClassification === 'Rusak Sedang'
+                    ? 'bg-amber-400 text-slate-950'
+                    : 'bg-rose-500 text-white'
+                }`}
+              >
+                {damageClassification}
+              </span>
+            </div>
           </div>
         </div>
 
@@ -1568,59 +1588,81 @@ export const AssessmentForm: React.FC = () => {
                 <th className="py-2.5 px-3">SUB KOMPONEN BANGUNAN</th>
                 <th className="py-2.5 px-3 text-center w-28">BOBOT (%)</th>
                 <th className="py-2.5 px-3 text-center w-28">MAX (%)</th>
-                <th className="py-2.5 px-3 text-center w-36">INPUT KERUSAKAN (%)</th>
+                <th className="py-2.5 px-3 text-center w-52">INPUT KERUSAKAN (%)</th>
                 <th className="py-2.5 px-3 text-right w-28">NILAI (%)</th>
               </tr>
             </thead>
             <tbody className="divide-y divide-slate-100">
-              {components.map((c, index) => {
-                const isNewGroup =
-                  index === 0 || c.componentNo !== components[index - 1].componentNo;
+              {components
+                .filter((c) => selectedComponentFilter === 'all' || c.componentName === selectedComponentFilter)
+                .map((c, index) => {
+                  const isNewGroup =
+                    index === 0 || c.componentNo !== components.filter((x) => selectedComponentFilter === 'all' || x.componentName === selectedComponentFilter)[index - 1]?.componentNo;
 
-                return (
-                  <tr
-                    key={c.id}
-                    className={`hover:bg-amber-50/40 transition-colors ${
-                      c.damagePercentInput > 0 ? 'bg-amber-50/20' : ''
-                    }`}
-                  >
-                    <td className="py-2.5 px-3 text-center font-bold text-slate-500">
-                      {isNewGroup ? c.componentNo : ''}
-                    </td>
-                    <td className="py-2.5 px-3 font-semibold text-slate-900">
-                      {isNewGroup ? c.componentName : ''}
-                    </td>
-                    <td className="py-2.5 px-3 text-slate-800 font-medium">
-                      {c.subComponentName}
-                    </td>
-                    <td className="py-2.5 px-3 text-center text-slate-600 font-mono">
-                      {c.bobotPercent.toFixed(2)}%
-                    </td>
-                    <td className="py-2.5 px-3 text-center text-slate-400 font-mono">
-                      {c.kerusakanMaxPercent.toFixed(2)}%
-                    </td>
-                    <td className="py-2 px-3 text-center">
-                      <div className="flex items-center justify-center gap-1">
-                        <input
-                          type="number"
-                          min={0}
-                          max={100}
-                          step={1}
-                          value={c.damagePercentInput}
-                          onChange={(e) =>
-                            handleComponentChange(c.id, parseFloat(e.target.value) || 0)
-                          }
-                          className="w-20 px-2 py-1 text-center font-bold rounded-lg border border-slate-300 focus:ring-2 focus:ring-amber-500 focus:border-amber-500 bg-white"
-                        />
-                        <span className="text-slate-400 font-semibold">%</span>
-                      </div>
-                    </td>
-                    <td className="py-2.5 px-3 text-right font-bold text-slate-900 font-mono">
-                      {c.calculatedScore.toFixed(2)}%
-                    </td>
-                  </tr>
-                );
-              })}
+                  return (
+                    <tr
+                      key={c.id}
+                      className={`hover:bg-amber-50/40 transition-colors ${
+                        c.damagePercentInput > 0 ? 'bg-amber-50/20' : ''
+                      }`}
+                    >
+                      <td className="py-2.5 px-3 text-center font-bold text-slate-500">
+                        {isNewGroup ? c.componentNo : ''}
+                      </td>
+                      <td className="py-2.5 px-3 font-semibold text-slate-900">
+                        {isNewGroup ? c.componentName : ''}
+                      </td>
+                      <td className="py-2.5 px-3 text-slate-800 font-medium">
+                        {c.subComponentName}
+                      </td>
+                      <td className="py-2.5 px-3 text-center text-slate-600 font-mono">
+                        {c.bobotPercent.toFixed(2)}%
+                      </td>
+                      <td className="py-2.5 px-3 text-center text-slate-400 font-mono">
+                        {c.kerusakanMaxPercent.toFixed(2)}%
+                      </td>
+                      <td className="py-2 px-3 text-center">
+                        <div className="flex items-center justify-center gap-1.5">
+                          <select
+                            value={c.damagePercentInput}
+                            onChange={(e) =>
+                              handleComponentChange(c.id, parseFloat(e.target.value) || 0)
+                            }
+                            className="px-2 py-1 text-xs font-bold rounded-lg border border-slate-300 focus:ring-2 focus:ring-amber-500 focus:border-amber-500 bg-white cursor-pointer"
+                          >
+                            <option value={0}>0% (Baik)</option>
+                            <option value={5}>5% (Sangat Ringan)</option>
+                            <option value={10}>10% (Ringan Sekali)</option>
+                            <option value={15}>15% (Ringan)</option>
+                            <option value={20}>20% (Ringan Sedang)</option>
+                            <option value={25}>25% (Cukup Ringan)</option>
+                            <option value={30}>30% (Sedang)</option>
+                            <option value={40}>40% (Sedang Berat)</option>
+                            <option value={50}>50% (Berat)</option>
+                            <option value={75}>75% (Berat Sekali)</option>
+                            <option value={100}>100% (Total / Runtuh)</option>
+                          </select>
+                          <input
+                            type="number"
+                            min={0}
+                            max={100}
+                            step={1}
+                            value={c.damagePercentInput}
+                            onChange={(e) =>
+                              handleComponentChange(c.id, parseFloat(e.target.value) || 0)
+                            }
+                            className="w-16 px-1.5 py-1 text-center font-bold rounded-lg border border-slate-300 focus:ring-2 focus:ring-amber-500 focus:border-amber-500 bg-white text-xs"
+                            title="Atau ketik nilai persentase manual"
+                          />
+                          <span className="text-slate-400 font-semibold">%</span>
+                        </div>
+                      </td>
+                      <td className="py-2.5 px-3 text-right font-bold text-slate-900 font-mono">
+                        {c.calculatedScore.toFixed(2)}%
+                      </td>
+                    </tr>
+                  );
+                })}
             </tbody>
             <tfoot>
               <tr className="bg-slate-900 text-white font-bold text-xs border-t-2 border-slate-900">
