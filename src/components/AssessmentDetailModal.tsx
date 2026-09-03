@@ -25,6 +25,7 @@ interface Props {
 export const AssessmentDetailModal: React.FC<Props> = ({ assessment, onClose }) => {
   const { syncAssessmentToSheet, showToast } = useApp();
   const [isSyncing, setIsSyncing] = useState(false);
+  const [showSignatures, setShowSignatures] = useState(true);
 
   const handlePrint = () => {
     window.print();
@@ -56,7 +57,18 @@ export const AssessmentDetailModal: React.FC<Props> = ({ assessment, onClose }) 
             </span>
           </div>
 
-          <div className="flex items-center gap-2">
+          <div className="flex items-center gap-3">
+            {/* Toggle Signatures */}
+            <label className="flex items-center gap-1.5 cursor-pointer text-xs font-semibold text-slate-700 bg-white border border-slate-300 px-3 py-1.5 rounded-xl hover:bg-slate-50 transition-colors">
+              <input 
+                type="checkbox" 
+                checked={showSignatures} 
+                onChange={(e) => setShowSignatures(e.target.checked)}
+                className="w-3.5 h-3.5 text-indigo-600 rounded border-slate-300 focus:ring-indigo-500"
+              />
+              <span>Tampilkan TTD</span>
+            </label>
+
             {/* Sync to Google Sheet button */}
             <button
               onClick={handleSyncToSheet}
@@ -335,37 +347,39 @@ export const AssessmentDetailModal: React.FC<Props> = ({ assessment, onClose }) 
           )}
 
           {/* Signatures & Official Validation (Exact CSV Structure) */}
-          <div className="grid grid-cols-2 gap-8 text-xs pt-6 border-t border-slate-400">
-            {/* Left: Mengetahui / Menyetujui Kepala Dinas PUPR */}
-            <div className="space-y-1">
-              <p className="font-semibold text-slate-700">Mengetahui / Menyetujui,</p>
-              <p className="font-bold text-slate-950">{assessment.headOfDepartment.title}</p>
-              <p className="font-bold text-slate-950">{assessment.headOfDepartment.subTitle}</p>
-              <div className="h-20 flex items-end">
-                <div>
-                  <p className="font-bold underline text-slate-950">{assessment.headOfDepartment.name}</p>
-                  <p className="text-[11px] text-slate-700 font-medium">{assessment.headOfDepartment.rank}</p>
-                  <p className="text-[11px] text-slate-700 font-mono">NIP. {assessment.headOfDepartment.nip}</p>
+          {showSignatures && (
+            <div className="grid grid-cols-2 gap-8 text-xs pt-6 border-t border-slate-400">
+              {/* Left: Mengetahui / Menyetujui Kepala Dinas PUPR */}
+              <div className="space-y-1">
+                <p className="font-semibold text-slate-700">Mengetahui / Menyetujui,</p>
+                <p className="font-bold text-slate-950">{assessment.headOfDepartment.title}</p>
+                <p className="font-bold text-slate-950">{assessment.headOfDepartment.subTitle}</p>
+                <div className="h-20 flex items-end">
+                  <div>
+                    <p className="font-bold underline text-slate-950">{assessment.headOfDepartment.name}</p>
+                    <p className="text-[11px] text-slate-700 font-medium">{assessment.headOfDepartment.rank}</p>
+                    <p className="text-[11px] text-slate-700 font-mono">NIP. {assessment.headOfDepartment.nip}</p>
+                  </div>
+                </div>
+              </div>
+
+              {/* Right: Tim Analisis PUPR */}
+              <div className="space-y-1 text-left sm:text-right">
+                <p className="text-slate-600 font-medium">
+                  {assessment.cityLocation}, {assessment.reportDateStr}
+                </p>
+                <p className="font-bold text-slate-950">Tim Analisis Lapangan:</p>
+                <div className="space-y-2 pt-2 text-left sm:text-right">
+                  {assessment.analysisTeam.map((teamMember, i) => (
+                    <div key={i} className="flex items-center justify-between sm:justify-end gap-2 text-[11px]">
+                      <span className="font-semibold text-slate-500">{i + 1}.</span>
+                      <span className="font-semibold text-slate-800 underline">{teamMember}</span>
+                    </div>
+                  ))}
                 </div>
               </div>
             </div>
-
-            {/* Right: Tim Analisis PUPR */}
-            <div className="space-y-1 text-left sm:text-right">
-              <p className="text-slate-600 font-medium">
-                {assessment.cityLocation}, {assessment.reportDateStr}
-              </p>
-              <p className="font-bold text-slate-950">Tim Analisis Lapangan:</p>
-              <div className="space-y-2 pt-2 text-left sm:text-right">
-                {assessment.analysisTeam.map((teamMember, i) => (
-                  <div key={i} className="flex items-center justify-between sm:justify-end gap-2 text-[11px]">
-                    <span className="font-semibold text-slate-500">{i + 1}.</span>
-                    <span className="font-semibold text-slate-800 underline">{teamMember}</span>
-                  </div>
-                ))}
-              </div>
-            </div>
-          </div>
+          )}
         </div>
       </div>
     </div>

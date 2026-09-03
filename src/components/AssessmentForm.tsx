@@ -24,6 +24,7 @@ import {
 import { compressImageFile } from '../utils/imageCompressor';
 import { BuildingPhotoGallery } from './BuildingPhotoGallery';
 import { PhotoViewerModal } from './PhotoViewerModal';
+import { AssessmentDetailModal } from './AssessmentDetailModal';
 import {
   Building2,
   Save,
@@ -43,6 +44,7 @@ import {
   X,
   Settings,
   Home,
+  Printer,
   Users,
   GraduationCap,
   Briefcase,
@@ -156,6 +158,11 @@ export const AssessmentForm: React.FC = () => {
   const [components, setComponents] = useState<SubComponentAssessment[]>(getInitialSubComponents());
   const [selectedComponentFilter, setSelectedComponentFilter] = useState<string>('all');
 
+  // Cascading Dropdown States for Component & Sub-Component Selection
+  const [cascadeComponent, setCascadeComponent] = useState<string>('Pondasi');
+  const [cascadeSubComponentId, setCascadeSubComponentId] = useState<string>('pondasi_1');
+  const [cascadeDamageInput, setCascadeDamageInput] = useState<number>(0);
+
   // Photos State (Maksimal 10 Foto Visual per Bangunan)
   const [photos, setPhotos] = useState<BuildingPhoto[]>([]);
   const [photoInputMethod, setPhotoInputMethod] = useState<'upload' | 'url'>('upload');
@@ -165,6 +172,77 @@ export const AssessmentForm: React.FC = () => {
   const [isProcessingPhotos, setIsProcessingPhotos] = useState(false);
   const [editingPhoto, setEditingPhoto] = useState<BuildingPhoto | null>(null);
   const [previewPhotoIndex, setPreviewPhotoIndex] = useState<number | null>(null);
+  const [previewAssessment, setPreviewAssessment] = useState<BuildingAssessment | null>(null);
+
+  const handleOpenPreviewPdf = () => {
+    const currentKec = kecamatans.find((k) => k.id === kecamatanId);
+    const currentDesa = desas.find((d) => d.id === desaId);
+
+    const finalOwner = buildingCategory === 'Hunian Masyarakat'
+      ? (namaPemilikRumah.trim() || ownerAgency.trim() || 'Pemilik Rumah')
+      : (namaPemilikGedung.trim() || ownerAgency.trim() || 'Pengelola Gedung');
+
+    const assessmentPayload: BuildingAssessment = {
+      id: isEditMode ? selectedAssessmentForEdit!.id : `assess_preview_${Date.now()}`,
+      code: code.trim() || 'REG-PREVIEW',
+      disasterType,
+      disasterDate,
+      assessmentDate,
+      buildingName: buildingName.trim() || 'Bangunan Gedung Belum Bernama',
+      buildingCategory,
+      yearBuilt: Number(yearBuilt),
+      ownerAgency: finalOwner,
+      namaPemilikRumah: buildingCategory === 'Hunian Masyarakat' ? (namaPemilikRumah.trim() || finalOwner) : undefined,
+      namaPemilikGedung: buildingCategory !== 'Hunian Masyarakat' ? (namaPemilikGedung.trim() || finalOwner) : undefined,
+      nikPemilik: nikPemilik.trim() || undefined,
+      noKkPemilik: noKkPemilik.trim() || undefined,
+      responsibleDepartment: responsibleDepartment.trim(),
+      buildingClass,
+      totalFloorAreaM2: Number(totalFloorAreaM2),
+      numberOfFloors: Number(numberOfFloors),
+      kecamatanId,
+      kecamatanName: currentKec?.name || 'Kecamatan',
+      desaId,
+      desaName: currentDesa?.name || 'Desa',
+      detailedAddress: detailedAddress.trim(),
+      latitude,
+      longitude,
+
+      components,
+      totalDamagePercent,
+      damageClassification,
+
+      hsbgnPerM2: Number(hsbgnPerM2),
+      treatmentCostPerM2: rehabCostDetails.treatmentCostPerM2,
+      demolitionPercent: Number(demolitionPercent),
+      demolitionCostPerM2: rehabCostDetails.demolitionCostPerM2,
+      totalCostPerM2: rehabCostDetails.totalCostPerM2,
+      totalRehabCost: rehabCostDetails.totalRehabCost,
+      roundedRehabCost: rehabCostDetails.roundedRehabCost,
+      costTerbilang: rehabCostDetails.costTerbilang,
+
+      photos,
+      cityLocation,
+      reportDateStr,
+      headOfDepartment: {
+        title: 'Kepala Dinas Pekerjaan Umum dan Penataan Ruang',
+        subTitle: 'Pemerintah Daerah',
+        rank: headRank,
+        name: headName,
+        nip: headNip,
+      },
+      analysisTeam,
+
+      verificationStatus: isEditMode ? selectedAssessmentForEdit!.verificationStatus : 'Menunggu Verifikasi',
+      googleSheetSynced: false,
+      createdBy: currentUser.id,
+      createdByName: currentUser.name,
+      createdAt: isEditMode ? selectedAssessmentForEdit!.createdAt : new Date().toISOString(),
+      updatedAt: new Date().toISOString(),
+    };
+
+    setPreviewAssessment(assessmentPayload);
+  };
 
   // City & Officials
   const [cityLocation, setCityLocation] = useState('Mbay');
@@ -735,6 +813,14 @@ export const AssessmentForm: React.FC = () => {
         </div>
 
         <div className="flex items-center gap-2">
+          <button
+            type="button"
+            onClick={handleOpenPreviewPdf}
+            className="flex items-center gap-1.5 px-3 py-2 text-xs font-bold text-indigo-900 bg-indigo-50 hover:bg-indigo-100 border border-indigo-200 rounded-xl transition-colors cursor-pointer shadow-xs"
+          >
+            <Printer className="w-3.5 h-3.5 text-indigo-600" />
+            <span>Pratinjau & Cetak PDF</span>
+          </button>
           <button
             type="button"
             onClick={handleResetScores}
@@ -1541,23 +1627,6 @@ export const AssessmentForm: React.FC = () => {
           </div>
 
           <div className="flex items-center gap-2.5 flex-wrap">
-            {/* Dropdown Filter for Component Observation */}
-            <div className="flex items-center gap-1.5 bg-slate-50 border border-slate-200 rounded-xl px-3 py-1.5">
-              <span className="text-xs font-semibold text-slate-600">Filter Bagian:</span>
-              <select
-                value={selectedComponentFilter}
-                onChange={(e) => setSelectedComponentFilter(e.target.value)}
-                className="bg-transparent text-xs font-bold text-slate-900 focus:outline-none cursor-pointer"
-              >
-                <option value="all">Semua Komponen (8 Bagian)</option>
-                {Array.from(new Set(components.map((c) => c.componentName))).map((compName) => (
-                  <option key={compName} value={compName}>
-                    {compName}
-                  </option>
-                ))}
-              </select>
-            </div>
-
             {/* Live damage badge */}
             <div className="flex items-center gap-2 bg-slate-900 text-white px-3 py-1.5 rounded-xl">
               <span className="text-xs text-slate-300">Total:</span>
@@ -1579,6 +1648,115 @@ export const AssessmentForm: React.FC = () => {
           </div>
         </div>
 
+        {/* Cascading Component & Sub-Component Selector Bar */}
+        <div className="bg-slate-50 border border-slate-200 rounded-2xl p-4 space-y-3">
+          <div className="flex items-center justify-between">
+            <div className="text-xs font-bold text-slate-800 uppercase tracking-wider flex items-center gap-1.5">
+              <Layers className="w-3.5 h-3.5 text-amber-600" />
+              <span>Dropdown Bertingkat: Pilih Komponen & Sub Komponen Observasi</span>
+            </div>
+            <div className="text-[11px] text-slate-500 font-medium">
+              Pilih komponen utama dan sub-komponennya untuk input cepat
+            </div>
+          </div>
+
+          <div className="grid grid-cols-1 md:grid-cols-3 gap-3">
+            <div>
+              <label className="block text-[11px] font-semibold text-slate-600 mb-1">
+                1. Komponen Bangunan Utama
+              </label>
+              <select
+                value={cascadeComponent}
+                onChange={(e) => {
+                  const comp = e.target.value;
+                  setCascadeComponent(comp);
+                  const subs = PUPR_MASTER_COMPONENTS.filter((c) => c.componentName === comp);
+                  if (subs.length > 0) {
+                    setCascadeSubComponentId(subs[0].id);
+                    const matchedComp = components.find(x => x.id === subs[0].id);
+                    if (matchedComp) {
+                      setCascadeDamageInput(matchedComp.damagePercentInput);
+                    }
+                  }
+                }}
+                className="w-full px-3 py-2 bg-white border border-slate-300 rounded-xl text-xs font-bold text-slate-900 focus:ring-2 focus:ring-amber-500 cursor-pointer"
+              >
+                {Array.from(new Set(PUPR_MASTER_COMPONENTS.map((c) => c.componentName))).map((compName) => (
+                  <option key={compName} value={compName}>
+                    {compName}
+                  </option>
+                ))}
+              </select>
+            </div>
+
+            <div>
+              <label className="block text-[11px] font-semibold text-slate-600 mb-1">
+                2. Sub Komponen (Menyesuaikan Otomatis)
+              </label>
+              <select
+                value={cascadeSubComponentId}
+                onChange={(e) => {
+                  const subId = e.target.value;
+                  setCascadeSubComponentId(subId);
+                  const matchedComp = components.find(x => x.id === subId);
+                  if (matchedComp) {
+                    setCascadeDamageInput(matchedComp.damagePercentInput);
+                  }
+                }}
+                className="w-full px-3 py-2 bg-white border border-slate-300 rounded-xl text-xs font-bold text-slate-900 focus:ring-2 focus:ring-amber-500 cursor-pointer"
+              >
+                {PUPR_MASTER_COMPONENTS.filter((c) => c.componentName === cascadeComponent).map((sub) => {
+                  const currentCompState = components.find(x => x.id === sub.id);
+                  const currentVal = currentCompState ? currentCompState.damagePercentInput : 0;
+                  return (
+                    <option key={sub.id} value={sub.id}>
+                      {sub.subComponentName} (Bobot: {sub.bobotPercent.toFixed(2)}% | Nilai saat ini: {currentVal}%)
+                    </option>
+                  );
+                })}
+              </select>
+            </div>
+
+            <div>
+              <label className="block text-[11px] font-semibold text-slate-600 mb-1">
+                3. Tingkat Kerusakan & Terapkan
+              </label>
+              <div className="flex items-center gap-2">
+                <select
+                  value={cascadeDamageInput}
+                  onChange={(e) => setCascadeDamageInput(parseFloat(e.target.value) || 0)}
+                  className="flex-1 px-3 py-2 bg-white border border-slate-300 rounded-xl text-xs font-bold text-slate-900 focus:ring-2 focus:ring-amber-500 cursor-pointer"
+                >
+                  <option value={0}>0% (Baik)</option>
+                  <option value={5}>5% (Sangat Ringan)</option>
+                  <option value={10}>10% (Ringan Sekali)</option>
+                  <option value={15}>15% (Ringan)</option>
+                  <option value={20}>20% (Ringan Sedang)</option>
+                  <option value={25}>25% (Cukup Ringan)</option>
+                  <option value={30}>30% (Sedang)</option>
+                  <option value={40}>40% (Sedang Berat)</option>
+                  <option value={50}>50% (Berat)</option>
+                  <option value={75}>75% (Berat Sekali)</option>
+                  <option value={100}>100% (Total / Runtuh)</option>
+                </select>
+                <button
+                  type="button"
+                  onClick={() => {
+                    if (cascadeSubComponentId) {
+                      handleComponentChange(cascadeSubComponentId, cascadeDamageInput);
+                      const targetSub = PUPR_MASTER_COMPONENTS.find(s => s.id === cascadeSubComponentId);
+                      showToast(`Kerusakan pada ${targetSub?.subComponentName || cascadeComponent} berhasil diperbarui!`, 'success');
+                    }
+                  }}
+                  className="px-4 py-2 bg-amber-500 hover:bg-amber-400 text-slate-950 font-bold text-xs rounded-xl shadow-xs transition-all cursor-pointer whitespace-nowrap"
+                >
+                  Terapkan
+                </button>
+              </div>
+            </div>
+          </div>
+        </div>
+
         <div className="overflow-x-auto border border-slate-200 rounded-xl">
           <table className="w-full text-left text-xs border-collapse">
             <thead>
@@ -1593,13 +1771,11 @@ export const AssessmentForm: React.FC = () => {
               </tr>
             </thead>
             <tbody className="divide-y divide-slate-100">
-              {components
-                .filter((c) => selectedComponentFilter === 'all' || c.componentName === selectedComponentFilter)
-                .map((c, index) => {
-                  const isNewGroup =
-                    index === 0 || c.componentNo !== components.filter((x) => selectedComponentFilter === 'all' || x.componentName === selectedComponentFilter)[index - 1]?.componentNo;
+              {components.map((c, index) => {
+                const isNewGroup =
+                  index === 0 || c.componentNo !== components[index - 1]?.componentNo;
 
-                  return (
+                return (
                     <tr
                       key={c.id}
                       className={`hover:bg-amber-50/40 transition-colors ${
@@ -2502,6 +2678,14 @@ export const AssessmentForm: React.FC = () => {
           initialIndex={previewPhotoIndex}
           buildingTitle={`${buildingName || 'Bangunan Gedung'} (Kec. ${kecamatans.find((k) => k.id === kecamatanId)?.name || 'Kecamatan'})`}
           onClose={() => setPreviewPhotoIndex(null)}
+        />
+      )}
+
+      {/* OFFICIAL PUPR PDF PREVIEW MODAL */}
+      {previewAssessment && (
+        <AssessmentDetailModal
+          assessment={previewAssessment}
+          onClose={() => setPreviewAssessment(null)}
         />
       )}
     </form>
