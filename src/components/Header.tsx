@@ -187,11 +187,11 @@ export const Header: React.FC<HeaderProps> = ({ onToggleMobileNav }) => {
             </button>
           )}
 
-          {/* User Role Switcher Dropdown */}
+          {/* User Account Menu Dropdown */}
           <div className="relative">
             <button
               onClick={() => setRoleDropdownOpen(!roleDropdownOpen)}
-              className="flex items-center gap-2 px-2.5 sm:px-3 py-1.5 rounded-lg bg-slate-100 hover:bg-slate-200 text-slate-800 border border-slate-200 text-left transition-all"
+              className="flex items-center gap-2 px-2.5 sm:px-3 py-1.5 rounded-lg bg-slate-100 hover:bg-slate-200 text-slate-800 border border-slate-200 text-left transition-all cursor-pointer"
             >
               <div className="w-7 h-7 rounded-full bg-slate-900 text-amber-400 flex items-center justify-center text-xs font-bold shrink-0">
                 {currentUser.name.charAt(0)}
@@ -208,62 +208,35 @@ export const Header: React.FC<HeaderProps> = ({ onToggleMobileNav }) => {
             </button>
 
             {roleDropdownOpen && (
-              <div className="absolute right-0 mt-2 w-72 rounded-xl bg-slate-900 text-white border border-slate-800 shadow-2xl p-2 z-50 animate-in fade-in zoom-in-95 duration-100">
-                <div className="px-3 py-2 border-b border-slate-800 mb-2">
-                  <p className="text-xs font-bold text-white">Ganti Peran Pengguna (RBAC)</p>
-                  <p className="text-[10px] text-slate-400">Pilih role untuk menguji pembatasan kuota dan wewenang:</p>
+              <div className="absolute right-0 mt-2 w-64 rounded-xl bg-slate-900 text-white border border-slate-800 shadow-2xl p-3 z-50 animate-in fade-in zoom-in-95 duration-100">
+                <div className="pb-3 border-b border-slate-800 mb-3">
+                  <div className="flex items-center gap-2.5">
+                    <div className="w-9 h-9 rounded-full bg-indigo-600 text-white flex items-center justify-center text-sm font-bold shrink-0">
+                      {currentUser.name.charAt(0)}
+                    </div>
+                    <div className="min-w-0">
+                      <p className="text-xs font-bold text-white truncate">{currentUser.name}</p>
+                      <p className="text-[10px] text-amber-400 font-medium truncate">{currentRoleConfig.title}</p>
+                    </div>
+                  </div>
+                  <div className="mt-2 text-[10px] text-slate-400 bg-slate-800/80 px-2 py-1 rounded">
+                    Hak akses aktif sesuai fungsi akun terdaftar.
+                  </div>
                 </div>
 
-                <div className="space-y-1">
-                  {(Object.keys(ROLE_LIMITS) as UserRole[]).map((roleKey) => {
-                    const limit = ROLE_LIMITS[roleKey];
-                    const count = roleCounts[roleKey] || 0;
-                    const isCurrent = currentUser.role === roleKey;
-
-                    return (
-                      <button
-                        key={roleKey}
-                        onClick={() => {
-                          switchUserRole(roleKey);
-                          setRoleDropdownOpen(false);
-                        }}
-                        className={`w-full flex items-center justify-between px-3 py-2 rounded-lg text-xs transition-colors ${
-                          isCurrent
-                            ? 'bg-amber-500 text-slate-950 font-bold'
-                            : 'hover:bg-slate-800 text-slate-300'
-                        }`}
-                      >
-                        <div className="flex items-center gap-2">
-                          <span className={`w-2 h-2 rounded-full ${isCurrent ? 'bg-slate-950' : 'bg-amber-400'}`}></span>
-                          <span>{limit.title}</span>
-                        </div>
-                        <span
-                          className={`text-[10px] px-1.5 py-0.5 rounded font-mono ${
-                            isCurrent
-                              ? 'bg-slate-950 text-amber-300'
-                              : 'bg-slate-800 text-slate-300 border border-slate-700'
-                          }`}
-                        >
-                          {count}/{limit.max}
-                        </span>
-                      </button>
-                    );
-                  })}
-                </div>
-
-                <div className="mt-2 pt-2 border-t border-slate-800 text-[10px] text-slate-400 px-2 flex items-center justify-between">
-                  <div className="flex items-center gap-1">
-                    <ShieldCheck className="w-3.5 h-3.5 text-emerald-400" />
-                    <span>Terlindungi</span>
+                <div className="flex items-center justify-between pt-1">
+                  <div className="flex items-center gap-1 text-[10px] text-emerald-400">
+                    <ShieldCheck className="w-3.5 h-3.5" />
+                    <span>Sesi Aman</span>
                   </div>
                   <button
                     onClick={() => {
                       setRoleDropdownOpen(false);
                       lockSession();
                     }}
-                    className="text-rose-400 hover:text-rose-300 font-bold flex items-center gap-1 px-2 py-1 rounded bg-rose-500/10 hover:bg-rose-500/20 transition-colors cursor-pointer"
+                    className="text-rose-400 hover:text-rose-300 font-bold flex items-center gap-1.5 px-3 py-1.5 rounded-lg bg-rose-500/10 hover:bg-rose-500/20 text-xs transition-colors cursor-pointer"
                   >
-                    <LogOut className="w-3 h-3" />
+                    <LogOut className="w-3.5 h-3.5" />
                     <span>Log Out</span>
                   </button>
                 </div>

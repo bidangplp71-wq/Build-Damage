@@ -347,91 +347,36 @@ export const Navigation: React.FC<NavigationProps> = ({ mobileOpen, onCloseMobil
         })}
       </div>
 
-      {/* Role Switching & Account Switcher at Bottom of Rail */}
+      {/* User Account & Session Management at Bottom of Rail */}
       <div className="p-3 border-t border-slate-800 bg-slate-950/50 space-y-2">
-        <div className="relative">
-          <button
-            onClick={() => setRoleMenuOpen(!roleMenuOpen)}
-            className="w-full flex items-center justify-between p-2.5 rounded-xl bg-slate-800/90 hover:bg-slate-800 border border-slate-700/80 transition-colors text-left cursor-pointer"
-          >
-            <div className="flex items-center gap-2.5 min-w-0">
-              <div className="w-8 h-8 rounded-lg bg-indigo-600 flex items-center justify-center text-white text-xs font-bold shrink-0 shadow-xs">
-                {currentUser.name.charAt(0)}
+        <div className="rounded-xl bg-slate-800/90 border border-slate-700/80 p-2.5 space-y-2">
+          <div className="flex items-center gap-2.5 min-w-0">
+            <div className="w-8 h-8 rounded-lg bg-indigo-600 flex items-center justify-center text-white text-xs font-bold shrink-0 shadow-xs">
+              {currentUser.name.charAt(0)}
+            </div>
+            <div className="min-w-0 flex-1">
+              <div className="text-xs font-semibold text-white truncate">
+                {currentUser.name}
               </div>
-              <div className="min-w-0">
-                <div className="text-xs font-semibold text-white truncate">
-                  {currentUser.name}
-                </div>
-                <div className="text-[10px] text-amber-400 font-medium truncate">
-                  {currentRoleConfig.title}
-                </div>
+              <div className="text-[10px] text-amber-400 font-medium truncate">
+                {currentRoleConfig.title}
               </div>
             </div>
-            <ChevronDown className="w-4 h-4 text-slate-400 shrink-0 ml-1" />
-          </button>
+          </div>
 
-          {/* Role switcher popover */}
-          {roleMenuOpen && (
-            <div className="absolute bottom-full left-0 right-0 mb-2 rounded-xl bg-slate-800 border border-slate-700 shadow-2xl p-2 z-50 animate-in fade-in zoom-in-95 duration-100">
-              <div className="px-2.5 py-1.5 border-b border-slate-700/80 mb-1.5">
-                <div className="flex items-center justify-between">
-                  <p className="text-[11px] font-bold text-slate-200">Ganti Peran Pengguna (RBAC)</p>
-                  <Sparkles className="w-3 h-3 text-amber-400" />
-                </div>
-                <p className="text-[10px] text-slate-400">Pilih role untuk menguji tampilan & hak akses masing-masing:</p>
-              </div>
-
-              <div className="space-y-1 max-h-56 overflow-y-auto">
-                {(Object.keys(ROLE_LIMITS) as UserRole[]).map((roleKey) => {
-                  const limit = ROLE_LIMITS[roleKey];
-                  const count = roleCounts[roleKey] || 0;
-                  const isCurrent = currentUser.role === roleKey;
-
-                  return (
-                    <button
-                      key={roleKey}
-                      onClick={() => {
-                        switchUserRole(roleKey);
-                        setRoleMenuOpen(false);
-                      }}
-                      className={`w-full flex items-center justify-between px-2.5 py-2 rounded-lg text-xs transition-colors cursor-pointer ${
-                        isCurrent
-                          ? 'bg-amber-500/20 text-amber-300 font-bold border border-amber-500/40'
-                          : 'hover:bg-slate-700/70 text-slate-300'
-                      }`}
-                    >
-                      <div className="text-left min-w-0">
-                        <div className="truncate font-semibold">{limit.title}</div>
-                        <div className="text-[9px] text-slate-400 truncate">
-                          {roleKey === 'admin_user' && '→ Langsung Form Input'}
-                          {roleKey === 'admin_verifikator' && '→ Langsung Verifikasi Data'}
-                          {roleKey === 'admin_publik' && '→ Dashboard & Cari Publik'}
-                          {(roleKey === 'super_admin' || roleKey === 'admin') && '→ Akses Penuh Semua Modul'}
-                        </div>
-                      </div>
-                      <span className="text-[10px] px-1.5 py-0.5 rounded bg-slate-900 text-slate-300 ml-1 shrink-0">
-                        {count}/{limit.max}
-                      </span>
-                    </button>
-                  );
-                })}
-              </div>
-
-              <div className="mt-2 pt-2 border-t border-slate-700/80 flex items-center justify-between px-1">
-                <span className="text-[10px] text-slate-400">Sesi Keamanan</span>
-                <button
-                  onClick={() => {
-                    setRoleMenuOpen(false);
-                    lockSession();
-                  }}
-                  className="text-rose-400 hover:text-rose-300 font-bold flex items-center gap-1.5 px-2.5 py-1 rounded-lg bg-rose-500/10 hover:bg-rose-500/20 text-xs transition-colors cursor-pointer"
-                >
-                  <LogOut className="w-3.5 h-3.5" />
-                  <span>Log Out</span>
-                </button>
-              </div>
-            </div>
-          )}
+          <div className="pt-2 border-t border-slate-700/60 flex items-center justify-between">
+            <span className="text-[10px] text-slate-400 flex items-center gap-1">
+              <ShieldCheck className="w-3 h-3 text-emerald-400" />
+              <span>Sesi Aman</span>
+            </span>
+            <button
+              onClick={() => lockSession()}
+              className="text-rose-400 hover:text-rose-300 font-bold flex items-center gap-1 px-2 py-1 rounded bg-rose-500/10 hover:bg-rose-500/20 text-[11px] transition-colors cursor-pointer"
+            >
+              <LogOut className="w-3 h-3" />
+              <span>Log Out</span>
+            </button>
+          </div>
         </div>
 
         {/* System Badges */}
