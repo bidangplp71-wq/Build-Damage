@@ -1,0 +1,7 @@
+{
+  "name": "SIM-PKBG KERUSAKAN GEDUNG PASCA BENCANA",
+  "description": "Sistem Informasi Manajemen Penilaian Cepat Tingkat Kerusakan Komponen Bangunan Gedung Pasca Bencana Berdasarkan Standar Permen PUPR No. 22/PRT/M/2018",
+  "requestFramePermissions": [],
+  "majorCapabilities": ["MAJOR_CAPABILITY_SERVER_SIDE_GEMINI_API"]
+}
+
