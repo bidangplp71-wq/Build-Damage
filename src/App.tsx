@@ -12,6 +12,7 @@ import { DukcapilManagement } from './components/DukcapilManagement';
 import { UserManagement } from './components/UserManagement';
 import { GoogleSheetIntegration } from './components/GoogleSheetIntegration';
 import { FirebaseProtection } from './components/FirebaseProtection';
+import { SessionLockScreen } from './components/SessionLockScreen';
 import { CheckCircle2, AlertCircle, Info, X, ShieldAlert } from 'lucide-react';
 
 const MainLayout: React.FC = () => {
@@ -113,6 +114,9 @@ const MainLayout: React.FC = () => {
           </div>
         </div>
       )}
+
+      {/* Inactivity Session Lock Screen */}
+      <SessionLockScreen />
     </div>
   );
 };

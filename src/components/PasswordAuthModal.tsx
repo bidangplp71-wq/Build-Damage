@@ -196,8 +196,8 @@ export const PasswordAuthModal: React.FC<PasswordAuthModalProps> = ({
             </div>
           )}
 
-          {/* Quick Helper for Demo / Authorized Roles */}
-          {currentUser.role === 'super_admin' && (
+          {/* Quick Helper for Demo / Authorized Roles (Never allowed for Super Admin) */}
+          {currentUser.role === 'super_admin' && !isTargetSuperAdmin && (
             <div className="p-2.5 bg-slate-800/60 rounded-xl border border-slate-700/60 text-[11px] text-slate-400 flex items-center justify-between">
               <span className="flex items-center gap-1.5">
                 <KeyRound className="w-3.5 h-3.5 text-amber-400" />

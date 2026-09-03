@@ -47,6 +47,11 @@ interface AppContextType {
   deleteUser: (id: string) => { success: boolean; message: string };
   switchUserRole: (role: UserRole) => void;
 
+  // Session Inactivity Lock
+  isSessionLocked: boolean;
+  lockSession: () => void;
+  unlockSession: (passwordInput: string) => { success: boolean; message: string };
+
   // Assessments
   assessments: BuildingAssessment[];
   addAssessment: (data: BuildingAssessment) => Promise<{ success: boolean; message: string }>;
@@ -435,6 +440,7 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
     }
 
     setCurrentUser(user);
+    setIsSessionLocked(false);
     setSelectedAssessmentForEdit(null);
     const targetTab = ROLE_NAV_CONFIGS[user.role]?.defaultTab || 'dashboard';
     setActiveTab(targetTab);
@@ -445,6 +451,54 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
       message: `Autentikasi berhasil. Selamat datang, ${user.name} (${ROLE_LIMITS[user.role].title})!`,
     };
   };
+
+  // Session Inactivity Lock State & Methods (15 minutes standard timeout)
+  const [isSessionLocked, setIsSessionLocked] = useState(false);
+
+  const lockSession = () => {
+    setIsSessionLocked(true);
+  };
+
+  const unlockSession = (passwordInput: string) => {
+    const isMatched = verifyPassword(passwordInput, currentUser.password);
+    if (!isMatched) {
+      return {
+        success: false,
+        message: 'Kata sandi tidak sesuai! Sesi gagal dibuka.',
+      };
+    }
+    setIsSessionLocked(false);
+    return {
+      success: true,
+      message: `Sesi ${currentUser.name} berhasil dibuka kembali.`,
+    };
+  };
+
+  useEffect(() => {
+    let inactivityTimer: NodeJS.Timeout;
+
+    const resetTimer = () => {
+      if (isSessionLocked) return;
+      clearTimeout(inactivityTimer);
+      inactivityTimer = setTimeout(() => {
+        setIsSessionLocked(true);
+      }, 15 * 60 * 1000); // 15 minutes standard inactivity timeout
+    };
+
+    const events = ['mousedown', 'mousemove', 'keypress', 'scroll', 'touchstart'];
+    events.forEach((event) => {
+      window.addEventListener(event, resetTimer);
+    });
+
+    resetTimer();
+
+    return () => {
+      clearTimeout(inactivityTimer);
+      events.forEach((event) => {
+        window.removeEventListener(event, resetTimer);
+      });
+    };
+  }, [isSessionLocked, currentUser.id]);
 
   const canCurrentUserManagePassword = (targetRole: UserRole) => {
     return canManageUserPassword(currentUser.role, targetRole);
@@ -904,6 +958,10 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
         canCurrentUserViewPassword,
         deleteUser,
         switchUserRole,
+
+        isSessionLocked,
+        lockSession,
+        unlockSession,
 
         assessments,
         addAssessment,

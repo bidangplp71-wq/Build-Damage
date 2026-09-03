@@ -82,13 +82,18 @@ export function canManageUserPassword(currentRole: UserRole, targetRole: UserRol
 
 /**
  * Permission check: Can current user view/unmask target user's password?
- * - super_admin: Can view all passwords (including admin)
- * - admin: Can ONLY view passwords of verifikator, surveyor, and publik. CANNOT view admin or super_admin passwords.
+ * - super_admin password is STRICTLY SECRET and can NEVER be viewed by anyone (returns false for super_admin).
+ * - super_admin can view passwords of admin, verifikator, surveyor, and publik.
+ * - admin can ONLY view passwords of verifikator, surveyor, and publik. CANNOT view admin or super_admin passwords.
  * - others: Cannot view any passwords.
  */
 export function canViewUserPassword(currentRole: UserRole, targetRole: UserRole): boolean {
+  // Super admin password is strictly confidential and never viewable in plaintext by anyone
+  if (targetRole === 'super_admin') {
+    return false;
+  }
   if (currentRole === 'super_admin') {
-    return true; // Super admin can view all passwords
+    return true; // Super admin can view other roles' passwords
   }
   if (currentRole === 'admin') {
     return targetRole === 'admin_verifikator' || targetRole === 'admin_user' || targetRole === 'admin_publik';
