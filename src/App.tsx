@@ -59,14 +59,16 @@ const MainLayout: React.FC = () => {
 
         {/* Dynamic Tab Content */}
         <main className="flex-1 p-4 sm:p-6 lg:p-8 w-full max-w-7xl mx-auto">
-          {activeTab === 'dashboard' && <DashboardAnalytics />}
-          {activeTab === 'penilaian' && <AssessmentTable />}
-          {(activeTab === 'input_baru' || activeTab === 'tambah') && <AssessmentForm />}
-          {activeTab === 'wilayah' && <WilayahManagement />}
-          {activeTab === 'dukcapil' && <DukcapilManagement />}
-          {(activeTab === 'manajemen_user' || activeTab === 'users') && <UserManagement />}
-          {(activeTab === 'google_sheet' || activeTab === 'googlesheets') && <GoogleSheetIntegration />}
-          {(activeTab === 'firebase_shield' || activeTab === 'firebase') && <FirebaseProtection />}
+          <ErrorBoundary>
+            {activeTab === 'dashboard' && <DashboardAnalytics />}
+            {activeTab === 'penilaian' && <AssessmentTable />}
+            {(activeTab === 'input_baru' || activeTab === 'tambah') && <AssessmentForm />}
+            {activeTab === 'wilayah' && <WilayahManagement />}
+            {activeTab === 'dukcapil' && <DukcapilManagement />}
+            {(activeTab === 'manajemen_user' || activeTab === 'users') && <UserManagement />}
+            {(activeTab === 'google_sheet' || activeTab === 'googlesheets') && <GoogleSheetIntegration />}
+            {(activeTab === 'firebase_shield' || activeTab === 'firebase') && <FirebaseProtection />}
+          </ErrorBoundary>
         </main>
 
         {/* Footer */}
@@ -127,10 +129,14 @@ const MainLayout: React.FC = () => {
   );
 };
 
+import { ErrorBoundary } from './components/ErrorBoundary';
+
 export default function App() {
   return (
-    <AppProvider>
-      <MainLayout />
-    </AppProvider>
+    <ErrorBoundary>
+      <AppProvider>
+        <MainLayout />
+      </AppProvider>
+    </ErrorBoundary>
   );
 }

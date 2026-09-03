@@ -113,7 +113,6 @@ const STORAGE_KEYS = {
   DUKCAPIL: 'sipandu_pupr_dukcapil_v3',
   GOOGLE_SHEET: 'sipandu_pupr_gsheet_v3',
   FIREBASE: 'sipandu_pupr_firebase_v3',
-  CURRENT_USER_ID: 'sipandu_pupr_current_uid_v3',
 };
 
 export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children }) => {
@@ -140,24 +139,10 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
   });
 
   // Initialize current user
-  const [isLoggedIn, setIsLoggedIn] = useState<boolean>(() => {
-    try {
-      const savedUid = localStorage.getItem(STORAGE_KEYS.CURRENT_USER_ID);
-      const found = users.find((u) => u.id === savedUid);
-      return !!found;
-    } catch {
-      return false;
-    }
-  });
+  const [isLoggedIn, setIsLoggedIn] = useState<boolean>(false);
 
   const [currentUser, setCurrentUser] = useState<UserAccount>(() => {
-    try {
-      const savedUid = localStorage.getItem(STORAGE_KEYS.CURRENT_USER_ID);
-      const found = users.find((u) => u.id === savedUid);
-      return found || users[0];
-    } catch {
-      return users[0];
-    }
+    return users[0] || INITIAL_USERS[0];
   });
 
   // Initialize assessments
@@ -233,16 +218,7 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
   });
 
   // UI state initialized based on user role
-  const [activeTab, setActiveTab] = useState<string>(() => {
-    try {
-      const savedUid = localStorage.getItem(STORAGE_KEYS.CURRENT_USER_ID);
-      const found = users.find((u) => u.id === savedUid);
-      const role = found ? found.role : users[0]?.role || 'super_admin';
-      return ROLE_NAV_CONFIGS[role]?.defaultTab || 'dashboard';
-    } catch {
-      return 'dashboard';
-    }
-  });
+  const [activeTab, setActiveTab] = useState<string>('dashboard');
   const [selectedAssessmentForDetail, setSelectedAssessmentForDetail] = useState<BuildingAssessment | null>(null);
   const [selectedAssessmentForEdit, setSelectedAssessmentForEdit] = useState<BuildingAssessment | null>(null);
   const [toastMessage, setToastMessage] = useState<{ type: 'success' | 'error' | 'info'; text: string } | null>(null);
@@ -455,7 +431,6 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
     setSelectedAssessmentForEdit(null);
     const targetTab = ROLE_NAV_CONFIGS[user.role]?.defaultTab || 'dashboard';
     setActiveTab(targetTab);
-    localStorage.setItem(STORAGE_KEYS.CURRENT_USER_ID, user.id);
 
     return {
       success: true,
@@ -486,7 +461,6 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
     setIsLoggedIn(true);
     setIsSessionLocked(false);
     setSelectedAssessmentForEdit(null);
-    localStorage.setItem(STORAGE_KEYS.CURRENT_USER_ID, user.id);
     const targetTab = ROLE_NAV_CONFIGS[user.role]?.defaultTab || 'dashboard';
     setActiveTab(targetTab);
 
@@ -519,7 +493,6 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
     setIsLoggedIn(true);
     setIsSessionLocked(false);
     setSelectedAssessmentForEdit(null);
-    localStorage.setItem(STORAGE_KEYS.CURRENT_USER_ID, user.id);
     const targetTab = ROLE_NAV_CONFIGS[user.role]?.defaultTab || 'dashboard';
     setActiveTab(targetTab);
 
@@ -531,7 +504,6 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
 
   const logout = () => {
     setIsLoggedIn(false);
-    localStorage.removeItem(STORAGE_KEYS.CURRENT_USER_ID);
     showToast('Anda telah keluar dari sesi.', 'info');
   };
 
