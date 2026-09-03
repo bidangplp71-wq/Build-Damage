@@ -11,19 +11,32 @@
     background-color: white !important;
     color: black !important;
     font-size: 11pt;
+    margin: 0;
+    padding: 0;
   }
-  .no-print {
-    display: none !important;
+  body * {
+    visibility: hidden;
   }
-  .print-only {
-    display: block !important;
+  .print-page, .print-page * {
+    visibility: visible;
   }
   .print-page {
+    position: absolute !important;
+    left: 0 !important;
+    top: 0 !important;
+    width: 100% !important;
+    max-width: 100% !important;
     box-shadow: none !important;
     border: none !important;
     padding: 0 !important;
     margin: 0 !important;
-    width: 100% !important;
-    max-width: 100% !important;
+    height: auto !important;
+    overflow: visible !important;
+  }
+  .no-print, .no-print * {
+    display: none !important;
+  }
+  .print-only {
+    display: block !important;
   }
 }
