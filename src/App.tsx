@@ -1,5 +1,6 @@
-import React, { useState } from 'react';
+import React, { useState, useEffect } from 'react';
 import { AppProvider, useApp } from './context/AppContext';
+import { ROLE_NAV_CONFIGS } from './types';
 import { Header } from './components/Header';
 import { Navigation } from './components/Navigation';
 import { DashboardAnalytics } from './components/DashboardAnalytics';
@@ -11,11 +12,13 @@ import { DukcapilManagement } from './components/DukcapilManagement';
 import { UserManagement } from './components/UserManagement';
 import { GoogleSheetIntegration } from './components/GoogleSheetIntegration';
 import { FirebaseProtection } from './components/FirebaseProtection';
-import { CheckCircle2, AlertCircle, Info, X } from 'lucide-react';
+import { CheckCircle2, AlertCircle, Info, X, ShieldAlert } from 'lucide-react';
 
 const MainLayout: React.FC = () => {
   const {
     activeTab,
+    setActiveTab,
+    currentUser,
     selectedAssessmentForDetail,
     setSelectedAssessmentForDetail,
     toastMessage,
@@ -23,6 +26,16 @@ const MainLayout: React.FC = () => {
   } = useApp();
 
   const [mobileNavOpen, setMobileNavOpen] = useState(false);
+
+  // Tab guard: Ensure user cannot access tabs outside their role
+  const roleConfig = ROLE_NAV_CONFIGS[currentUser.role];
+  const isTabAllowed = roleConfig?.allowedTabs?.includes(activeTab);
+
+  useEffect(() => {
+    if (!isTabAllowed && roleConfig) {
+      setActiveTab(roleConfig.defaultTab);
+    }
+  }, [currentUser.role, activeTab, isTabAllowed, roleConfig, setActiveTab]);
 
   return (
     <div className="min-h-screen bg-slate-100 flex font-sans text-slate-900 antialiased selection:bg-amber-500 selection:text-slate-950">

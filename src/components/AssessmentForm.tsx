@@ -717,9 +717,16 @@ export const AssessmentForm: React.FC = () => {
             <ArrowLeft className="w-4 h-4" />
           </button>
           <div>
-            <h2 className="text-lg font-bold text-slate-900">
-              {isEditMode ? 'Edit Penilaian Kerusakan Gedung' : 'Formulir Penilaian Cepat Kerusakan Gedung'}
-            </h2>
+            <div className="flex items-center gap-2">
+              <h2 className="text-lg font-bold text-slate-900">
+                {isEditMode ? 'Edit Penilaian Kerusakan Gedung' : 'Formulir Penilaian Cepat Kerusakan Gedung'}
+              </h2>
+              {currentUser.role === 'admin_user' && (
+                <span className="px-2 py-0.5 rounded-full text-[10px] font-bold bg-emerald-100 text-emerald-800 border border-emerald-300">
+                  Mode Surveyor Lapangan
+                </span>
+              )}
+            </div>
             <p className="text-xs text-slate-500">
               Format Standar PUPR: Analisis Komponen Pondasi, Struktur, Atap, Dinding, Lantai, Utilitas & Finishing
             </p>
@@ -730,14 +737,14 @@ export const AssessmentForm: React.FC = () => {
           <button
             type="button"
             onClick={handleResetScores}
-            className="flex items-center gap-1.5 px-3 py-2 text-xs font-semibold text-slate-700 bg-slate-100 hover:bg-slate-200 rounded-xl transition-colors"
+            className="flex items-center gap-1.5 px-3 py-2 text-xs font-semibold text-slate-700 bg-slate-100 hover:bg-slate-200 rounded-xl transition-colors cursor-pointer"
           >
             <RotateCcw className="w-3.5 h-3.5" />
             <span>Reset Nilai</span>
           </button>
           <button
             type="submit"
-            className="flex items-center gap-1.5 px-4 py-2 text-xs font-bold text-slate-950 bg-amber-500 hover:bg-amber-400 rounded-xl shadow-xs transition-colors"
+            className="flex items-center gap-1.5 px-4 py-2 text-xs font-bold text-slate-950 bg-amber-500 hover:bg-amber-400 rounded-xl shadow-xs transition-colors cursor-pointer"
           >
             <Save className="w-4 h-4" />
             <span>{isEditMode ? 'Simpan Perubahan' : 'Simpan & Hitung'}</span>
@@ -777,19 +784,21 @@ export const AssessmentForm: React.FC = () => {
               <ExternalLink className="w-3.5 h-3.5" />
             </a>
           )}
-          <button
-            type="button"
-            onClick={() => {
-              setTempSpreadsheetUrl(googleSheetConfig.spreadsheetUrl || '');
-              setTempWebhookUrl(googleSheetConfig.webhookUrl || '');
-              setTempSheetName(googleSheetConfig.sheetName || 'Data_Kerusakan_PUPR');
-              setShowSheetModal(true);
-            }}
-            className="inline-flex items-center gap-1.5 px-3 py-1.5 rounded-xl bg-emerald-700 hover:bg-emerald-800 text-white font-semibold text-xs shadow-xs transition-colors"
-          >
-            <Settings className="w-3.5 h-3.5" />
-            <span>Tentukan Link Sheet</span>
-          </button>
+          {(currentUser.role === 'super_admin' || currentUser.role === 'admin') && (
+            <button
+              type="button"
+              onClick={() => {
+                setTempSpreadsheetUrl(googleSheetConfig.spreadsheetUrl || '');
+                setTempWebhookUrl(googleSheetConfig.webhookUrl || '');
+                setTempSheetName(googleSheetConfig.sheetName || 'Data_Kerusakan_PUPR');
+                setShowSheetModal(true);
+              }}
+              className="inline-flex items-center gap-1.5 px-3 py-1.5 rounded-xl bg-emerald-700 hover:bg-emerald-800 text-white font-semibold text-xs shadow-xs transition-colors cursor-pointer"
+            >
+              <Settings className="w-3.5 h-3.5" />
+              <span>Tentukan Link Sheet</span>
+            </button>
+          )}
         </div>
       </div>
 

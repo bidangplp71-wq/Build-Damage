@@ -41,18 +41,90 @@ export const ROLE_LIMITS: Record<UserRole, RoleLimit> = {
   },
   admin_user: {
     role: 'admin_user',
-    title: 'Admin User (Surveyor OPD)',
+    title: 'Surveyor Lapangan',
     max: 100,
     description: 'Petugas lapangan dan perwakilan unit kerja yang menginput penilaian cepat fisik bangunan pasca bencana.',
     badgeColor: 'bg-emerald-100 text-emerald-800 border-emerald-200'
   },
   admin_publik: {
     role: 'admin_publik',
-    title: 'Admin Publik',
+    title: 'Akses Publik',
     max: 10,
     description: 'Fasilitator laporan awal masyarakat dan penghubung publik untuk pemetaan cepat dampak bencana.',
     badgeColor: 'bg-sky-100 text-sky-800 border-sky-200'
   }
+};
+
+export interface RoleNavConfig {
+  defaultTab: string;
+  allowedTabs: string[];
+  roleTitle: string;
+  roleSubtitle: string;
+  badgeLabel: string;
+}
+
+export const ROLE_NAV_CONFIGS: Record<UserRole, RoleNavConfig> = {
+  super_admin: {
+    defaultTab: 'dashboard',
+    allowedTabs: [
+      'dashboard',
+      'penilaian',
+      'input_baru',
+      'tambah',
+      'wilayah',
+      'dukcapil',
+      'manajemen_user',
+      'users',
+      'google_sheet',
+      'googlesheets',
+      'firebase_shield',
+      'firebase',
+    ],
+    roleTitle: 'Super Administrator',
+    roleSubtitle: 'Akses Penuh Semua Modul & Konfigurasi Sistem',
+    badgeLabel: 'Super Admin (Akses Penuh)',
+  },
+  admin: {
+    defaultTab: 'dashboard',
+    allowedTabs: [
+      'dashboard',
+      'penilaian',
+      'input_baru',
+      'tambah',
+      'wilayah',
+      'dukcapil',
+      'manajemen_user',
+      'users',
+      'google_sheet',
+      'googlesheets',
+      'firebase_shield',
+      'firebase',
+    ],
+    roleTitle: 'Admin Utama Dinas PUPR',
+    roleSubtitle: 'Akses Operasional Lengkap, Wilayah & Pelaporan',
+    badgeLabel: 'Admin Utama (Akses Penuh)',
+  },
+  admin_verifikator: {
+    defaultTab: 'penilaian',
+    allowedTabs: ['penilaian', 'dashboard'],
+    roleTitle: 'Tim Ahli Verifikator (TABG PUPR)',
+    roleSubtitle: 'Fokus Khusus: Validasi Teknis, Audit Foto & Persetujuan Survei',
+    badgeLabel: 'Mode Verifikator TABG',
+  },
+  admin_user: {
+    defaultTab: 'input_baru',
+    allowedTabs: ['input_baru', 'tambah', 'penilaian'],
+    roleTitle: 'Petugas Surveyor Lapangan PUPR',
+    roleSubtitle: 'Fokus Khusus: Pengisian Formulir Penilaian Cepat Kerusakan',
+    badgeLabel: 'Mode Surveyor Lapangan',
+  },
+  admin_publik: {
+    defaultTab: 'dashboard',
+    allowedTabs: ['dashboard', 'penilaian'],
+    roleTitle: 'Portal Informasi Publik',
+    roleSubtitle: 'Fokus Khusus: Dashboard Ringkasan & Pencarian Data Publik',
+    badgeLabel: 'Mode Publik (Read-Only)',
+  },
 };
 
 export interface UserAccount {

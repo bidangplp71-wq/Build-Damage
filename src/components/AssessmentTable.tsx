@@ -82,6 +82,10 @@ export const AssessmentTable: React.FC = () => {
   // Syncing state per ID
   const [syncingId, setSyncingId] = useState<string | null>(null);
 
+  const pendingVerificationCount = useMemo(() => {
+    return assessments.filter((a) => a.verificationStatus === 'Menunggu Verifikasi').length;
+  }, [assessments]);
+
   // Desas filtered by selected Kecamatan
   const availableDesas = useMemo(() => {
     if (!selectedKecamatanId) return [];
@@ -256,17 +260,69 @@ export const AssessmentTable: React.FC = () => {
 
   return (
     <div className="space-y-4">
+      {/* Role-Specific Context Banner */}
+      {currentUser.role === 'admin_verifikator' && (
+        <div className="bg-amber-50 border border-amber-300 rounded-2xl p-3.5 flex items-center justify-between gap-3 text-xs shadow-xs">
+          <div className="flex items-center gap-3">
+            <div className="w-9 h-9 rounded-xl bg-amber-500 text-slate-950 flex items-center justify-center shrink-0 font-bold shadow-xs">
+              <ShieldCheck className="w-5 h-5" />
+            </div>
+            <div>
+              <span className="font-bold text-slate-900">Mode Tim Ahli Verifikator (TABG PUPR)</span>
+              <p className="text-slate-600 text-[11px] mt-0.5">
+                Periksa bukti visual foto lapangan, validasi kelayakan teknis 8 komponen, dan tetapkan status verifikasi pada tombol ikon perisai (<span className="font-bold text-amber-800">Aksi &gt; Validasi</span>).
+              </p>
+            </div>
+          </div>
+          {pendingVerificationCount > 0 && (
+            <button
+              onClick={() => {
+                setSelectedVerification('Menunggu Verifikasi');
+                setCurrentPage(1);
+              }}
+              className="px-3 py-1.5 rounded-xl bg-amber-500 hover:bg-amber-400 text-slate-950 font-bold text-xs shrink-0 cursor-pointer shadow-xs transition-colors"
+            >
+              Tampilkan Antrean ({pendingVerificationCount})
+            </button>
+          )}
+        </div>
+      )}
+
+      {currentUser.role === 'admin_publik' && (
+        <div className="bg-sky-50 border border-sky-300 rounded-2xl p-3.5 flex items-center gap-3 text-xs shadow-xs">
+          <div className="w-9 h-9 rounded-xl bg-sky-500 text-white flex items-center justify-center shrink-0 font-bold shadow-xs">
+            <Eye className="w-5 h-5" />
+          </div>
+          <div>
+            <span className="font-bold text-slate-900">Portal Informasi & Keterbukaan Publik</span>
+            <p className="text-slate-600 text-[11px] mt-0.5">
+              Cari dan telusuri status klasifikasi kerusakan gedung pasca bencana secara transparan. Klik tombol mata untuk melihat formulir penilaian resmi & cetak laporan.
+            </p>
+          </div>
+        </div>
+      )}
+
       {/* Header Bar: Title, Count, and Global Actions */}
       <div className="flex flex-col sm:flex-row items-start sm:items-center justify-between gap-4 bg-white p-4 rounded-2xl border border-slate-200 shadow-xs">
         <div>
           <h2 className="text-lg font-bold text-slate-900 flex items-center gap-2">
-            <span>Daftar Penilaian Kerusakan Gedung</span>
+            <span>
+              {currentUser.role === 'admin_verifikator'
+                ? 'Verifikasi & Data Penilaian Kerusakan Gedung'
+                : currentUser.role === 'admin_publik'
+                ? 'Pencarian Status Kerusakan Bangunan'
+                : 'Daftar Penilaian Kerusakan Gedung'}
+            </span>
             <span className="text-xs px-2.5 py-0.5 rounded-full bg-slate-100 text-slate-700 font-semibold border border-slate-200">
-              {filteredAssessments.length} Data Ditemukan
+              {filteredAssessments.length} Data
             </span>
           </h2>
           <p className="text-xs text-slate-500 mt-0.5">
-            Kelola, perbarui, cetak formulir resmi PUPR, dan sinkronkan data ke Google Sheet
+            {currentUser.role === 'admin_verifikator'
+              ? 'Audit foto lapangan, verifikasi data teknis & status persetujuan bencana'
+              : currentUser.role === 'admin_publik'
+              ? 'Informasi resmi klasifikasi kerusakan bangunan standar Permen PUPR No. 22/2018'
+              : 'Kelola, perbarui, cetak formulir resmi PUPR, dan sinkronkan data ke Google Sheet'}
           </p>
         </div>
 
@@ -275,7 +331,7 @@ export const AssessmentTable: React.FC = () => {
           <button
             onClick={handleRefresh}
             title="Muat ulang tabel"
-            className="flex items-center gap-1.5 px-3 py-2 text-xs font-semibold text-slate-700 bg-slate-100 hover:bg-slate-200 rounded-xl border border-slate-200 transition-colors"
+            className="flex items-center gap-1.5 px-3 py-2 text-xs font-semibold text-slate-700 bg-slate-100 hover:bg-slate-200 rounded-xl border border-slate-200 transition-colors cursor-pointer"
           >
             <RefreshCw className={`w-3.5 h-3.5 ${isRefreshing ? 'animate-spin text-indigo-600' : ''}`} />
             <span>Refresh</span>
@@ -288,10 +344,10 @@ export const AssessmentTable: React.FC = () => {
             className="flex items-center gap-1.5 px-3 py-2 text-xs font-bold text-emerald-900 bg-emerald-100 hover:bg-emerald-200 rounded-xl border border-emerald-300 transition-colors cursor-pointer shadow-2xs"
           >
             <Download className="w-3.5 h-3.5 text-emerald-700" />
-            <span>Excel Multi-Sheet (Per Kec)</span>
+            <span>Excel Multi-Sheet</span>
           </button>
 
-          {/* Export to CSV / Google Sheet format */}
+          {/* Export to CSV */}
           <button
             onClick={() => exportAssessmentsToCSV(filteredAssessments)}
             title="Download file CSV untuk Google Sheet / Excel"
@@ -316,14 +372,19 @@ export const AssessmentTable: React.FC = () => {
             </a>
           )}
 
-          {/* Add New Assessment */}
-          <button
-            onClick={() => setActiveTab('input_baru')}
-            className="flex items-center gap-1.5 px-3.5 py-2 text-xs font-bold text-slate-950 bg-amber-500 hover:bg-amber-400 rounded-xl shadow-xs transition-colors ml-auto sm:ml-0"
-          >
-            <Plus className="w-4 h-4 stroke-[3]" />
-            <span>Input Baru</span>
-          </button>
+          {/* Add New Assessment (Hidden for Public) */}
+          {currentUser.role !== 'admin_publik' && (
+            <button
+              onClick={() => {
+                setSelectedAssessmentForEdit(null);
+                setActiveTab('input_baru');
+              }}
+              className="flex items-center gap-1.5 px-3.5 py-2 text-xs font-bold text-slate-950 bg-amber-500 hover:bg-amber-400 rounded-xl shadow-xs transition-colors ml-auto sm:ml-0 cursor-pointer"
+            >
+              <Plus className="w-4 h-4 stroke-[3]" />
+              <span>Input Baru</span>
+            </button>
+          )}
         </div>
       </div>
 
@@ -719,24 +780,26 @@ export const AssessmentTable: React.FC = () => {
                           </span>
                         )}
 
-                        {/* Edit Button */}
-                        <button
-                          onClick={() => {
-                            if (!canEdit) {
-                              showToast(
-                                'Akses ditolak: Anda hanya dapat mengedit survei yang Anda buat, kecuali Super Admin/Admin.',
-                                'error'
-                              );
-                              return;
-                            }
-                            setSelectedAssessmentForEdit(item);
-                            setActiveTab('input_baru');
-                          }}
-                          title="Edit Penilaian"
-                          className="p-1.5 rounded-lg bg-slate-100 hover:bg-slate-200 text-slate-700 border border-slate-200 transition-colors"
-                        >
-                          <Edit className="w-3.5 h-3.5" />
-                        </button>
+                        {/* Edit Button (Hidden for Public) */}
+                        {currentUser.role !== 'admin_publik' && (
+                          <button
+                            onClick={() => {
+                              if (!canEdit) {
+                                showToast(
+                                  'Akses ditolak: Anda hanya dapat mengedit survei yang Anda buat, kecuali Super Admin/Admin.',
+                                  'error'
+                                );
+                                return;
+                              }
+                              setSelectedAssessmentForEdit(item);
+                              setActiveTab('input_baru');
+                            }}
+                            title="Edit Penilaian"
+                            className="p-1.5 rounded-lg bg-slate-100 hover:bg-slate-200 text-slate-700 border border-slate-200 transition-colors cursor-pointer"
+                          >
+                            <Edit className="w-3.5 h-3.5" />
+                          </button>
+                        )}
 
                         {/* Update / Verify Button */}
                         {canVerify && (
@@ -747,29 +810,24 @@ export const AssessmentTable: React.FC = () => {
                               setVerifyNotesInput(item.verificationNotes || '');
                             }}
                             title="Update Status Validasi Teknis"
-                            className="p-1.5 rounded-lg bg-amber-50 hover:bg-amber-100 text-amber-700 border border-amber-200 transition-colors"
+                            className="p-1.5 rounded-lg bg-amber-50 hover:bg-amber-100 text-amber-700 border border-amber-200 transition-colors cursor-pointer"
                           >
                             <ShieldCheck className="w-3.5 h-3.5" />
                           </button>
                         )}
 
-                        {/* Delete Button */}
-                        <button
-                          onClick={() => {
-                            if (!canDelete) {
-                              showToast(
-                                'Akses ditolak: Hanya Super Admin dan Admin yang dapat menghapus survei.',
-                                'error'
-                              );
-                              return;
-                            }
-                            setItemToDelete(item);
-                          }}
-                          title="Hapus Data"
-                          className="p-1.5 rounded-lg bg-rose-50 hover:bg-rose-100 text-rose-700 border border-rose-200 transition-colors"
-                        >
-                          <Trash2 className="w-3.5 h-3.5" />
-                        </button>
+                        {/* Delete Button (Super Admin & Admin Only) */}
+                        {canDelete && (
+                          <button
+                            onClick={() => {
+                              setItemToDelete(item);
+                            }}
+                            title="Hapus Data"
+                            className="p-1.5 rounded-lg bg-rose-50 hover:bg-rose-100 text-rose-700 border border-rose-200 transition-colors cursor-pointer"
+                          >
+                            <Trash2 className="w-3.5 h-3.5" />
+                          </button>
+                        )}
                       </div>
                     </td>
                   </tr>

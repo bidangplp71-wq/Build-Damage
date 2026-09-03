@@ -3,6 +3,7 @@ import {
   UserAccount,
   UserRole,
   ROLE_LIMITS,
+  ROLE_NAV_CONFIGS,
   BuildingAssessment,
   Kecamatan,
   Desa,
@@ -190,8 +191,17 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
     }
   });
 
-  // UI state
-  const [activeTab, setActiveTab] = useState<string>('dashboard');
+  // UI state initialized based on user role
+  const [activeTab, setActiveTab] = useState<string>(() => {
+    try {
+      const savedUid = localStorage.getItem(STORAGE_KEYS.CURRENT_USER_ID);
+      const found = users.find((u) => u.id === savedUid);
+      const role = found ? found.role : users[0]?.role || 'super_admin';
+      return ROLE_NAV_CONFIGS[role]?.defaultTab || 'dashboard';
+    } catch {
+      return 'dashboard';
+    }
+  });
   const [selectedAssessmentForDetail, setSelectedAssessmentForDetail] = useState<BuildingAssessment | null>(null);
   const [selectedAssessmentForEdit, setSelectedAssessmentForEdit] = useState<BuildingAssessment | null>(null);
   const [toastMessage, setToastMessage] = useState<{ type: 'success' | 'error' | 'info'; text: string } | null>(null);
@@ -347,7 +357,10 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
     const existing = users.find((u) => u.role === role);
     if (existing) {
       setCurrentUser(existing);
-      showToast(`Beralih ke peran: ${ROLE_LIMITS[role].title} (${existing.name})`, 'info');
+      setSelectedAssessmentForEdit(null);
+      const targetTab = ROLE_NAV_CONFIGS[role]?.defaultTab || 'dashboard';
+      setActiveTab(targetTab);
+      showToast(`Beralih ke peran: ${ROLE_LIMITS[role].title} (${existing.name}) — Tampilan disesuaikan`, 'info');
     } else {
       showToast(`Belum ada akun terdaftar dengan peran ${ROLE_LIMITS[role].title}`, 'error');
     }

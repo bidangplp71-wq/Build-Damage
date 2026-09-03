@@ -47,6 +47,26 @@ export const Header: React.FC<HeaderProps> = ({ onToggleMobileNav }) => {
   };
 
   const getTabInfo = () => {
+    // If in role-specific mode, give contextual tab titles
+    if (currentUser.role === 'admin_user' && (activeTab === 'input_baru' || activeTab === 'tambah')) {
+      return {
+        title: 'Formulir Survei Bangunan Lapangan (PUPR)',
+        subtitle: 'Mode Surveyor: Pengisian cepat 8 komponen fisik pasca bencana, tersimpan langsung ke Google Sheet',
+      };
+    }
+    if (currentUser.role === 'admin_verifikator' && activeTab === 'penilaian') {
+      return {
+        title: 'Verifikasi & Validasi Hasil Survei (TABG PUPR)',
+        subtitle: 'Mode Verifikator: Periksa bukti visual foto kerusakan, validasi komponen, dan berikan persetujuan teknis',
+      };
+    }
+    if (currentUser.role === 'admin_publik') {
+      return {
+        title: activeTab === 'dashboard' ? 'Portal Informasi & Statistik Bencana' : 'Pencarian Status Bangunan Publik',
+        subtitle: 'Mode Publik: Rekapitulasi kerusakan wilayah & keterbukaan data pasca bencana daerah',
+      };
+    }
+
     switch (activeTab) {
       case 'dashboard':
         return {
@@ -69,6 +89,11 @@ export const Header: React.FC<HeaderProps> = ({ onToggleMobileNav }) => {
           title: 'Manajemen Wilayah (Kecamatan & Desa)',
           subtitle: 'Pengelolaan hierarki wilayah dan dukungan pemekaran desa/kecamatan baru',
         };
+      case 'dukcapil':
+        return {
+          title: 'Data Dukcapil (Kependudukan)',
+          subtitle: 'Lookup NIK/KK, Excel, PDF & GSheet',
+        };
       case 'manajemen_user':
       case 'users':
         return {
@@ -79,7 +104,7 @@ export const Header: React.FC<HeaderProps> = ({ onToggleMobileNav }) => {
       case 'googlesheets':
         return {
           title: 'Penyimpanan Langsung Google Sheet',
-          subtitle: 'Data penilaian gedung langsung tercatat otomatis ke spreadsheet tanpa perlu sinkronisasi manual',
+          subtitle: 'Data penilaian gedung langsung tercatat otomatis multi-sheet per kecamatan tanpa perlu sinkronisasi manual',
         };
       case 'firebase_shield':
       case 'firebase':
