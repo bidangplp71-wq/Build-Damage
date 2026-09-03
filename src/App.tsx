@@ -30,19 +30,19 @@ const MainLayout: React.FC = () => {
 
   const [mobileNavOpen, setMobileNavOpen] = useState(false);
 
-  if (!isLoggedIn) {
-    return <LoginScreen />;
-  }
-
   // Tab guard: Ensure user cannot access tabs outside their role
   const roleConfig = ROLE_NAV_CONFIGS[currentUser.role];
   const isTabAllowed = roleConfig?.allowedTabs?.includes(activeTab);
 
   useEffect(() => {
-    if (!isTabAllowed && roleConfig) {
+    if (isLoggedIn && !isTabAllowed && roleConfig) {
       setActiveTab(roleConfig.defaultTab);
     }
-  }, [currentUser.role, activeTab, isTabAllowed, roleConfig, setActiveTab]);
+  }, [isLoggedIn, currentUser.role, activeTab, isTabAllowed, roleConfig, setActiveTab]);
+
+  if (!isLoggedIn) {
+    return <LoginScreen />;
+  }
 
   return (
     <div className="min-h-screen bg-slate-100 flex font-sans text-slate-900 antialiased selection:bg-amber-500 selection:text-slate-950">
