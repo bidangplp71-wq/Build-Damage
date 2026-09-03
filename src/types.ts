@@ -376,6 +376,8 @@ export interface GoogleSheetConfig {
   spreadsheetUrl?: string;
   webhookUrl: string;
   sheetName: string;
+  splitByKecamatan?: boolean; // Fitur: Setiap Kecamatan memiliki Tab Sheet tersendiri
+  includeMasterSummarySheet?: boolean; // Tetap sertakan Sheet Rekap Gabungan Semua Kecamatan
   autoSync: boolean;
   directSaveEnabled: boolean;
   lastTestedAt?: string;

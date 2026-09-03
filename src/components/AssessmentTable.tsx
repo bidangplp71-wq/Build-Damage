@@ -9,7 +9,7 @@ import {
   BUILDING_CATEGORY_CONFIGS,
 } from '../types';
 import { formatRupiah } from '../utils/puprCalculations';
-import { exportAssessmentsToCSV } from '../services/googleSheetsService';
+import { exportAssessmentsToCSV, exportAssessmentsToExcelMultiSheet } from '../services/googleSheetsService';
 import {
   Search,
   Filter,
@@ -281,14 +281,24 @@ export const AssessmentTable: React.FC = () => {
             <span>Refresh</span>
           </button>
 
+          {/* Export to Excel Multi-Sheet per Kecamatan */}
+          <button
+            onClick={() => exportAssessmentsToExcelMultiSheet(filteredAssessments, kecamatans)}
+            title="Download file Excel (.xlsx) dengan 1 Tab per Kecamatan + Ringkasan Master"
+            className="flex items-center gap-1.5 px-3 py-2 text-xs font-bold text-emerald-900 bg-emerald-100 hover:bg-emerald-200 rounded-xl border border-emerald-300 transition-colors cursor-pointer shadow-2xs"
+          >
+            <Download className="w-3.5 h-3.5 text-emerald-700" />
+            <span>Excel Multi-Sheet (Per Kec)</span>
+          </button>
+
           {/* Export to CSV / Google Sheet format */}
           <button
             onClick={() => exportAssessmentsToCSV(filteredAssessments)}
             title="Download file CSV untuk Google Sheet / Excel"
-            className="flex items-center gap-1.5 px-3 py-2 text-xs font-semibold text-emerald-800 bg-emerald-50 hover:bg-emerald-100 rounded-xl border border-emerald-200 transition-colors"
+            className="flex items-center gap-1.5 px-3 py-2 text-xs font-semibold text-slate-700 bg-slate-100 hover:bg-slate-200 rounded-xl transition-colors cursor-pointer"
           >
             <Download className="w-3.5 h-3.5" />
-            <span>Ekspor CSV</span>
+            <span>CSV</span>
           </button>
 
           {/* Direct Google Sheet button */}

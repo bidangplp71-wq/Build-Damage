@@ -760,7 +760,7 @@ export const AssessmentForm: React.FC = () => {
               </span>
             </div>
             <p className="text-slate-600 text-[11px] mt-0.5">
-              Data penilaian gedung otomatis dikirim & langsung masuk ke tab Sheet <span className="font-bold text-emerald-900">"{googleSheetConfig.sheetName}"</span> begitu Anda klik Simpan.
+              Data penilaian gedung otomatis dikirim & langsung masuk ke tab Sheet <span className="font-bold text-emerald-900">Kecamatan masing-masing ("Kec. {kecamatans.find(k => k.id === kecamatanId)?.name || 'Kecamatan'}")</span> serta Master Rekapitulasi begitu Anda klik Simpan.
             </p>
           </div>
         </div>
