@@ -18,6 +18,7 @@ import {
   Sparkles,
   Search,
   Lock,
+  LogOut,
 } from 'lucide-react';
 
 interface NavigationProps {
@@ -35,6 +36,7 @@ export const Navigation: React.FC<NavigationProps> = ({ mobileOpen, onCloseMobil
     switchUserRole,
     getUserCountsByRole,
     setSelectedAssessmentForEdit,
+    lockSession,
   } = useApp();
 
   const [roleMenuOpen, setRoleMenuOpen] = React.useState(false);
@@ -413,6 +415,20 @@ export const Navigation: React.FC<NavigationProps> = ({ mobileOpen, onCloseMobil
                     </button>
                   );
                 })}
+              </div>
+
+              <div className="mt-2 pt-2 border-t border-slate-700/80 flex items-center justify-between px-1">
+                <span className="text-[10px] text-slate-400">Sesi Keamanan</span>
+                <button
+                  onClick={() => {
+                    setRoleMenuOpen(false);
+                    lockSession();
+                  }}
+                  className="text-rose-400 hover:text-rose-300 font-bold flex items-center gap-1.5 px-2.5 py-1 rounded-lg bg-rose-500/10 hover:bg-rose-500/20 text-xs transition-colors cursor-pointer"
+                >
+                  <LogOut className="w-3.5 h-3.5" />
+                  <span>Log Out</span>
+                </button>
               </div>
             </div>
           )}

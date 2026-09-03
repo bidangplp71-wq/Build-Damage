@@ -9,6 +9,7 @@ import {
   Building2,
   ExternalLink,
   PlusCircle,
+  LogOut,
 } from 'lucide-react';
 
 interface HeaderProps {
@@ -26,6 +27,7 @@ export const Header: React.FC<HeaderProps> = ({ onToggleMobileNav }) => {
     showToast,
     setSelectedAssessmentForEdit,
     googleSheetConfig,
+    lockSession,
   } = useApp();
 
   const [roleDropdownOpen, setRoleDropdownOpen] = React.useState(false);
@@ -249,9 +251,21 @@ export const Header: React.FC<HeaderProps> = ({ onToggleMobileNav }) => {
                   })}
                 </div>
 
-                <div className="mt-2 pt-2 border-t border-slate-800 text-[10px] text-slate-400 px-2 flex items-center gap-1">
-                  <ShieldCheck className="w-3.5 h-3.5 text-emerald-400" />
-                  <span>Aturan kuota & peran terlindungi</span>
+                <div className="mt-2 pt-2 border-t border-slate-800 text-[10px] text-slate-400 px-2 flex items-center justify-between">
+                  <div className="flex items-center gap-1">
+                    <ShieldCheck className="w-3.5 h-3.5 text-emerald-400" />
+                    <span>Terlindungi</span>
+                  </div>
+                  <button
+                    onClick={() => {
+                      setRoleDropdownOpen(false);
+                      lockSession();
+                    }}
+                    className="text-rose-400 hover:text-rose-300 font-bold flex items-center gap-1 px-2 py-1 rounded bg-rose-500/10 hover:bg-rose-500/20 transition-colors cursor-pointer"
+                  >
+                    <LogOut className="w-3 h-3" />
+                    <span>Log Out</span>
+                  </button>
                 </div>
               </div>
             )}
