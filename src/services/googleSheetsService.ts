@@ -3,7 +3,7 @@ import { BuildingAssessment, GoogleSheetConfig, Kecamatan, UserActivityLog } fro
 import { formatRupiah } from '../utils/puprCalculations';
 
 export interface GoogleSheetRowPayload {
-  action: 'insert' | 'update' | 'delete' | 'sync_all' | 'ping' | 'sync_activity_logs' | 'log_user_access';
+  action: 'insert' | 'update' | 'delete' | 'sync_all' | 'ping' | 'sync_activity_logs' | 'log_user_access' | 'test_drive';
   sheetName: string;
   logSheetName?: string;
   kecamatanSheetName?: string;
@@ -33,6 +33,44 @@ export function extractSpreadsheetId(url?: string): string | null {
   if (!url) return null;
   const match = url.match(/\/spreadsheets\/d\/([a-zA-Z0-9-_]+)/);
   return match ? match[1] : null;
+}
+
+/**
+ * Extracts Google Drive Folder ID from various URL formats or returns the raw ID
+ * Supports:
+ * - https://drive.google.com/drive/folders/1BxiMVs0XRA5nFM...
+ * - https://drive.google.com/drive/u/0/folders/1BxiMVs0XRA5nFM...
+ * - https://drive.google.com/drive/u/1/folders/1BxiMVs0XRA5nFM...
+ * - https://drive.google.com/open?id=1BxiMVs0XRA5nFM...
+ * - Raw ID: 1BxiMVs0XRA5nFM...
+ */
+export function extractDriveFolderId(input?: string): string {
+  if (!input) return '';
+  const str = input.trim();
+  // If already clean ID (at least 15 alphanumeric, hyphens or underscores, no slashes)
+  if (/^[a-zA-Z0-9_-]{15,}$/.test(str)) {
+    return str;
+  }
+  // Match /folders/([a-zA-Z0-9_-]+)
+  const folderMatch = str.match(/\/folders\/([a-zA-Z0-9_-]+)/);
+  if (folderMatch && folderMatch[1]) {
+    return folderMatch[1];
+  }
+  // Match ?id=([a-zA-Z0-9_-]+)
+  const idMatch = str.match(/[?&]id=([a-zA-Z0-9_-]+)/);
+  if (idMatch && idMatch[1]) {
+    return idMatch[1];
+  }
+  return str.replace(/^https?:\/\/[^\/]+\//, '').split('?')[0].replace(/^folders\//, '').replace(/\/+$/, '').trim();
+}
+
+/**
+ * Returns full Google Drive folder URL from a folder ID or URL
+ */
+export function getDriveFolderUrl(idOrUrl?: string): string {
+  if (!idOrUrl) return '';
+  const id = extractDriveFolderId(idOrUrl);
+  return id ? `https://drive.google.com/drive/folders/${id}` : '';
 }
 
 /**
@@ -108,7 +146,7 @@ export async function directSaveToGoogleSheet(
   assessment: BuildingAssessment,
   config: GoogleSheetConfig,
   action: 'insert' | 'update' | 'delete' = 'insert'
-): Promise<{ success: boolean; message: string }> {
+): Promise<{ success: boolean; message: string; folderUrl?: string }> {
   if (!config.webhookUrl || !config.webhookUrl.startsWith('http')) {
     return {
       success: false,
@@ -116,9 +154,18 @@ export async function directSaveToGoogleSheet(
     };
   }
 
+  // Detect if user mistakenly pasted a Google Drive link in the webhook field
+  if (config.webhookUrl.includes('drive.google.com')) {
+    return {
+      success: false,
+      message: 'URL Webhook keliru: Anda memasukkan tautan Google Drive di kolom URL Webhook. Kolom Webhook memerlukan URL Web App Google Apps Script (https://script.google.com/macros/s/.../exec).',
+    };
+  }
+
   const rowData = formatAssessmentForGoogleSheet(assessment);
   const spreadsheetId = extractSpreadsheetId(config.spreadsheetUrl);
   const kecSheetName = sanitizeSheetName(`Kec. ${assessment.kecamatanName || 'Lainnya'}`);
+  const cleanFolderId = extractDriveFolderId(config.driveFolderId);
 
   const payload: GoogleSheetRowPayload = {
     action,
@@ -138,7 +185,7 @@ export async function directSaveToGoogleSheet(
       dataBase64: p.url && p.url.startsWith('data:') ? p.url : undefined,
     })) : [],
     savePhotosToDrive: config.savePhotosToDrive !== false,
-    driveFolderId: config.driveFolderId || undefined,
+    driveFolderId: cleanFolderId || undefined,
     timestamp: new Date().toISOString(),
   };
 
@@ -157,9 +204,12 @@ export async function directSaveToGoogleSheet(
       ? `tab "${kecSheetName}" & Master Sheet` 
       : `tab "${config.sheetName || 'Data_Kerusakan_PUPR'}"`;
 
+    const folderUrl = cleanFolderId ? `https://drive.google.com/drive/folders/${cleanFolderId}` : undefined;
+
     return {
       success: true,
-      message: `Data gedung "${assessment.buildingName}" langsung tersimpan di Google Sheet (${destination})!`,
+      message: `Data gedung "${assessment.buildingName}" langsung tersimpan di Google Sheet (${destination}) & foto dikirim ke Google Drive!`,
+      folderUrl,
     };
   } catch (err: any) {
     console.error('Error saving directly to Google Sheet:', err);
@@ -168,6 +218,102 @@ export async function directSaveToGoogleSheet(
       message: `Gagal menyimpan langsung ke Google Sheet: ${err.message || 'Koneksi terputus'}`,
     };
   }
+}
+
+/**
+ * Test photo upload directly to Google Drive via Apps Script webhook
+ */
+export async function testDrivePhotoUpload(
+  config: GoogleSheetConfig
+): Promise<{ success: boolean; message: string; folderUrl?: string }> {
+  if (!config.webhookUrl || !config.webhookUrl.startsWith('http')) {
+    return {
+      success: false,
+      message: 'URL Webhook Google Apps Script belum diisi.',
+    };
+  }
+
+  if (config.webhookUrl.includes('drive.google.com')) {
+    return {
+      success: false,
+      message: 'URL Webhook keliru: Anda memasukkan tautan Google Drive di kolom Webhook. Kolom Webhook harus berisi URL Web App Apps Script (https://script.google.com/macros/s/.../exec).',
+    };
+  }
+
+  const cleanFolderId = extractDriveFolderId(config.driveFolderId);
+  const sampleBase64 = 'data:image/png;base64,iVBORw0KGgoAAAANSUhEUgAAAAoAAAAKCAYAAACNMs+9AAAAFUlEQVR42mNk+M9QzwAEjDAGYzAAAO9+BQJ3f5Y8AAAAAElFTkSuQmCC';
+
+  const payload: GoogleSheetRowPayload = {
+    action: 'test_drive',
+    sheetName: config.sheetName || 'Data_Kerusakan_PUPR',
+    driveFolderId: cleanFolderId || undefined,
+    savePhotosToDrive: true,
+    data: {
+      'No Registrasi': 'TEST-001',
+      'Nama Bangunan': 'Gedung Uji Coba SIM-PKBG',
+      'Kecamatan': 'Uji Coba',
+    },
+    photos: [
+      {
+        id: 'test_photo_sample',
+        caption: 'Foto Uji Coba Integrasi Google Drive',
+        damageLocation: 'Uji Coba Sistem SIM-PKBG',
+        dataBase64: sampleBase64,
+      }
+    ],
+    timestamp: new Date().toISOString(),
+  };
+
+  try {
+    await fetch(config.webhookUrl, {
+      method: 'POST',
+      mode: 'no-cors',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify(payload),
+    });
+
+    const folderUrl = cleanFolderId ? `https://drive.google.com/drive/folders/${cleanFolderId}` : undefined;
+    return {
+      success: true,
+      message: 'Uji coba pengunggahan foto berhasil dikirim ke Google Apps Script! Periksa Google Drive Anda.',
+      folderUrl,
+    };
+  } catch (err: any) {
+    return {
+      success: false,
+      message: `Gagal menghubungi Webhook: ${err.message || 'Koneksi gagal'}`,
+    };
+  }
+}
+
+/**
+ * Sync individual assessment photos to Google Drive
+ */
+export async function syncAssessmentPhotosToDrive(
+  assessment: BuildingAssessment,
+  config: GoogleSheetConfig
+): Promise<{ success: boolean; message: string; folderUrl?: string }> {
+  if (!config.webhookUrl || !config.webhookUrl.startsWith('http')) {
+    return {
+      success: false,
+      message: 'URL Webhook Google Apps Script belum dikonfigurasi.',
+    };
+  }
+  if (!assessment.photos || assessment.photos.length === 0) {
+    return {
+      success: false,
+      message: 'Gedung ini belum memiliki dokumentasi foto untuk diunggah.',
+    };
+  }
+
+  const res = await directSaveToGoogleSheet(assessment, config, 'update');
+  const cleanFolderId = extractDriveFolderId(config.driveFolderId);
+  const folderUrl = cleanFolderId ? `https://drive.google.com/drive/folders/${cleanFolderId}` : undefined;
+  return {
+    success: res.success,
+    message: res.success ? `Foto gedung "${assessment.buildingName}" berhasil dikirimkan ke Google Drive!` : res.message,
+    folderUrl,
+  };
 }
 
 /**
@@ -361,6 +507,21 @@ function doPost(e) {
       })).setMimeType(ContentService.MimeType.JSON);
     }
     
+    // ACTION 2D: TEST PHOTO UPLOAD TO GOOGLE DRIVE
+    if (action === 'test_drive') {
+      var testPhotos = json.photos || [{
+        damageLocation: "Uji Coba Sistem SIM-PKBG",
+        caption: "Foto Uji Coba Integrasi Google Drive",
+        dataBase64: "data:image/png;base64,iVBORw0KGgoAAAANSUhEUgAAAAoAAAAKCAYAAACNMs+9AAAAFUlEQVR42mNk+M9QzwAEjDAGYzAAAO9+BQJ3f5Y8AAAAAElFTkSuQmCC"
+      }];
+      var testUrl = savePhotosToGoogleDrive(testPhotos, "TEST-001", "Gedung Uji Coba SIM-PKBG", json.driveFolderId);
+      return ContentService.createTextOutput(JSON.stringify({
+        status: "success",
+        message: "Perintah uji coba pengunggahan foto ke Google Drive berhasil diproses!",
+        driveFolderUrl: testUrl
+      })).setMimeType(ContentService.MimeType.JSON);
+    }
+
     // ACTION 3: INSERT / UPDATE SINGLE ROW (LANGSUNG DARI FORMULIR SURVEI)
     var rowData = json.data;
     if (!rowData) {
@@ -599,53 +760,95 @@ function createStatisticsSummarySheet(ss, allRows) {
 }
 
 /**
+ * Ekstraksi ID Folder Google Drive dari URL atau teks input
+ */
+function extractDriveFolderIdFromScript(input) {
+  if (!input) return "";
+  var str = ("" + input).trim();
+  if (/^[a-zA-Z0-9_-]{15,}$/.test(str)) {
+    return str;
+  }
+  var m1 = str.match(/\/folders\/([a-zA-Z0-9_-]+)/);
+  if (m1 && m1[1]) return m1[1];
+  var m2 = str.match(/[?&]id=([a-zA-Z0-9_-]+)/);
+  if (m2 && m2[1]) return m2[1];
+  return str.replace(/^https?:\/\/[^\/]+\//, '').split('?')[0].replace(/^folders\//, '').replace(/\/+$/, '').trim();
+}
+
+/**
  * Menyimpan dokumentasi foto ke Google Drive dalam folder terstruktur per bangunan
  */
 function savePhotosToGoogleDrive(photos, regCode, buildingName, parentFolderId) {
   if (!photos || photos.length === 0) return "";
   try {
-    var parentFolder;
-    if (parentFolderId) {
+    var parentFolder = null;
+    var cleanId = extractDriveFolderIdFromScript(parentFolderId);
+    
+    if (cleanId) {
       try {
-        var cleanId = parentFolderId.replace(/https:\\/\\/drive\\.google\\.com\\/drive\\/folders\\//g, '').split('?')[0].trim();
         parentFolder = DriveApp.getFolderById(cleanId);
-      } catch(e) {}
-    }
-    if (!parentFolder) {
-      var rootFolders = DriveApp.getFoldersByName("SIM-PKBG PUPR - Dokumentasi Foto Kerusakan");
-      if (rootFolders.hasNext()) {
-        parentFolder = rootFolders.next();
-      } else {
-        parentFolder = DriveApp.createFolder("SIM-PKBG PUPR - Dokumentasi Foto Kerusakan");
-        try { parentFolder.setSharing(DriveApp.Access.ANYONE_WITH_LINK, DriveApp.Permission.VIEW); } catch(e) {}
+      } catch(errFolder) {
+        Logger.log("Folder kustom dengan ID '" + cleanId + "' tidak ditemukan atau belum diberi izin: " + errFolder);
       }
     }
     
-    // Buat / dapatkan subfolder untuk gedung terkait
+    // Jika folder induk tidak ditemukan / tidak diisi, gunakan atau buat folder utama SIM-PKBG
+    if (!parentFolder) {
+      var defaultFolderName = "SIM-PKBG PUPR - Dokumentasi Foto Kerusakan";
+      var rootFolders = DriveApp.getFoldersByName(defaultFolderName);
+      if (rootFolders.hasNext()) {
+        parentFolder = rootFolders.next();
+      } else {
+        parentFolder = DriveApp.createFolder(defaultFolderName);
+        try { parentFolder.setSharing(DriveApp.Access.ANYONE_WITH_LINK, DriveApp.Permission.VIEW); } catch(eShare) {}
+      }
+    }
+    
+    // Buat / dapatkan subfolder khusus untuk gedung terkait
     var safeBuilding = (buildingName || "Gedung").replace(/[:\\\\/?*\\[\\]]/g, "_").trim();
     var folderName = safeBuilding + (regCode ? (" - " + regCode) : "");
     var subFolders = parentFolder.getFoldersByName(folderName);
     var targetFolder = subFolders.hasNext() ? subFolders.next() : parentFolder.createFolder(folderName);
-    try { targetFolder.setSharing(DriveApp.Access.ANYONE_WITH_LINK, DriveApp.Permission.VIEW); } catch(e) {}
+    try { targetFolder.setSharing(DriveApp.Access.ANYONE_WITH_LINK, DriveApp.Permission.VIEW); } catch(eSub) {}
     
     for (var i = 0; i < photos.length; i++) {
       var p = photos[i];
-      var base64Data = p.dataBase64 || p.url;
-      if (base64Data && base64Data.indexOf("data:") === 0) {
+      var base64Data = p.dataBase64 || p.url || "";
+      var decoded = null;
+      var contentType = "image/jpeg";
+      
+      if (base64Data.indexOf("data:") === 0) {
         var parts = base64Data.split(",");
         if (parts.length > 1) {
-          var contentType = parts[0].split(":")[1].split(";")[0] || "image/jpeg";
-          var decoded = Utilities.base64Decode(parts[1]);
-          var safeLoc = (p.damageLocation || ("Foto_" + (i + 1))).replace(/[:\\\\/?*\\[\\]]/g, "_");
-          var fileName = ("0" + (i + 1)).slice(-2) + "_" + safeLoc + ".jpg";
-          
-          var existingFiles = targetFolder.getFilesByName(fileName);
-          if (existingFiles.hasNext()) {
-            existingFiles.next().setContent(decoded);
-          } else {
-            var blob = Utilities.newBlob(decoded, contentType, fileName);
-            targetFolder.createFile(blob);
+          contentType = parts[0].split(":")[1].split(";")[0] || "image/jpeg";
+          decoded = Utilities.base64Decode(parts[1]);
+        }
+      } else if (base64Data.indexOf("http") === 0) {
+        try {
+          var resp = UrlFetchApp.fetch(base64Data, { muteHttpExceptions: true });
+          if (resp.getResponseCode() === 200) {
+            decoded = resp.getBlob().getBytes();
+            contentType = resp.getBlob().getContentType() || "image/jpeg";
           }
+        } catch(eFetch) {}
+      } else if (base64Data.length > 50 && !/^\s*http/.test(base64Data)) {
+        try {
+          decoded = Utilities.base64Decode(base64Data);
+        } catch(eDec) {}
+      }
+      
+      if (decoded) {
+        var safeLoc = (p.damageLocation || ("Foto_" + (i + 1))).replace(/[:\\\\/?*\\[\\]]/g, "_");
+        var fileName = ("0" + (i + 1)).slice(-2) + "_" + safeLoc + ".jpg";
+        var existingFiles = targetFolder.getFilesByName(fileName);
+        if (existingFiles.hasNext()) {
+          var file = existingFiles.next();
+          file.setContent(decoded);
+          try { file.setSharing(DriveApp.Access.ANYONE_WITH_LINK, DriveApp.Permission.VIEW); } catch(e) {}
+        } else {
+          var blob = Utilities.newBlob(decoded, contentType, fileName);
+          var newFile = targetFolder.createFile(blob);
+          try { newFile.setSharing(DriveApp.Access.ANYONE_WITH_LINK, DriveApp.Permission.VIEW); } catch(e) {}
         }
       }
     }

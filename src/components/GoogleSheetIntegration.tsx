@@ -5,6 +5,9 @@ import {
   exportAssessmentsToCSV,
   exportAssessmentsToExcelMultiSheet,
   extractSpreadsheetId,
+  extractDriveFolderId,
+  getDriveFolderUrl,
+  testDrivePhotoUpload,
   groupAssessmentsByKecamatan,
 } from '../services/googleSheetsService';
 import {
@@ -22,6 +25,10 @@ import {
   Layers,
   MapPin,
   Check,
+  AlertTriangle,
+  Image,
+  FolderCheck,
+  UploadCloud,
 } from 'lucide-react';
 
 export const GoogleSheetIntegration: React.FC = () => {
@@ -43,6 +50,8 @@ export const GoogleSheetIntegration: React.FC = () => {
   const [driveFolderIdInput, setDriveFolderIdInput] = useState(googleSheetConfig.driveFolderId || '');
 
   const [isTesting, setIsTesting] = useState(false);
+  const [isTestingDrive, setIsTestingDrive] = useState(false);
+  const [testDriveResult, setTestDriveResult] = useState<{ success: boolean; message: string; folderUrl?: string } | null>(null);
   const [isSyncingAll, setIsSyncingAll] = useState(false);
   const [copiedScript, setCopiedScript] = useState(false);
 
@@ -83,6 +92,11 @@ export const GoogleSheetIntegration: React.FC = () => {
       return;
     }
 
+    if (webhookUrlInput.includes('drive.google.com')) {
+      showToast('URL Webhook tidak boleh berupa link Google Drive!', 'error');
+      return;
+    }
+
     setIsTesting(true);
     try {
       // Test direct save with ping payload
@@ -115,6 +129,44 @@ export const GoogleSheetIntegration: React.FC = () => {
       showToast('Gagal menghubungi Google Sheet: ' + err.message, 'error');
     } finally {
       setIsTesting(false);
+    }
+  };
+
+  const handleTestDriveUpload = async () => {
+    const hookUrl = webhookUrlInput.trim();
+    if (!hookUrl) {
+      showToast('Masukkan URL Webhook Google Apps Script terlebih dahulu', 'error');
+      return;
+    }
+    if (hookUrl.includes('drive.google.com')) {
+      showToast('URL Webhook keliru: Anda menempelkan link Google Drive di kolom Webhook! Pindahkan ke kolom Folder Drive.', 'error');
+      return;
+    }
+
+    setIsTestingDrive(true);
+    setTestDriveResult(null);
+    try {
+      const res = await testDrivePhotoUpload({
+        ...googleSheetConfig,
+        webhookUrl: hookUrl,
+        driveFolderId: driveFolderIdInput.trim() || undefined,
+        savePhotosToDrive: true,
+      });
+      setTestDriveResult(res);
+      if (res.success) {
+        showToast(res.message, 'success');
+      } else {
+        showToast(res.message, 'error');
+      }
+    } catch (err: any) {
+      const msg = 'Gagal menghubungi Webhook: ' + (err.message || 'Koneksi gagal');
+      setTestDriveResult({
+        success: false,
+        message: msg,
+      });
+      showToast(msg, 'error');
+    } finally {
+      setIsTestingDrive(false);
     }
   };
 
@@ -329,6 +381,30 @@ export const GoogleSheetIntegration: React.FC = () => {
               required
               className="w-full px-3 py-2 rounded-xl border border-slate-200 font-mono text-slate-900 bg-slate-50 focus:bg-white focus:outline-hidden focus:ring-2 focus:ring-emerald-500"
             />
+            {webhookUrlInput.includes('drive.google.com') && (
+              <div className="mt-2 p-3 bg-amber-50 border border-amber-300 rounded-xl text-xs text-amber-900 flex flex-col sm:flex-row sm:items-center justify-between gap-2.5">
+                <div className="flex items-start gap-2">
+                  <AlertTriangle className="w-4 h-4 text-amber-600 shrink-0 mt-0.5" />
+                  <div>
+                    <span className="font-bold block">Tautan Google Drive Terdeteksi di Kolom Webhook!</span>
+                    <span className="text-[11px] text-amber-800">
+                      Kolom ini memerlukan URL Web App Google Apps Script (<code>https://script.google.com/macros/s/.../exec</code>). Tautan Google Drive seharusnya dimasukkan pada kolom Folder Drive di bawah.
+                    </span>
+                  </div>
+                </div>
+                <button
+                  type="button"
+                  onClick={() => {
+                    setDriveFolderIdInput(webhookUrlInput);
+                    setWebhookUrlInput(googleSheetConfig.webhookUrl?.includes('drive.google.com') ? '' : (googleSheetConfig.webhookUrl || ''));
+                    showToast('Tautan Google Drive dipindahkan ke kolom Folder Google Drive!', 'info');
+                  }}
+                  className="px-3 py-1.5 bg-amber-600 hover:bg-amber-700 text-white rounded-lg font-bold text-xs shrink-0 cursor-pointer shadow-xs"
+                >
+                  Pindahkan ke Kolom Drive
+                </button>
+              </div>
+            )}
             <p className="text-[11px] text-slate-500 mt-1">
               URL Webhook Aplikasi Web dari Google Apps Script (akses: "Siapa saja / Anyone").
             </p>
@@ -432,19 +508,85 @@ export const GoogleSheetIntegration: React.FC = () => {
 
               <div>
                 <label className="block font-semibold text-slate-700 mb-1">
-                  ID / Link Folder Induk Google Drive (Opsional)
+                  ID / Link Folder Induk Google Drive (Penyimpanan Foto)
                 </label>
                 <input
                   type="text"
                   value={driveFolderIdInput}
                   onChange={(e) => setDriveFolderIdInput(e.target.value)}
-                  placeholder="Kosongkan jika ingin dibuatkan otomatis: 'SIM-PKBG PUPR - Dokumentasi Foto Kerusakan'"
+                  placeholder="https://drive.google.com/drive/folders/... atau ID Folder"
                   className="w-full px-3 py-2 rounded-xl border border-slate-200 font-mono text-slate-900 bg-white focus:outline-hidden focus:ring-2 focus:ring-indigo-500"
                 />
                 <p className="text-[10px] text-slate-500 mt-1">
                   Bila dikosongkan, skrip akan otomatis membuat folder induk bernama <strong>SIM-PKBG PUPR - Dokumentasi Foto Kerusakan</strong> di Google Drive Anda.
                 </p>
+
+                {driveFolderIdInput && (
+                  <div className="mt-2 p-2.5 bg-indigo-100/70 border border-indigo-200 rounded-lg flex flex-wrap items-center justify-between gap-2 text-xs">
+                    <div className="flex items-center gap-1.5 text-indigo-950">
+                      <FolderCheck className="w-4 h-4 text-indigo-600 shrink-0" />
+                      <span className="font-mono text-[11px]">ID Folder Terdeteksi: <strong>{extractDriveFolderId(driveFolderIdInput) || 'Format Belum Tepat'}</strong></span>
+                    </div>
+                    {getDriveFolderUrl(driveFolderIdInput) && (
+                      <a
+                        href={getDriveFolderUrl(driveFolderIdInput)}
+                        target="_blank"
+                        rel="noopener noreferrer"
+                        className="inline-flex items-center gap-1 text-[11px] font-bold text-indigo-700 hover:text-indigo-900 hover:underline"
+                      >
+                        <ExternalLink className="w-3.5 h-3.5" />
+                        <span>Buka Folder di Tab Baru</span>
+                      </a>
+                    )}
+                  </div>
+                )}
               </div>
+
+              {/* Uji Unggah Foto Google Drive */}
+              <div className="pt-2 border-t border-indigo-200/60 flex flex-wrap items-center justify-between gap-2">
+                <button
+                  type="button"
+                  onClick={handleTestDriveUpload}
+                  disabled={isTestingDrive}
+                  className="inline-flex items-center gap-1.5 px-3 py-1.5 bg-indigo-600 hover:bg-indigo-700 text-white rounded-lg text-xs font-bold transition-colors cursor-pointer shadow-xs disabled:opacity-50"
+                >
+                  <UploadCloud className={`w-3.5 h-3.5 ${isTestingDrive ? 'animate-spin' : ''}`} />
+                  <span>{isTestingDrive ? 'Mengirim Foto Contoh ke Drive...' : 'Uji Kirim 1 Foto Contoh ke Google Drive'}</span>
+                </button>
+
+                <span className="text-[11px] text-indigo-800">
+                  Menguji apakah webhook Anda sudah memiliki izin & skrip penyimpan foto ke Drive.
+                </span>
+              </div>
+
+              {testDriveResult && (
+                <div className={`p-3 rounded-xl border text-xs ${testDriveResult.success ? 'bg-emerald-50 border-emerald-300 text-emerald-950' : 'bg-rose-50 border-rose-300 text-rose-950'}`}>
+                  <div className="flex items-start justify-between gap-2">
+                    <div className="flex items-start gap-2">
+                      {testDriveResult.success ? <CheckCircle2 className="w-4 h-4 text-emerald-600 shrink-0 mt-0.5" /> : <AlertTriangle className="w-4 h-4 text-rose-600 shrink-0 mt-0.5" />}
+                      <div>
+                        <span className="font-bold block">{testDriveResult.message}</span>
+                        {testDriveResult.success && (
+                          <span className="text-[11px] text-emerald-800 block mt-0.5">
+                            Periksa Google Drive Anda. Di dalam folder Anda akan muncul subfolder "Gedung Uji Coba SIM-PKBG" beserta file foto uji coba!
+                          </span>
+                        )}
+                      </div>
+                    </div>
+                    {testDriveResult.folderUrl && (
+                      <a
+                        href={testDriveResult.folderUrl}
+                        target="_blank"
+                        rel="noopener noreferrer"
+                        className="inline-flex items-center gap-1 px-2.5 py-1 bg-white border border-emerald-300 text-emerald-800 rounded-lg font-bold text-[11px] hover:bg-emerald-50 shrink-0"
+                      >
+                        <ExternalLink className="w-3.5 h-3.5" />
+                        <span>Buka Folder Drive</span>
+                      </a>
+                    )}
+                  </div>
+                </div>
+              )}
             </div>
           </div>
 
@@ -502,6 +644,34 @@ export const GoogleSheetIntegration: React.FC = () => {
             <Copy className="w-3.5 h-3.5" />
             <span>{copiedScript ? 'Tersalin ke Clipboard!' : 'Salin Skrip Multi-Sheet'}</span>
           </button>
+        </div>
+
+        {/* Important Notice for Google Drive Photo Storage */}
+        <div className="p-4 bg-amber-500/10 border border-amber-500/30 rounded-xl space-y-2">
+          <div className="flex items-center gap-2 text-amber-400 font-bold text-xs uppercase tracking-wider">
+            <AlertTriangle className="w-4 h-4 text-amber-400 shrink-0" />
+            <span>Penting: Mengapa Foto Belum Tersimpan ke Link Google Drive Anda?</span>
+          </div>
+          <p className="text-xs text-slate-300 leading-relaxed">
+            Google Apps Script berjalan di Google Cloud akun Anda sendiri. Jika sebelumnya Anda telah men-deploy Apps Script sebelum fitur foto Google Drive ditambahkan, spreadsheet Anda masih menjalankan kode versi lama. Untuk mengaktifkannya:
+          </p>
+          <ol className="list-decimal list-inside space-y-1.5 text-xs text-slate-300 pl-1">
+            <li>
+              Klik tombol <strong className="text-amber-300">"Salin Skrip Multi-Sheet"</strong> di atas.
+            </li>
+            <li>
+              Di Google Spreadsheet Anda, buka menu <strong className="text-white">Ekstensi &gt; Apps Script</strong>.
+            </li>
+            <li>
+              Hapus seluruh isi kode lama di editor Apps Script, lalu <strong>Paste</strong> kode baru yang telah disalin.
+            </li>
+            <li>
+              <strong className="text-amber-300">Langkah Kunci Pembaruan:</strong> Klik tombol <strong className="text-white">Deploy (Terapkan)</strong> &gt; <strong className="text-white">Kelola Deployment (Manage deployments)</strong> &gt; Klik ikon <strong className="text-white">Pensil (Edit)</strong> &gt; Pada dropdown Versi pilih <strong className="text-emerald-400">Versi Baru (New version)</strong> &gt; Klik <strong className="text-white">Terapkan (Deploy)</strong>.
+            </li>
+            <li>
+              Jika Google meminta otorisasi izin (<em className="text-slate-400">"Review Permissions"</em>), klik <strong className="text-white">Review Permissions</strong> &gt; Pilih akun Google Anda &gt; Klik <strong className="text-white">Advanced / Lanjutan</strong> &gt; Klik <strong className="text-white">Buka SIM-PKBG (Aman)</strong> &gt; Klik <strong className="text-emerald-400">Izinkan (Allow)</strong> agar skrip diizinkan membuat folder & menyimpan foto di Drive Anda.
+            </li>
+          </ol>
         </div>
 
         {/* 4 Steps */}

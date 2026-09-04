@@ -96,6 +96,7 @@ export const AssessmentForm: React.FC = () => {
   const [tempSpreadsheetUrl, setTempSpreadsheetUrl] = useState(googleSheetConfig.spreadsheetUrl || '');
   const [tempWebhookUrl, setTempWebhookUrl] = useState(googleSheetConfig.webhookUrl || '');
   const [tempSheetName, setTempSheetName] = useState(googleSheetConfig.sheetName || 'Data_Kerusakan_PUPR');
+  const [tempDriveFolderId, setTempDriveFolderId] = useState(googleSheetConfig.driveFolderId || '');
 
   // Form Fields
   const [code, setCode] = useState('');
@@ -963,8 +964,39 @@ export const AssessmentForm: React.FC = () => {
                   placeholder="https://script.google.com/macros/s/AKfycb.../exec"
                   className="w-full px-3 py-2 rounded-xl border border-slate-200 text-xs font-mono text-slate-800 focus:outline-hidden focus:ring-2 focus:ring-emerald-500"
                 />
+                {tempWebhookUrl.includes('drive.google.com') && (
+                  <div className="mt-1.5 p-2 bg-amber-50 border border-amber-200 rounded-lg text-[11px] text-amber-800 flex items-center justify-between gap-2">
+                    <span>⚠️ Link Google Drive terdeteksi di kolom Webhook. Pindahkan ke kolom Folder Drive di bawah.</span>
+                    <button
+                      type="button"
+                      onClick={() => {
+                        setTempDriveFolderId(tempWebhookUrl);
+                        setTempWebhookUrl('');
+                      }}
+                      className="px-2 py-1 bg-amber-600 hover:bg-amber-700 text-white rounded text-[10px] font-bold shrink-0"
+                    >
+                      Pindahkan
+                    </button>
+                  </div>
+                )}
                 <p className="text-[11px] text-slate-500 mt-1">
                   URL Web App dari Apps Script Google Sheet Anda (Who has access: Anyone) yang langsung menulis baris data baru.
+                </p>
+              </div>
+
+              <div>
+                <label className="block font-semibold text-slate-700 mb-1">
+                  Link / ID Folder Google Drive (Penyimpanan Foto Kerusakan)
+                </label>
+                <input
+                  type="text"
+                  value={tempDriveFolderId}
+                  onChange={(e) => setTempDriveFolderId(e.target.value)}
+                  placeholder="https://drive.google.com/drive/folders/... (atau kosongkan untuk folder default)"
+                  className="w-full px-3 py-2 rounded-xl border border-slate-200 text-xs font-mono text-slate-800 focus:outline-hidden focus:ring-2 focus:ring-indigo-500"
+                />
+                <p className="text-[11px] text-slate-500 mt-1">
+                  Folder induk Google Drive untuk arsip foto. Bila dikosongkan, folder <strong>SIM-PKBG PUPR - Dokumentasi Foto Kerusakan</strong> akan dibuat otomatis.
                 </p>
               </div>
 
@@ -995,21 +1027,30 @@ export const AssessmentForm: React.FC = () => {
                 onClick={() => {
                   let sheetUrl = tempSpreadsheetUrl.trim();
                   let hookUrl = tempWebhookUrl.trim();
+                  let driveFolder = tempDriveFolderId.trim();
+
+                  if (hookUrl.includes('drive.google.com') && !driveFolder) {
+                    driveFolder = hookUrl;
+                    hookUrl = '';
+                  }
                   if (hookUrl.includes('docs.google.com/spreadsheets') && !sheetUrl) {
                     sheetUrl = hookUrl;
                   }
+
                   updateGoogleSheetConfig({
                     spreadsheetUrl: sheetUrl,
                     webhookUrl: hookUrl,
                     sheetName: tempSheetName.trim() || 'Data_Kerusakan_PUPR',
+                    driveFolderId: driveFolder || undefined,
+                    savePhotosToDrive: true,
                     directSaveEnabled: true,
                     autoSync: true,
                     lastTestedAt: new Date().toISOString(),
                     lastTestStatus: 'success',
-                    lastTestMessage: 'Link penyimpanan Google Sheet berhasil diperbarui.',
+                    lastTestMessage: 'Link penyimpanan Google Sheet & Google Drive berhasil diperbarui.',
                   });
                   setShowSheetModal(false);
-                  showToast('Link Google Sheet berhasil disimpan! Data akan langsung otomatis tersimpan ke Sheet tersebut.', 'success');
+                  showToast('Link Google Sheet & Google Drive berhasil disimpan!', 'success');
                 }}
                 className="px-4 py-2 rounded-xl bg-emerald-600 hover:bg-emerald-700 text-white font-bold text-xs shadow-xs transition-colors"
               >

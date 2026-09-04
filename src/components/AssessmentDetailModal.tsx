@@ -12,8 +12,10 @@ import {
   CheckCircle2,
   AlertTriangle,
   ExternalLink,
+  UploadCloud,
 } from 'lucide-react';
 import { BuildingPhotoGallery } from './BuildingPhotoGallery';
+import { syncAssessmentPhotosToDrive } from '../services/googleSheetsService';
 
 interface Props {
   assessment: BuildingAssessment;
@@ -26,12 +28,33 @@ const safeNumber = (val: unknown, fallback = 0): number => {
 };
 
 export const AssessmentDetailModal: React.FC<Props> = ({ assessment, onClose }) => {
-  const { syncAssessmentToSheet, logUserActivity, showToast } = useApp();
+  const { syncAssessmentToSheet, googleSheetConfig, logUserActivity, showToast } = useApp();
   const [isSyncing, setIsSyncing] = useState(false);
+  const [isUploadingToDrive, setIsUploadingToDrive] = useState(false);
   const [showSignatures, setShowSignatures] = useState(true);
 
   const hasPhotos = Boolean(assessment.photos && assessment.photos.length > 0);
   const [showPhotos, setShowPhotos] = useState(false);
+
+  const handleSyncPhotosToDrive = async () => {
+    if (!googleSheetConfig.webhookUrl) {
+      showToast('Tentukan URL Webhook Google Apps Script terlebih dahulu di menu Integrasi Google Sheet', 'error');
+      return;
+    }
+    setIsUploadingToDrive(true);
+    try {
+      const res = await syncAssessmentPhotosToDrive(assessment, googleSheetConfig);
+      if (res.success) {
+        showToast(res.message, 'success');
+      } else {
+        showToast(res.message, 'error');
+      }
+    } catch (err: any) {
+      showToast('Gagal mengunggah foto: ' + (err.message || 'Error'), 'error');
+    } finally {
+      setIsUploadingToDrive(false);
+    }
+  };
 
   // Manage body class for print isolation & scroll lock
   useEffect(() => {
@@ -414,13 +437,25 @@ export const AssessmentDetailModal: React.FC<Props> = ({ assessment, onClose }) 
                       Dokumentasi Visual Kerusakan Fisik Bangunan ({assessment.photos?.length || 0} / 10 Foto)
                     </span>
                   </div>
-                  <div className="flex items-center gap-2">
+                  <div className="flex items-center gap-2 print:hidden">
+                    {googleSheetConfig.webhookUrl && (
+                      <button
+                        type="button"
+                        onClick={handleSyncPhotosToDrive}
+                        disabled={isUploadingToDrive}
+                        className="inline-flex items-center gap-1.5 px-2.5 py-1 rounded-lg bg-indigo-600 hover:bg-indigo-700 text-white text-xs font-bold transition-colors shadow-xs disabled:opacity-50 cursor-pointer"
+                        title="Unggah atau perbarui arsip foto gedung ini langsung ke Google Drive"
+                      >
+                        <UploadCloud className={`w-3.5 h-3.5 ${isUploadingToDrive ? 'animate-spin' : ''}`} />
+                        <span>{isUploadingToDrive ? 'Mengunggah...' : 'Kirim Foto ke Google Drive'}</span>
+                      </button>
+                    )}
                     {assessment.googleDriveFolderUrl && (
                       <a
                         href={assessment.googleDriveFolderUrl}
                         target="_blank"
                         rel="noopener noreferrer"
-                        className="inline-flex items-center gap-1.5 px-2.5 py-1 rounded-lg bg-indigo-50 hover:bg-indigo-100 text-indigo-700 text-xs font-semibold border border-indigo-200 transition-colors print:hidden"
+                        className="inline-flex items-center gap-1.5 px-2.5 py-1 rounded-lg bg-indigo-50 hover:bg-indigo-100 text-indigo-700 text-xs font-semibold border border-indigo-200 transition-colors"
                         title="Buka folder arsip foto gedung ini di Google Drive"
                       >
                         <ExternalLink className="w-3.5 h-3.5 text-indigo-600" />
