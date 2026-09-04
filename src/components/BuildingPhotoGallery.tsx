@@ -45,16 +45,16 @@ export const BuildingPhotoGallery: React.FC<BuildingPhotoGalleryProps> = ({
       </div>
 
       {/* Responsive Small Thumbnails Grid */}
-      <div className="grid grid-cols-2 sm:grid-cols-3 md:grid-cols-4 lg:grid-cols-5 gap-3">
+      <div className="grid grid-cols-2 sm:grid-cols-3 md:grid-cols-4 lg:grid-cols-5 gap-3 print:grid-cols-4 print:gap-2.5">
         {photos.map((photo, index) => (
           <div
             key={photo.id || index}
-            className="group relative flex flex-col bg-white rounded-xl border border-slate-200 shadow-xs hover:shadow-md transition-all overflow-hidden hover:border-amber-400"
+            className="group relative flex flex-col bg-white rounded-xl border border-slate-200 shadow-xs hover:shadow-md transition-all overflow-hidden hover:border-amber-400 print:rounded-lg print:border-slate-300 print:shadow-none avoid-break"
           >
             {/* Image Thumbnail Container */}
             <div 
               onClick={() => setSelectedPhotoIndex(index)}
-              className="relative aspect-4/3 w-full bg-slate-900 cursor-pointer overflow-hidden"
+              className="relative aspect-4/3 w-full bg-slate-900 cursor-pointer overflow-hidden print:aspect-4/3"
               title="Klik untuk memperbesar foto"
             >
               <img
@@ -62,7 +62,7 @@ export const BuildingPhotoGallery: React.FC<BuildingPhotoGalleryProps> = ({
                 alt={photo.caption || `Foto Kerusakan ${index + 1}`}
                 className="w-full h-full object-cover transition-transform duration-300 group-hover:scale-105"
                 referrerPolicy="no-referrer"
-                loading="lazy"
+                loading="eager"
               />
               
               {/* Top badges */}
@@ -73,24 +73,24 @@ export const BuildingPhotoGallery: React.FC<BuildingPhotoGalleryProps> = ({
               </div>
 
               {/* Zoom overlay hint on hover */}
-              <div className="absolute inset-0 bg-slate-950/40 opacity-0 group-hover:opacity-100 transition-opacity flex items-center justify-center text-white gap-1 text-xs font-semibold backdrop-blur-2xs">
+              <div className="no-print absolute inset-0 bg-slate-950/40 opacity-0 group-hover:opacity-100 transition-opacity flex items-center justify-center text-white gap-1 text-xs font-semibold backdrop-blur-2xs">
                 <ZoomIn className="w-4 h-4 text-amber-300" />
                 <span>Perbesar</span>
               </div>
             </div>
 
             {/* Information Body */}
-            <div className="p-2.5 flex-1 flex flex-col justify-between text-left bg-white">
+            <div className="p-2.5 flex-1 flex flex-col justify-between text-left bg-white print:p-2">
               <div className="space-y-1">
                 {/* Damage Location Badge */}
-                <div className="flex items-center gap-1 text-[10px] font-bold text-indigo-700 bg-indigo-50 border border-indigo-200/80 px-1.5 py-0.5 rounded truncate" title={photo.damageLocation || 'Bagian Bangunan'}>
-                  <Layers className="w-2.5 h-2.5 shrink-0 text-indigo-500" />
+                <div className="flex items-center gap-1 text-[10px] font-bold text-indigo-700 bg-indigo-50 border border-indigo-200/80 px-1.5 py-0.5 rounded truncate print:border-slate-300 print:bg-slate-100" title={photo.damageLocation || 'Bagian Bangunan'}>
+                  <Layers className="w-2.5 h-2.5 shrink-0 text-indigo-500 no-print" />
                   <span className="truncate">{photo.damageLocation || 'Bagian Bangunan'}</span>
                 </div>
 
                 {/* Caption / Keterangan Kerusakan */}
                 <p 
-                  className="text-[11px] text-slate-700 font-medium line-clamp-2 leading-tight"
+                  className="text-[11px] text-slate-700 font-medium line-clamp-2 leading-tight print:text-[10px] print:line-clamp-3"
                   title={photo.caption || 'Tanpa keterangan'}
                 >
                   {photo.caption || <span className="text-slate-400 italic">Tanpa keterangan</span>}
@@ -99,7 +99,7 @@ export const BuildingPhotoGallery: React.FC<BuildingPhotoGalleryProps> = ({
 
               {/* Action Buttons if editable */}
               {isEditable && (
-                <div className="flex items-center justify-between pt-2 mt-1 border-t border-slate-100">
+                <div className="no-print flex items-center justify-between pt-2 mt-1 border-t border-slate-100">
                   <button
                     type="button"
                     onClick={(e) => {

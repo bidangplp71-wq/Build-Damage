@@ -238,17 +238,23 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
         setUsers(snapshot.docs.map(doc => doc.data() as UserAccount));
       } else {
         // If empty, seed with INITIAL_USERS
-        INITIAL_USERS.forEach(u => setDoc(doc(db, 'users', u.id), u));
+        INITIAL_USERS.forEach(u => {
+          const cleanU = JSON.parse(JSON.stringify(u));
+          setDoc(doc(db, 'users', cleanU.id), cleanU).catch(console.error);
+        });
       }
-    });
+    }).catch(console.error);
 
     getDocs(collection(db, 'assessments')).then((snapshot) => {
       if (!snapshot.empty) {
         setAssessments(snapshot.docs.map(doc => doc.data() as BuildingAssessment));
       } else {
-        INITIAL_ASSESSMENTS.forEach(a => setDoc(doc(db, 'assessments', a.id), a));
+        INITIAL_ASSESSMENTS.forEach(a => {
+          const cleanA = JSON.parse(JSON.stringify(a));
+          setDoc(doc(db, 'assessments', cleanA.id), cleanA).catch(console.error);
+        });
       }
-    });
+    }).catch(console.error);
   }, []);
 
   useEffect(() => {

@@ -53,7 +53,7 @@ const MainLayout: React.FC = () => {
       /></div>
 
       {/* 2. Main Work Area */}
-      <div className={`flex-1 flex flex-col min-w-0 ${selectedAssessmentForDetail ? "print:hidden" : "print:overflow-visible print:block"}`}>
+      <div className="flex-1 flex flex-col min-w-0">
         {/* Top bar with mobile hamburger and active tab title */}
         <div className="print:hidden"><Header onToggleMobileNav={() => setMobileNavOpen((prev) => !prev)} /></div>
 
