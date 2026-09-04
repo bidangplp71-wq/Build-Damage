@@ -14,6 +14,15 @@ export interface GoogleSheetRowPayload {
   registrationCode?: string;
   data: Record<string, any> | Record<string, any>[];
   dataByKecamatan?: Record<string, Record<string, any>[]>;
+  photos?: {
+    id: string;
+    caption: string;
+    damageLocation?: string;
+    url?: string;
+    dataBase64?: string;
+  }[];
+  savePhotosToDrive?: boolean;
+  driveFolderId?: string;
   timestamp: string;
 }
 
@@ -68,6 +77,7 @@ export function formatAssessmentForGoogleSheet(item: BuildingAssessment) {
     'Tanggal Verifikasi': item.verifiedAt ? new Date(item.verifiedAt).toLocaleDateString('id-ID') : '-',
     'Catatan Verifikator': item.verificationNotes || '-',
     'Jumlah Foto Kerusakan': item.photos ? item.photos.length : 0,
+    'Link Folder Foto Google Drive': item.googleDriveFolderUrl || (item.photos && item.photos.length > 0 ? '(Tersimpan di Google Drive)' : '-'),
     'Surveyor / Petugas': item.createdByName,
     'Kota Laporan': item.cityLocation,
     'Jumlah Tim Analisis': item.analysisTeam ? item.analysisTeam.length : 0,
@@ -92,7 +102,7 @@ export function groupAssessmentsByKecamatan(assessments: BuildingAssessment[]): 
 
 /**
  * Directly save assessment data to Google Sheet via Webhook endpoint
- * Supports auto-routing to Kecamatan-specific tab sheet + Master sheet
+ * Supports auto-routing to Kecamatan-specific tab sheet + Master sheet + Google Drive photo folders
  */
 export async function directSaveToGoogleSheet(
   assessment: BuildingAssessment,
@@ -120,6 +130,15 @@ export async function directSaveToGoogleSheet(
     spreadsheetId: spreadsheetId || undefined,
     registrationCode: assessment.code,
     data: rowData,
+    photos: assessment.photos ? assessment.photos.map((p, idx) => ({
+      id: p.id || `photo_${idx}`,
+      caption: p.caption || '',
+      damageLocation: p.damageLocation || `Foto ${idx + 1}`,
+      url: p.url,
+      dataBase64: p.url && p.url.startsWith('data:') ? p.url : undefined,
+    })) : [],
+    savePhotosToDrive: config.savePhotosToDrive !== false,
+    driveFolderId: config.driveFolderId || undefined,
     timestamp: new Date().toISOString(),
   };
 
@@ -352,6 +371,14 @@ function doPost(e) {
     var regCode = json.registrationCode || (rowData['No Registrasi'] || "");
     var kecamatanName = rowData['Kecamatan'] || "Lainnya";
     var kecTabName = json.kecamatanSheetName || ("Kec. " + kecamatanName);
+
+    // SIMPAN DOKUMENTASI FOTO KE GOOGLE DRIVE (Folder per Bangunan)
+    if (json.photos && json.photos.length > 0 && json.savePhotosToDrive !== false) {
+      var driveFolderUrl = savePhotosToGoogleDrive(json.photos, regCode, rowData['Nama Bangunan'], json.driveFolderId);
+      if (driveFolderUrl) {
+        rowData['Link Folder Foto Google Drive'] = driveFolderUrl;
+      }
+    }
     
     // A. Tulis ke Sheet Khusus Kecamatan Terkait
     if (splitByKecamatan) {
@@ -365,9 +392,10 @@ function doPost(e) {
     
     return ContentService.createTextOutput(JSON.stringify({
       status: "success",
-      message: "Data langsung tersimpan di Tab '" + kecTabName + "' dan Master Sheet!",
+      message: "Data langsung tersimpan di Tab '" + kecTabName + "', Master Sheet & Arsip Foto Google Drive!",
       registrationCode: regCode,
-      targetTab: kecTabName
+      targetTab: kecTabName,
+      driveFolderUrl: rowData['Link Folder Foto Google Drive'] || ""
     })).setMimeType(ContentService.MimeType.JSON);
     
   } catch (error) {
@@ -568,6 +596,64 @@ function createStatisticsSummarySheet(ss, allRows) {
   var totalRange = summarySheet.getRange(lastRow, 1, 1, summaryTable[0].length);
   totalRange.setBackground("#f1f5f9");
   totalRange.setFontWeight("bold");
+}
+
+/**
+ * Menyimpan dokumentasi foto ke Google Drive dalam folder terstruktur per bangunan
+ */
+function savePhotosToGoogleDrive(photos, regCode, buildingName, parentFolderId) {
+  if (!photos || photos.length === 0) return "";
+  try {
+    var parentFolder;
+    if (parentFolderId) {
+      try {
+        var cleanId = parentFolderId.replace(/https:\\/\\/drive\\.google\\.com\\/drive\\/folders\\//g, '').split('?')[0].trim();
+        parentFolder = DriveApp.getFolderById(cleanId);
+      } catch(e) {}
+    }
+    if (!parentFolder) {
+      var rootFolders = DriveApp.getFoldersByName("SIPANDU PUPR - Dokumentasi Foto Kerusakan");
+      if (rootFolders.hasNext()) {
+        parentFolder = rootFolders.next();
+      } else {
+        parentFolder = DriveApp.createFolder("SIPANDU PUPR - Dokumentasi Foto Kerusakan");
+        try { parentFolder.setSharing(DriveApp.Access.ANYONE_WITH_LINK, DriveApp.Permission.VIEW); } catch(e) {}
+      }
+    }
+    
+    // Buat / dapatkan subfolder untuk gedung terkait
+    var safeBuilding = (buildingName || "Gedung").replace(/[:\\\\/?*\\[\\]]/g, "_").trim();
+    var folderName = safeBuilding + (regCode ? (" - " + regCode) : "");
+    var subFolders = parentFolder.getFoldersByName(folderName);
+    var targetFolder = subFolders.hasNext() ? subFolders.next() : parentFolder.createFolder(folderName);
+    try { targetFolder.setSharing(DriveApp.Access.ANYONE_WITH_LINK, DriveApp.Permission.VIEW); } catch(e) {}
+    
+    for (var i = 0; i < photos.length; i++) {
+      var p = photos[i];
+      var base64Data = p.dataBase64 || p.url;
+      if (base64Data && base64Data.indexOf("data:") === 0) {
+        var parts = base64Data.split(",");
+        if (parts.length > 1) {
+          var contentType = parts[0].split(":")[1].split(";")[0] || "image/jpeg";
+          var decoded = Utilities.base64Decode(parts[1]);
+          var safeLoc = (p.damageLocation || ("Foto_" + (i + 1))).replace(/[:\\\\/?*\\[\\]]/g, "_");
+          var fileName = ("0" + (i + 1)).slice(-2) + "_" + safeLoc + ".jpg";
+          
+          var existingFiles = targetFolder.getFilesByName(fileName);
+          if (existingFiles.hasNext()) {
+            existingFiles.next().setContent(decoded);
+          } else {
+            var blob = Utilities.newBlob(decoded, contentType, fileName);
+            targetFolder.createFile(blob);
+          }
+        }
+      }
+    }
+    return targetFolder.getUrl();
+  } catch (err) {
+    Logger.log("Error saving photos to Drive: " + err);
+    return "";
+  }
 }
 
 function doGet(e) {

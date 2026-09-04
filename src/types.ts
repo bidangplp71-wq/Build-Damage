@@ -332,6 +332,8 @@ export interface BuildingPhoto {
   damageLocation?: string; // Bagian / komponen kerusakan fisik yang difoto (e.g. Kolom, Dinding, Atap, Pondasi, dll)
   subComponentName?: string;
   takenAt?: string;
+  driveUrl?: string; // Link file foto di Google Drive jika tersimpan di Cloud Drive
+  driveFileId?: string; // ID unik file di Google Drive
 }
 
 export const STANDARD_DAMAGE_LOCATIONS = [
@@ -417,10 +419,11 @@ export interface BuildingAssessment {
   verifiedAt?: string;
   verificationNotes?: string;
   
-  // Google Sheets Synchronization
+  // Google Sheets & Google Drive Synchronization
   googleSheetSynced: boolean;
   googleSheetSyncedAt?: string;
   googleSheetRowId?: string;
+  googleDriveFolderUrl?: string; // Link URL folder dokumentasi foto gedung di Google Drive
 
   createdBy: string;
   createdByName: string;
@@ -457,6 +460,9 @@ export interface GoogleSheetConfig {
   includeMasterSummarySheet?: boolean; // Tetap sertakan Sheet Rekap Gabungan Semua Kecamatan
   autoSync: boolean;
   directSaveEnabled: boolean;
+  savePhotosToDrive?: boolean; // Fitur: Simpan dokumentasi foto otomatis ke folder Google Drive
+  driveFolderId?: string; // ID / URL folder induk Google Drive untuk arsip foto
+  driveFolderUrl?: string; // Tautan langsung ke folder induk Google Drive
   lastTestedAt?: string;
   lastTestStatus?: 'success' | 'error';
   lastTestMessage?: string;

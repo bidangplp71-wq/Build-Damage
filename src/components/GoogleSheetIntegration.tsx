@@ -39,6 +39,8 @@ export const GoogleSheetIntegration: React.FC = () => {
   const [sheetNameInput, setSheetNameInput] = useState(googleSheetConfig.sheetName || 'REKAP_SEMUA_KECAMATAN');
   const [splitByKecamatan, setSplitByKecamatan] = useState(googleSheetConfig.splitByKecamatan !== false);
   const [includeMasterSummary, setIncludeMasterSummary] = useState(googleSheetConfig.includeMasterSummarySheet !== false);
+  const [savePhotosToDrive, setSavePhotosToDrive] = useState(googleSheetConfig.savePhotosToDrive !== false);
+  const [driveFolderIdInput, setDriveFolderIdInput] = useState(googleSheetConfig.driveFolderId || '');
 
   const [isTesting, setIsTesting] = useState(false);
   const [isSyncingAll, setIsSyncingAll] = useState(false);
@@ -64,13 +66,15 @@ export const GoogleSheetIntegration: React.FC = () => {
       sheetName: sheetNameInput.trim() || 'REKAP_SEMUA_KECAMATAN',
       splitByKecamatan: splitByKecamatan,
       includeMasterSummarySheet: includeMasterSummary,
+      savePhotosToDrive: savePhotosToDrive,
+      driveFolderId: driveFolderIdInput.trim() || undefined,
       directSaveEnabled: true,
       autoSync: true,
       lastTestedAt: new Date().toISOString(),
       lastTestStatus: 'success',
-      lastTestMessage: 'Pengaturan penyimpanan multi-sheet per kecamatan aktif.',
+      lastTestMessage: 'Pengaturan penyimpanan multi-sheet dan Google Drive aktif.',
     });
-    showToast('Tautan Google Sheet berhasil disimpan! Setiap data kecamatan akan langsung masuk ke sheet masing-masing.', 'success');
+    showToast('Tautan Google Sheet & Google Drive berhasil disimpan! Foto dan data akan otomatis tersinkron.', 'success');
   };
 
   const handleTestConnection = async () => {
@@ -388,6 +392,58 @@ export const GoogleSheetIntegration: React.FC = () => {
               <div className="flex items-center gap-2 px-3 py-2 rounded-xl bg-emerald-50 border border-emerald-200 text-emerald-900 font-semibold w-full">
                 <CheckCircle2 className="w-4 h-4 text-emerald-600 shrink-0" />
                 <span>Penyimpanan Langsung Otomatis: Aktif</span>
+              </div>
+            </div>
+          </div>
+
+          {/* Konfigurasi Google Drive untuk Foto Skala Besar */}
+          <div className="p-4 rounded-xl border border-indigo-200 bg-indigo-50/40 space-y-3">
+            <div className="flex items-center justify-between">
+              <span className="font-bold text-indigo-950 flex items-center gap-2">
+                <Database className="w-4 h-4 text-indigo-600" />
+                <span>Arsip Foto Google Drive (Dukungan 20.000 Foto / 2.000 Gedung)</span>
+              </span>
+              <span className="text-[10px] uppercase font-bold tracking-wider px-2 py-0.5 rounded-full bg-indigo-100 text-indigo-800 border border-indigo-200">
+                Skala Besar PUPR
+              </span>
+            </div>
+            
+            <p className="text-[11px] text-indigo-900 leading-relaxed">
+              Untuk mengantisipasi 2.000 gedung dengan hingga 10 foto per gedung (20.000 foto), foto diarsipkan langsung ke <strong>Google Drive</strong> dalam folder terstruktur per nama gedung. Di <strong>Cloud Firestore</strong>, data tersimpan ringan dan cepat di bawah 1 MB.
+            </p>
+
+            <div className="space-y-3 pt-1">
+              <label className="flex items-start gap-2.5 cursor-pointer">
+                <input
+                  type="checkbox"
+                  checked={savePhotosToDrive}
+                  onChange={(e) => setSavePhotosToDrive(e.target.checked)}
+                  className="mt-0.5 rounded border-indigo-300 text-indigo-600 focus:ring-indigo-500 w-4 h-4 cursor-pointer"
+                />
+                <div>
+                  <span className="font-bold text-indigo-950 block">
+                    Otomatis Arsipkan Foto Kerusakan ke Google Drive
+                  </span>
+                  <span className="text-[11px] text-indigo-800 leading-tight block mt-0.5">
+                    Google Apps Script akan otomatis membuat subfolder per bangunan dan menyimpan foto visual lengkap dengan tautan di Google Sheet.
+                  </span>
+                </div>
+              </label>
+
+              <div>
+                <label className="block font-semibold text-slate-700 mb-1">
+                  ID / Link Folder Induk Google Drive (Opsional)
+                </label>
+                <input
+                  type="text"
+                  value={driveFolderIdInput}
+                  onChange={(e) => setDriveFolderIdInput(e.target.value)}
+                  placeholder="Kosongkan jika ingin dibuatkan otomatis: 'SIPANDU PUPR - Dokumentasi Foto Kerusakan'"
+                  className="w-full px-3 py-2 rounded-xl border border-slate-200 font-mono text-slate-900 bg-white focus:outline-hidden focus:ring-2 focus:ring-indigo-500"
+                />
+                <p className="text-[10px] text-slate-500 mt-1">
+                  Bila dikosongkan, skrip akan otomatis membuat folder induk bernama <strong>SIPANDU PUPR - Dokumentasi Foto Kerusakan</strong> di Google Drive Anda.
+                </p>
               </div>
             </div>
           </div>

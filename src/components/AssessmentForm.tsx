@@ -21,7 +21,7 @@ import {
   calculateRehabCosts,
   formatRupiah,
 } from '../utils/puprCalculations';
-import { compressImageFile } from '../utils/imageCompressor';
+import { compressImageFile, calculatePhotosPayloadSize } from '../utils/imageCompressor';
 import { BuildingPhotoGallery } from './BuildingPhotoGallery';
 import { PhotoViewerModal } from './PhotoViewerModal';
 import { AssessmentDetailModal } from './AssessmentDetailModal';
@@ -66,6 +66,7 @@ import {
   ZoomIn,
   Edit3,
   ImageIcon,
+  Database,
 } from 'lucide-react';
 
 export const AssessmentForm: React.FC = () => {
@@ -2069,6 +2070,39 @@ export const AssessmentForm: React.FC = () => {
               <p className="text-[11px] text-slate-500">
                 Maksimal 10 foto visual per satu bangunan gedung/rumah. Wajib menentukan bagian kerusakan agar verifikator teknis mengetahui detail lokasi foto.
               </p>
+              {photos.length > 0 && (
+                <div className="flex flex-wrap items-center gap-2 mt-2 pt-1.5 border-t border-slate-100 text-[11px]">
+                  {(() => {
+                    const info = calculatePhotosPayloadSize(photos);
+                    return (
+                      <span className={`inline-flex items-center gap-1 px-2 py-0.5 rounded-md font-medium ${
+                        info.isSafe 
+                          ? 'bg-emerald-50 text-emerald-700 border border-emerald-200' 
+                          : 'bg-amber-50 text-amber-800 border border-amber-200'
+                      }`}>
+                        <Database className="w-3 h-3 text-emerald-600" />
+                        <span>Firestore: {info.formatted} / 1 MB ({info.isSafe ? 'Aman' : 'Peringatan'})</span>
+                      </span>
+                    );
+                  })()}
+                  <span className="inline-flex items-center gap-1 px-2 py-0.5 rounded-md bg-sky-50 text-sky-700 border border-sky-200 font-medium">
+                    <UploadCloud className="w-3 h-3 text-sky-600" />
+                    <span>Google Drive: Folder Arsip per Bangunan</span>
+                  </span>
+                  {selectedAssessmentForEdit?.googleDriveFolderUrl && (
+                    <a
+                      href={selectedAssessmentForEdit.googleDriveFolderUrl}
+                      target="_blank"
+                      rel="noopener noreferrer"
+                      className="inline-flex items-center gap-1 px-2 py-0.5 rounded-md bg-indigo-50 hover:bg-indigo-100 text-indigo-700 border border-indigo-200 font-medium transition-colors"
+                      title="Buka folder dokumentasi foto gedung ini di Google Drive"
+                    >
+                      <ExternalLink className="w-3 h-3" />
+                      <span>Buka Google Drive</span>
+                    </a>
+                  )}
+                </div>
+              )}
             </div>
           </div>
 

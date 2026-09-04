@@ -11,6 +11,7 @@ import {
   Layers,
   CheckCircle2,
   AlertTriangle,
+  ExternalLink,
 } from 'lucide-react';
 import { BuildingPhotoGallery } from './BuildingPhotoGallery';
 
@@ -413,9 +414,23 @@ export const AssessmentDetailModal: React.FC<Props> = ({ assessment, onClose }) 
                       Dokumentasi Visual Kerusakan Fisik Bangunan ({assessment.photos?.length || 0} / 10 Foto)
                     </span>
                   </div>
-                  <span className="text-[11px] text-slate-500 font-medium">
-                    Dilengkapi keterangan bagian kerusakan untuk verifikasi
-                  </span>
+                  <div className="flex items-center gap-2">
+                    {assessment.googleDriveFolderUrl && (
+                      <a
+                        href={assessment.googleDriveFolderUrl}
+                        target="_blank"
+                        rel="noopener noreferrer"
+                        className="inline-flex items-center gap-1.5 px-2.5 py-1 rounded-lg bg-indigo-50 hover:bg-indigo-100 text-indigo-700 text-xs font-semibold border border-indigo-200 transition-colors print:hidden"
+                        title="Buka folder arsip foto gedung ini di Google Drive"
+                      >
+                        <ExternalLink className="w-3.5 h-3.5 text-indigo-600" />
+                        <span>Folder Google Drive</span>
+                      </a>
+                    )}
+                    <span className="text-[11px] text-slate-500 font-medium hidden sm:inline">
+                      Dilengkapi keterangan bagian kerusakan untuk verifikasi
+                    </span>
+                  </div>
                 </div>
 
                 {/* Gallery Component */}
