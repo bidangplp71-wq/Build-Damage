@@ -1,5 +1,5 @@
 import { initializeApp, getApps, getApp, FirebaseApp } from 'firebase/app';
-import { getFirestore, Firestore, collection, doc, setDoc, getDocs, deleteDoc } from 'firebase/firestore';
+import { getFirestore, initializeFirestore, Firestore, collection, doc, setDoc, getDocs, deleteDoc } from 'firebase/firestore';
 import { getAuth, Auth } from 'firebase/auth';
 import firebaseAppletConfig from '../../firebase-applet-config.json';
 
@@ -15,10 +15,12 @@ try {
     app = getApps().length > 0 ? getApp() : initializeApp(firebaseConfig);
     
     // IMPORTANT: Use the specific databaseId if provided in the generated config
-    if (firebaseConfig.firestoreDatabaseId) {
-      db = getFirestore(app, firebaseConfig.firestoreDatabaseId);
-    } else {
-      db = getFirestore(app);
+    const dbId = firebaseConfig.firestoreDatabaseId || '(default)';
+    try {
+      db = initializeFirestore(app, { experimentalForceLongPolling: true }, dbId);
+    } catch (e) {
+      // Fallback if already initialized
+      db = getFirestore(app, dbId);
     }
     
     auth = getAuth(app);
