@@ -471,13 +471,20 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
   };
 
   const loginByNamePassword = (nameInput: string, passwordInput: string) => {
-    const nameQuery = nameInput.trim().toLowerCase();
-    const user = users.find((u) => u.name.toLowerCase() === nameQuery || u.name.toLowerCase().includes(nameQuery));
+    const query = nameInput.trim().toLowerCase();
+    
+    // First try exact match on email or name
+    let user = users.find((u) => u.name.toLowerCase() === query || u.email.toLowerCase() === query);
+    
+    // If not found, try partial match on name
+    if (!user) {
+      user = users.find((u) => u.name.toLowerCase().includes(query));
+    }
 
     if (!user) {
       return {
         success: false,
-        message: 'Nama pengguna belum terdaftar di sistem. Akses ditolak!',
+        message: 'Nama pengguna atau email belum terdaftar di sistem. Akses ditolak!',
       };
     }
 

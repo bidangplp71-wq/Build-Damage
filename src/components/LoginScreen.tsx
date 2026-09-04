@@ -27,7 +27,7 @@ export const LoginScreen: React.FC = () => {
   const handleLogin = (e: React.FormEvent) => {
     e.preventDefault();
     if (!nameInput.trim() || !passwordInput.trim()) {
-      setErrorMsg('Nama pengguna dan kata sandi wajib diisi.');
+      setErrorMsg('Nama pengguna/email dan kata sandi wajib diisi.');
       return;
     }
 
@@ -83,14 +83,14 @@ export const LoginScreen: React.FC = () => {
               <span>Autentikasi Akun Pengguna</span>
             </h2>
             <p className="text-xs text-slate-400 mt-0.5">
-              Masukkan nama pengguna dan kata sandi sesuai peran fungsional Anda.
+              Masukkan nama pengguna, email, dan kata sandi sesuai peran fungsional Anda.
             </p>
           </div>
 
           <form onSubmit={handleLogin} className="space-y-4">
             <div>
               <label className="block text-xs font-semibold text-slate-300 mb-1.5">
-                Nama Pengguna
+                Nama Pengguna / Email
               </label>
               <div className="relative">
                 <div className="absolute inset-y-0 left-0 pl-3.5 flex items-center pointer-events-none text-slate-400">
@@ -104,7 +104,7 @@ export const LoginScreen: React.FC = () => {
                     setNameInput(e.target.value);
                     if (errorMsg) setErrorMsg('');
                   }}
-                  placeholder="contoh: Vancy Djogo atau Admin Utama"
+                  placeholder="contoh: Vancy Djogo atau email@contoh.com"
                   className="w-full pl-10 pr-4 py-3 bg-slate-950 border border-slate-800 rounded-xl text-sm text-white placeholder-slate-600 focus:outline-none focus:ring-2 focus:ring-amber-500 focus:border-amber-500 transition-all font-medium"
                 />
               </div>
