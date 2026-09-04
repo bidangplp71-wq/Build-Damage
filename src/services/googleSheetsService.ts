@@ -61,7 +61,11 @@ export function extractDriveFolderId(input?: string): string {
   if (idMatch && idMatch[1]) {
     return idMatch[1];
   }
-  return str.replace(/^https?:\/\/[^\/]+\//, '').split('?')[0].replace(/^folders\//, '').replace(/\/+$/, '').trim();
+  // If user pasted a URL, strip domain
+  if (str.startsWith('http')) {
+    return str.replace(/^https?:\/\/[^\/]+\//, '').split('?')[0].replace(/^folders\//, '').replace(/\/+$/, '').trim();
+  }
+  return str;
 }
 
 /**
@@ -69,8 +73,13 @@ export function extractDriveFolderId(input?: string): string {
  */
 export function getDriveFolderUrl(idOrUrl?: string): string {
   if (!idOrUrl) return '';
-  const id = extractDriveFolderId(idOrUrl);
-  return id ? `https://drive.google.com/drive/folders/${id}` : '';
+  const str = idOrUrl.trim();
+  if (str.startsWith('http')) return str;
+  const id = extractDriveFolderId(str);
+  if (id && /^[a-zA-Z0-9_-]{15,}$/.test(id) && !id.includes('/')) {
+    return `https://drive.google.com/drive/folders/${id}`;
+  }
+  return '';
 }
 
 /**
@@ -115,7 +124,7 @@ export function formatAssessmentForGoogleSheet(item: BuildingAssessment) {
     'Tanggal Verifikasi': item.verifiedAt ? new Date(item.verifiedAt).toLocaleDateString('id-ID') : '-',
     'Catatan Verifikator': item.verificationNotes || '-',
     'Jumlah Foto Kerusakan': item.photos ? item.photos.length : 0,
-    'Link Folder Foto Google Drive': item.googleDriveFolderUrl || (item.photos && item.photos.length > 0 ? '(Tersimpan di Google Drive)' : '-'),
+    'Link Folder Foto Google Drive': item.googleDriveFolderUrl || '-',
     'Surveyor / Petugas': item.createdByName,
     'Kota Laporan': item.cityLocation,
     'Jumlah Tim Analisis': item.analysisTeam ? item.analysisTeam.length : 0,
@@ -185,7 +194,7 @@ export async function directSaveToGoogleSheet(
       dataBase64: p.url && p.url.startsWith('data:') ? p.url : undefined,
     })) : [],
     savePhotosToDrive: config.savePhotosToDrive !== false,
-    driveFolderId: cleanFolderId || undefined,
+    driveFolderId: (config.driveFolderId || '').trim() || undefined,
     timestamp: new Date().toISOString(),
   };
 
@@ -246,7 +255,7 @@ export async function testDrivePhotoUpload(
   const payload: GoogleSheetRowPayload = {
     action: 'test_drive',
     sheetName: config.sheetName || 'Data_Kerusakan_PUPR',
-    driveFolderId: cleanFolderId || undefined,
+    driveFolderId: (config.driveFolderId || '').trim() || undefined,
     savePhotosToDrive: true,
     data: {
       'No Registrasi': 'TEST-001',
@@ -785,23 +794,69 @@ function extractDriveFolderIdFromScript(input) {
 }
 
 /**
- * Menyimpan dokumentasi foto ke Google Drive dalam folder terstruktur per bangunan
+ * Mencari folder induk di Google Drive:
+ * 1. Coba melalui Google Drive ID (jika pengguna menyalin URL / ID)
+ * 2. Coba melalui NAMA folder persis (misal 'Data-IKBG/CK' seperti di Google Drive pengguna)
  */
-function savePhotosToGoogleDrive(photos, regCode, buildingName, parentFolderId) {
-  if (!photos || photos.length === 0) return "";
+function findTargetDriveFolder(parentFolderInput) {
+  if (!parentFolderInput) return null;
+  var raw = ("" + parentFolderInput).trim();
+  if (!raw) return null;
+
+  // 1. Coba cari dengan ID (jika berupa ID alfanumerik panjang tanpa slash)
+  var cleanId = extractDriveFolderIdFromScript(raw);
+  if (cleanId && /^[a-zA-Z0-9_-]{15,}$/.test(cleanId) && cleanId.indexOf('/') === -1) {
+    try {
+      var folderById = DriveApp.getFolderById(cleanId);
+      if (folderById) {
+        Logger.log("Folder Google Drive ditemukan via ID: " + cleanId);
+        return folderById;
+      }
+    } catch(eId) {
+      Logger.log("getFolderById gagal untuk ID '" + cleanId + "': " + eId);
+    }
+  }
+
+  // 2. Coba cari berdasarkan NAMA folder (misal: 'Data-IKBG/CK')
   try {
-    var parentFolder = null;
-    var cleanId = extractDriveFolderIdFromScript(parentFolderId);
-    
-    if (cleanId) {
-      try {
-        parentFolder = DriveApp.getFolderById(cleanId);
-      } catch(errFolder) {
-        Logger.log("Folder kustom dengan ID '" + cleanId + "' tidak ditemukan atau belum diberi izin: " + errFolder);
+    var foldersByName = DriveApp.getFoldersByName(raw);
+    if (foldersByName.hasNext()) {
+      var folderByName = foldersByName.next();
+      Logger.log("Folder Google Drive ditemukan via Nama: " + raw);
+      return folderByName;
+    }
+  } catch(eName) {
+    Logger.log("getFoldersByName gagal untuk nama '" + raw + "': " + eName);
+  }
+
+  // 3. Jika input memiliki pemisah slash (misal 'Data-IKBG/CK'), coba cari bagian terakhir atau pertama
+  if (raw.indexOf('/') !== -1) {
+    var parts = raw.split('/');
+    for (var p = 0; p < parts.length; p++) {
+      var seg = parts[p].trim();
+      if (seg && seg.length >= 3) {
+        try {
+          var fSeg = DriveApp.getFoldersByName(seg);
+          if (fSeg.hasNext()) {
+            return fSeg.next();
+          }
+        } catch(eSeg) {}
       }
     }
+  }
+
+  return null;
+}
+
+/**
+ * Menyimpan dokumentasi foto ke Google Drive dalam folder terstruktur per bangunan
+ */
+function savePhotosToGoogleDrive(photos, regCode, buildingName, parentFolderInput) {
+  if (!photos || photos.length === 0) return "";
+  try {
+    var parentFolder = findTargetDriveFolder(parentFolderInput);
     
-    // Jika folder induk tidak ditemukan / tidak diisi, gunakan atau buat folder utama SIM-PKBG
+    // Jika folder induk kustom tidak ditemukan / tidak diisi, gunakan atau buat folder utama SIM-PKBG
     if (!parentFolder) {
       var defaultFolderName = "SIM-PKBG PUPR - Dokumentasi Foto Kerusakan";
       var rootFolders = DriveApp.getFoldersByName(defaultFolderName);
@@ -846,19 +901,22 @@ function savePhotosToGoogleDrive(photos, regCode, buildingName, parentFolderId) 
         } catch(eDec) {}
       }
       
-      if (decoded) {
+      if (decoded && decoded.length > 0) {
         var safeLoc = (p.damageLocation || ("Foto_" + (i + 1))).replace(/[^a-zA-Z0-9 _-]/g, "_");
         var fileName = ("0" + (i + 1)).slice(-2) + "_" + safeLoc + ".jpg";
+        
+        // Hapus file lama jika ada agar diperbarui dengan file baru
         var existingFiles = targetFolder.getFilesByName(fileName);
-        if (existingFiles.hasNext()) {
-          var file = existingFiles.next();
-          file.setContent(decoded);
-          try { file.setSharing(DriveApp.Access.ANYONE_WITH_LINK, DriveApp.Permission.VIEW); } catch(e) {}
-        } else {
-          var blob = Utilities.newBlob(decoded, contentType, fileName);
-          var newFile = targetFolder.createFile(blob);
-          try { newFile.setSharing(DriveApp.Access.ANYONE_WITH_LINK, DriveApp.Permission.VIEW); } catch(e) {}
+        while (existingFiles.hasNext()) {
+          try {
+            existingFiles.next().setTrashed(true);
+          } catch(eTrash) {}
         }
+        
+        // Buat file baru dari binary blob
+        var blob = Utilities.newBlob(decoded, contentType, fileName);
+        var newFile = targetFolder.createFile(blob);
+        try { newFile.setSharing(DriveApp.Access.ANYONE_WITH_LINK, DriveApp.Permission.VIEW); } catch(e) {}
       }
     }
     return targetFolder.getUrl();

@@ -525,9 +525,15 @@ export const GoogleSheetIntegration: React.FC = () => {
                   <div className="mt-2 p-2.5 bg-indigo-100/70 border border-indigo-200 rounded-lg flex flex-wrap items-center justify-between gap-2 text-xs">
                     <div className="flex items-center gap-1.5 text-indigo-950">
                       <FolderCheck className="w-4 h-4 text-indigo-600 shrink-0" />
-                      <span className="font-mono text-[11px]">ID Folder Terdeteksi: <strong>{extractDriveFolderId(driveFolderIdInput) || 'Format Belum Tepat'}</strong></span>
+                      <span className="text-[11px]">
+                        {driveFolderIdInput.includes('drive.google.com') || (/^[a-zA-Z0-9_-]{15,}$/.test(extractDriveFolderId(driveFolderIdInput)) && !driveFolderIdInput.includes('/')) ? (
+                          <>ID Folder Terdeteksi: <strong className="font-mono">{extractDriveFolderId(driveFolderIdInput)}</strong></>
+                        ) : (
+                          <>Nama Folder Terdeteksi: <strong className="font-semibold">{driveFolderIdInput.trim()}</strong> (Apps Script akan mencari folder ini)</>
+                        )}
+                      </span>
                     </div>
-                    {getDriveFolderUrl(driveFolderIdInput) && (
+                    {getDriveFolderUrl(driveFolderIdInput) ? (
                       <a
                         href={getDriveFolderUrl(driveFolderIdInput)}
                         target="_blank"
@@ -537,9 +543,17 @@ export const GoogleSheetIntegration: React.FC = () => {
                         <ExternalLink className="w-3.5 h-3.5" />
                         <span>Buka Folder di Tab Baru</span>
                       </a>
+                    ) : (
+                      <span className="text-[10px] text-indigo-700 italic">
+                        Tip: Salin URL dari browser saat membuka folder ini untuk tautan langsung
+                      </span>
                     )}
                   </div>
                 )}
+                <div className="mt-2 p-2 bg-white/70 border border-indigo-200/60 rounded-lg text-[11px] text-slate-600">
+                  <span className="font-semibold text-indigo-950 block mb-0.5">💡 Cara mendapatkan Link Folder Google Drive:</span>
+                  <span>Buka folder Anda (misal: <em>Data-IKBG/CK</em>) di Google Drive, klik kanan folder atau klik panah samping namanya, pilih <strong>Bagikan &gt; Salin tautan</strong>, lalu tempel di kolom ini.</span>
+                </div>
               </div>
 
               {/* Uji Unggah Foto Google Drive */}
