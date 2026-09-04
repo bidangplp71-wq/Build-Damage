@@ -9,48 +9,6 @@
 import { BuildingPhoto } from '../types';
 
 /**
- * Checks if a file is an Apple HEIC/HEIF image based on extension or MIME type
- */
-function isHeicFile(file: File): boolean {
-  const name = file.name.toLowerCase();
-  const type = (file.type || '').toLowerCase();
-  return (
-    name.endsWith('.heic') ||
-    name.endsWith('.heif') ||
-    type === 'image/heic' ||
-    type === 'image/heif' ||
-    type.includes('heic') ||
-    type.includes('heif')
-  );
-}
-
-/**
- * Converts HEIC/HEIF file to standard JPEG blob using heic2any
- */
-async function convertHeicToJpeg(file: File): Promise<File | Blob> {
-  try {
-    const heic2anyModule = await import('heic2any');
-    const heic2any = ((heic2anyModule as { default?: unknown }).default || heic2anyModule) as (options: {
-      blob: Blob;
-      toType?: string;
-      quality?: number;
-    }) => Promise<Blob | Blob[]>;
-    const result = await heic2any({
-      blob: file,
-      toType: 'image/jpeg',
-      quality: 0.85,
-    });
-    const blob = Array.isArray(result) ? result[0] : result;
-    return new File([blob], file.name.replace(/\.(heic|heif)$/i, '.jpg'), {
-      type: 'image/jpeg',
-    });
-  } catch (err) {
-    console.warn('heic2any dynamic conversion fallback:', err);
-    return file;
-  }
-}
-
-/**
  * Compresses and standardizes any image file into an optimized Data URL
  */
 export async function compressImageFile(
@@ -59,11 +17,7 @@ export async function compressImageFile(
   maxHeight = 1200,
   quality = 0.78
 ): Promise<string> {
-  // 1. Process Apple HEIC/HEIF photos if detected
-  let file: File | Blob = rawFile;
-  if (isHeicFile(rawFile)) {
-    file = await convertHeicToJpeg(rawFile);
-  }
+  const file: File | Blob = rawFile;
 
   return new Promise((resolve) => {
     const reader = new FileReader();
