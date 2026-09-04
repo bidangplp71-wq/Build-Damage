@@ -44,10 +44,10 @@ export const AssessmentDetailModal: React.FC<Props> = ({ assessment, onClose }) 
   };
 
   return (
-    <div className="fixed inset-0 z-50 overflow-y-auto bg-slate-950/75 backdrop-blur-xs flex items-center justify-center p-2 sm:p-4 animate-in fade-in duration-150 print:static print:bg-transparent print:p-0 print:block">
-      <div className="bg-white rounded-2xl w-full max-w-4xl shadow-2xl border border-slate-300 max-h-[95vh] flex flex-col overflow-hidden print:shadow-none print:border-none print:rounded-none print:max-w-none print:max-h-none print:block print:overflow-visible">
+    <div className="fixed inset-0 z-50 overflow-y-auto bg-slate-950/75 backdrop-blur-xs flex items-center justify-center p-2 sm:p-4 animate-in fade-in duration-150 print:absolute print:inset-0 print:bg-transparent print:p-0 print:block print:overflow-visible">
+      <div className="bg-white rounded-2xl w-full max-w-4xl shadow-2xl border border-slate-300 max-h-[95vh] flex flex-col overflow-hidden print:shadow-none print:border-none print:rounded-none print:max-w-none print:max-h-none print:block print:overflow-visible print:absolute print:top-0 print:left-0 print:w-full">
         {/* Top Control Bar (Hidden on print) */}
-        <div className="no-print flex items-center justify-between px-6 py-4 border-b border-slate-200 bg-slate-50">
+        <div className="print:hidden flex items-center justify-between px-6 py-4 border-b border-slate-200 bg-slate-50">
           <div className="flex items-center gap-2">
             <span className="px-2.5 py-0.5 rounded-full text-xs font-bold bg-amber-100 text-amber-900 border border-amber-300">
               Dokumen Standar PUPR
@@ -99,7 +99,7 @@ export const AssessmentDetailModal: React.FC<Props> = ({ assessment, onClose }) 
         </div>
 
         {/* Official PUPR Printable Document Area */}
-        <div className="overflow-y-auto p-6 sm:p-10 font-sans text-slate-900 print-page space-y-6 print:overflow-visible print:h-auto">
+        <div className="overflow-y-auto p-6 sm:p-10 font-sans text-slate-900 space-y-6 print:overflow-visible print:h-auto print:p-0">
           {/* Header Title */}
           <div className="text-center border-b-2 border-slate-900 pb-4">
             <h2 className="text-base sm:text-lg font-black tracking-wide uppercase text-slate-950">

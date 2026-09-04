@@ -45,17 +45,17 @@ const MainLayout: React.FC = () => {
   }
 
   return (
-    <div className="min-h-screen bg-slate-100 flex font-sans text-slate-900 antialiased selection:bg-amber-500 selection:text-slate-950">
+    <div className="min-h-screen bg-slate-100 flex font-sans text-slate-900 antialiased selection:bg-amber-500 selection:text-slate-950 print:bg-white">
       {/* 1. Simple Vertical Tab Sidebar Navigation */}
-      <Navigation
+      <div className="print:hidden"><Navigation
         mobileOpen={mobileNavOpen}
         onCloseMobile={() => setMobileNavOpen(false)}
-      />
+      /></div>
 
       {/* 2. Main Work Area */}
-      <div className="flex-1 flex flex-col min-w-0 overflow-x-hidden">
+      <div className={`flex-1 flex flex-col min-w-0 ${selectedAssessmentForDetail ? "print:hidden" : "print:overflow-visible print:block"}`}>
         {/* Top bar with mobile hamburger and active tab title */}
-        <Header onToggleMobileNav={() => setMobileNavOpen((prev) => !prev)} />
+        <div className="print:hidden"><Header onToggleMobileNav={() => setMobileNavOpen((prev) => !prev)} /></div>
 
         {/* Dynamic Tab Content */}
         <main className="flex-1 p-4 sm:p-6 lg:p-8 w-full max-w-7xl mx-auto">
@@ -72,7 +72,7 @@ const MainLayout: React.FC = () => {
         </main>
 
         {/* Footer */}
-        <footer className="no-print bg-white border-t border-slate-200 py-4 px-4 sm:px-6 lg:px-8 mt-auto">
+        <footer className="print:hidden bg-white border-t border-slate-200 py-4 px-4 sm:px-6 lg:px-8 mt-auto">
           <div className="max-w-7xl mx-auto flex flex-col sm:flex-row items-center justify-between gap-2 text-xs text-slate-500">
             <div className="flex items-center gap-2">
               <span className="font-bold text-slate-800">SIM-PKBG PUPR</span>
