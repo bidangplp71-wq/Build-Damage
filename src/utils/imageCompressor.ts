@@ -1,57 +1,139 @@
 /**
  * Helper utility to resize and compress uploaded images for damage assessment photos.
+ * Supports all image formats: JPG, JPEG, PNG, WEBP, HEIC/HEIF (Apple iPhone/iPad),
+ * BMP, GIF, TIFF, AVIF, and raw camera uploads.
  * Ensures up to 10 photos per building can be stored smoothly in Firestore and local state
  * without exceeding the 1,048,576 bytes (1 MB) document limit.
  */
 
 import { BuildingPhoto } from '../types';
 
-export async function compressImageFile(
-  file: File,
-  maxWidth = 960,
-  maxHeight = 960,
-  quality = 0.68
-): Promise<string> {
-  return new Promise((resolve, reject) => {
-    const reader = new FileReader();
-    reader.onload = (e) => {
-      const img = new Image();
-      img.onload = () => {
-        let width = img.width;
-        let height = img.height;
+/**
+ * Checks if a file is an Apple HEIC/HEIF image based on extension or MIME type
+ */
+function isHeicFile(file: File): boolean {
+  const name = file.name.toLowerCase();
+  const type = (file.type || '').toLowerCase();
+  return (
+    name.endsWith('.heic') ||
+    name.endsWith('.heif') ||
+    type === 'image/heic' ||
+    type === 'image/heif' ||
+    type.includes('heic') ||
+    type.includes('heif')
+  );
+}
 
+/**
+ * Converts HEIC/HEIF file to standard JPEG blob using heic2any
+ */
+async function convertHeicToJpeg(file: File): Promise<File | Blob> {
+  try {
+    const heic2anyModule = await import('heic2any');
+    const heic2any = ((heic2anyModule as { default?: unknown }).default || heic2anyModule) as (options: {
+      blob: Blob;
+      toType?: string;
+      quality?: number;
+    }) => Promise<Blob | Blob[]>;
+    const result = await heic2any({
+      blob: file,
+      toType: 'image/jpeg',
+      quality: 0.85,
+    });
+    const blob = Array.isArray(result) ? result[0] : result;
+    return new File([blob], file.name.replace(/\.(heic|heif)$/i, '.jpg'), {
+      type: 'image/jpeg',
+    });
+  } catch (err) {
+    console.warn('heic2any dynamic conversion fallback:', err);
+    return file;
+  }
+}
+
+/**
+ * Compresses and standardizes any image file into an optimized Data URL
+ */
+export async function compressImageFile(
+  rawFile: File,
+  maxWidth = 1200,
+  maxHeight = 1200,
+  quality = 0.78
+): Promise<string> {
+  // 1. Process Apple HEIC/HEIF photos if detected
+  let file: File | Blob = rawFile;
+  if (isHeicFile(rawFile)) {
+    file = await convertHeicToJpeg(rawFile);
+  }
+
+  return new Promise((resolve) => {
+    const reader = new FileReader();
+
+    reader.onload = (e) => {
+      const originalDataUrl = (e.target?.result as string) || '';
+      if (!originalDataUrl) {
+        resolve('');
+        return;
+      }
+
+      const img = new Image();
+
+      img.onload = () => {
+        let width = img.width || maxWidth;
+        let height = img.height || maxHeight;
+
+        // Scale proportionally if dimensions exceed maximum bounds
         if (width > maxWidth || height > maxHeight) {
           if (width > height) {
             height = Math.round((height * maxWidth) / width);
             width = maxWidth;
           } else {
             width = Math.round((width * maxHeight) / height);
-            maxHeight = height;
+            height = maxHeight;
           }
         }
 
-        const canvas = document.createElement('canvas');
-        canvas.width = width;
-        canvas.height = height;
-        const ctx = canvas.getContext('2d');
-        if (!ctx) {
-          resolve(e.target?.result as string);
-          return;
-        }
+        try {
+          const canvas = document.createElement('canvas');
+          canvas.width = width;
+          canvas.height = height;
+          const ctx = canvas.getContext('2d');
 
-        // Draw and compress with progressive quality
-        ctx.drawImage(img, 0, 0, width, height);
-        const dataUrl = canvas.toDataURL('image/jpeg', quality);
-        resolve(dataUrl);
+          if (!ctx) {
+            resolve(originalDataUrl);
+            return;
+          }
+
+          // Fill white background for transparent PNG/WebP/GIF to avoid black backgrounds
+          ctx.fillStyle = '#FFFFFF';
+          ctx.fillRect(0, 0, width, height);
+
+          // Draw scaled image
+          ctx.drawImage(img, 0, 0, width, height);
+
+          // Standardize to clean, lightweight JPEG for cross-platform compatibility
+          const dataUrl = canvas.toDataURL('image/jpeg', quality);
+          resolve(dataUrl);
+        } catch (canvasErr) {
+          console.warn('Canvas compression fallback to raw data URL:', canvasErr);
+          resolve(originalDataUrl);
+        }
       };
+
       img.onerror = () => {
-        reject(new Error('Gagal memuat file gambar'));
+        // If browser cannot render on canvas (e.g. rare raw camera format or TIFF),
+        // fallback safely to original Data URL so the photo is never rejected
+        console.warn('Direct Image() render fallback for format:', rawFile.type || rawFile.name);
+        resolve(originalDataUrl);
       };
-      img.src = e.target?.result as string;
+
+      img.src = originalDataUrl;
     };
+
     reader.onerror = () => {
-      reject(new Error('Gagal membaca file gambar'));
+      console.error('FileReader failed to read photo:', rawFile.name);
+      resolve('');
     };
+
     reader.readAsDataURL(file);
   });
 }

@@ -903,7 +903,21 @@ function savePhotosToGoogleDrive(photos, regCode, buildingName, parentFolderInpu
       
       if (decoded && decoded.length > 0) {
         var safeLoc = (p.damageLocation || ("Foto_" + (i + 1))).replace(/[^a-zA-Z0-9 _-]/g, "_");
-        var fileName = ("0" + (i + 1)).slice(-2) + "_" + safeLoc + ".jpg";
+        
+        // Tentukan ekstensi file secara dinamis sesuai tipe MIME gambar
+        var ext = "jpg";
+        var lowerType = (contentType || "").toLowerCase();
+        if (lowerType.indexOf("png") !== -1) ext = "png";
+        else if (lowerType.indexOf("webp") !== -1) ext = "webp";
+        else if (lowerType.indexOf("gif") !== -1) ext = "gif";
+        else if (lowerType.indexOf("bmp") !== -1) ext = "bmp";
+        else if (lowerType.indexOf("svg") !== -1) ext = "svg";
+        else if (lowerType.indexOf("avif") !== -1) ext = "avif";
+        else if (lowerType.indexOf("tiff") !== -1 || lowerType.indexOf("tif") !== -1) ext = "tif";
+        else if (lowerType.indexOf("heic") !== -1) ext = "heic";
+        else if (lowerType.indexOf("heif") !== -1) ext = "heif";
+        
+        var fileName = ("0" + (i + 1)).slice(-2) + "_" + safeLoc + "." + ext;
         
         // Hapus file lama jika ada agar diperbarui dengan file baru
         var existingFiles = targetFolder.getFilesByName(fileName);

@@ -2270,12 +2270,12 @@ export const AssessmentForm: React.FC = () => {
                     )}
                   </div>
                   <p className="text-[11px] text-slate-500">
-                    File otomatis dikompresi agar ukuran tetap ringan dan kualitas tetap jernih untuk diperbesar
+                    Mendukung semua format foto: <strong>JPG, JPEG, PNG, WEBP, HEIC/HEIF (iPhone/Apple), BMP, GIF, TIFF, AVIF</strong>. File otomatis dioptimalkan agar ringan dan jernih.
                   </p>
                 </div>
                 <input
                   type="file"
-                  accept="image/*"
+                  accept="image/*, .heic, .heif, .jpg, .jpeg, .png, .webp, .bmp, .gif, .tiff, .tif, .avif"
                   multiple
                   disabled={photos.length >= 10 || isProcessingPhotos}
                   onChange={handlePhotoFilesSelected}
