@@ -948,6 +948,31 @@ function doGet(e) {
     timestamp: new Date().toISOString()
   })).setMimeType(ContentService.MimeType.JSON);
 }
+
+/**
+ * =========================================================================
+ * FUNGSI UJI COBA OTORISASI GOOGLE DRIVE & SPREADSHEET (JALANKAN SEKALI)
+ * =========================================================================
+ * Cara Pakai:
+ * 1. Di bilah menu atas editor Apps Script, pilih fungsi 'testIzinAksesGoogleDrive'
+ * 2. Klik tombol 'Jalankan' (Run)
+ * 3. Jika muncul pop-up "Otorisasi Diperlukan" (Authorization Required):
+ *    -> Klik 'Tinjau Izin' (Review permissions)
+ *    -> Pilih akun Google Anda
+ *    -> Klik 'Lanjutan' (Advanced)
+ *    -> Klik 'Buka ... (tidak aman)' / 'Go to ... (unsafe)'
+ *    -> Klik 'Izinkan' (Allow)
+ * 4. Setelah itu, Web App Anda sudah 100% berhak membuat folder & mengunggah foto ke Google Drive!
+ */
+function testIzinAksesGoogleDrive() {
+  var root = DriveApp.getRootFolder();
+  var ss = SpreadsheetApp.getActiveSpreadsheet();
+  Logger.log("SUKSES: Izin Google Drive & Spreadsheet telah aktif!");
+  Logger.log("Nama Folder Utama Drive: " + root.getName());
+  if (ss) {
+    Logger.log("Nama Spreadsheet Terhubung: " + ss.getName());
+  }
+}
 `;
 }
 
