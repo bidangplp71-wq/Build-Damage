@@ -255,7 +255,8 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
     localStorage.setItem(STORAGE_KEYS.USERS, JSON.stringify(users));
     if (db && !isInitialLoad.current) {
       users.forEach(user => {
-        setDoc(doc(db, 'users', user.id), user).catch(console.error);
+        const cleanUser = JSON.parse(JSON.stringify(user));
+        setDoc(doc(db, 'users', cleanUser.id), cleanUser).catch(console.error);
       });
     }
   }, [users]);
@@ -264,7 +265,9 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
     localStorage.setItem(STORAGE_KEYS.ASSESSMENTS, JSON.stringify(assessments));
     if (db && !isInitialLoad.current) {
       assessments.forEach(a => {
-        setDoc(doc(db, 'assessments', a.id), a).catch(console.error);
+        // Strip undefined fields for Firebase
+        const cleanA = JSON.parse(JSON.stringify(a));
+        setDoc(doc(db, 'assessments', cleanA.id), cleanA).catch(console.error);
       });
     }
   }, [assessments]);

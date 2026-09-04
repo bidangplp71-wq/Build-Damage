@@ -26,6 +26,7 @@ export const AssessmentDetailModal: React.FC<Props> = ({ assessment, onClose }) 
   const { syncAssessmentToSheet, showToast } = useApp();
   const [isSyncing, setIsSyncing] = useState(false);
   const [showSignatures, setShowSignatures] = useState(true);
+  const [showPhotos, setShowPhotos] = useState(false);
 
   const handlePrint = () => {
     window.print();
@@ -58,6 +59,15 @@ export const AssessmentDetailModal: React.FC<Props> = ({ assessment, onClose }) 
           </div>
 
           <div className="flex items-center gap-3">
+                        <label className="flex items-center gap-1.5 cursor-pointer text-xs font-semibold text-slate-700 bg-white border border-slate-300 px-3 py-1.5 rounded-xl hover:bg-slate-50 transition-colors">
+              <input 
+                type="checkbox" 
+                checked={showPhotos} 
+                onChange={(e) => setShowPhotos(e.target.checked)}
+                className="w-3.5 h-3.5 text-indigo-600 rounded border-slate-300 focus:ring-indigo-500"
+              />
+              <span>Cetak dgn Foto</span>
+            </label>
             {/* Toggle Signatures */}
             <label className="flex items-center gap-1.5 cursor-pointer text-xs font-semibold text-slate-700 bg-white border border-slate-300 px-3 py-1.5 rounded-xl hover:bg-slate-50 transition-colors">
               <input 
