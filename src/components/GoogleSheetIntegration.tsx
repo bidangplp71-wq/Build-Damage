@@ -438,11 +438,11 @@ export const GoogleSheetIntegration: React.FC = () => {
                   type="text"
                   value={driveFolderIdInput}
                   onChange={(e) => setDriveFolderIdInput(e.target.value)}
-                  placeholder="Kosongkan jika ingin dibuatkan otomatis: 'SIPANDU PUPR - Dokumentasi Foto Kerusakan'"
+                  placeholder="Kosongkan jika ingin dibuatkan otomatis: 'SIM-PKBG PUPR - Dokumentasi Foto Kerusakan'"
                   className="w-full px-3 py-2 rounded-xl border border-slate-200 font-mono text-slate-900 bg-white focus:outline-hidden focus:ring-2 focus:ring-indigo-500"
                 />
                 <p className="text-[10px] text-slate-500 mt-1">
-                  Bila dikosongkan, skrip akan otomatis membuat folder induk bernama <strong>SIPANDU PUPR - Dokumentasi Foto Kerusakan</strong> di Google Drive Anda.
+                  Bila dikosongkan, skrip akan otomatis membuat folder induk bernama <strong>SIM-PKBG PUPR - Dokumentasi Foto Kerusakan</strong> di Google Drive Anda.
                 </p>
               </div>
             </div>

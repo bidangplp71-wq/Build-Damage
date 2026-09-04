@@ -612,11 +612,11 @@ function savePhotosToGoogleDrive(photos, regCode, buildingName, parentFolderId) 
       } catch(e) {}
     }
     if (!parentFolder) {
-      var rootFolders = DriveApp.getFoldersByName("SIPANDU PUPR - Dokumentasi Foto Kerusakan");
+      var rootFolders = DriveApp.getFoldersByName("SIM-PKBG PUPR - Dokumentasi Foto Kerusakan");
       if (rootFolders.hasNext()) {
         parentFolder = rootFolders.next();
       } else {
-        parentFolder = DriveApp.createFolder("SIPANDU PUPR - Dokumentasi Foto Kerusakan");
+        parentFolder = DriveApp.createFolder("SIM-PKBG PUPR - Dokumentasi Foto Kerusakan");
         try { parentFolder.setSharing(DriveApp.Access.ANYONE_WITH_LINK, DriveApp.Permission.VIEW); } catch(e) {}
       }
     }
