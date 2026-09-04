@@ -19,6 +19,11 @@ interface Props {
   onClose: () => void;
 }
 
+const safeNumber = (val: unknown, fallback = 0): number => {
+  const n = typeof val === 'number' ? val : Number(val);
+  return Number.isFinite(n) ? n : fallback;
+};
+
 export const AssessmentDetailModal: React.FC<Props> = ({ assessment, onClose }) => {
   const { syncAssessmentToSheet, logUserActivity, showToast } = useApp();
   const [isSyncing, setIsSyncing] = useState(false);
@@ -30,12 +35,13 @@ export const AssessmentDetailModal: React.FC<Props> = ({ assessment, onClose }) 
   // Manage body class for print isolation & scroll lock
   useEffect(() => {
     document.body.classList.add('pupr-modal-active');
+    const safeTotalPercent = safeNumber(assessment.totalDamagePercent);
     logUserActivity(
       'VIEW_DETAIL',
       'Penilaian Kerusakan',
       `Membuka Rincian Penilaian: ${assessment.buildingName}`,
       assessment.code || assessment.buildingName,
-      `Klasifikasi: ${assessment.damageClassification} (${assessment.totalDamagePercent.toFixed(1)}%)`
+      `Klasifikasi: ${assessment.damageClassification || 'Belum Diklasifikasi'} (${safeTotalPercent.toFixed(1)}%)`
     );
     return () => {
       document.body.classList.remove('pupr-modal-active');
@@ -49,7 +55,7 @@ export const AssessmentDetailModal: React.FC<Props> = ({ assessment, onClose }) 
       'Pencetakan & Dokumen',
       `Mencetak Dokumen Laporan: ${assessment.buildingName} (Tanpa Foto)`,
       assessment.code || assessment.buildingName,
-      `Kategori: ${assessment.buildingCategory} — Nilai Rehab: Rp ${assessment.roundedRehabCost.toLocaleString('id-ID')}`
+      `Kategori: ${assessment.buildingCategory} — Nilai Rehab: Rp ${safeNumber(assessment.roundedRehabCost).toLocaleString('id-ID')}`
     );
     setTimeout(() => {
       window.print();
@@ -267,7 +273,7 @@ export const AssessmentDetailModal: React.FC<Props> = ({ assessment, onClose }) 
             <div className="space-y-2">
               <div className="flex items-center justify-between text-xs font-bold text-slate-800">
                 <span>Tabel Komponen Bangunan (Standar PUPR)</span>
-                <span>Nilai Tingkat Kerusakan: {assessment.totalDamagePercent.toFixed(2)}%</span>
+                <span>Nilai Tingkat Kerusakan: {safeNumber(assessment.totalDamagePercent).toFixed(2)}%</span>
               </div>
 
               <div className="overflow-x-auto border border-slate-300 rounded-lg">
@@ -282,25 +288,50 @@ export const AssessmentDetailModal: React.FC<Props> = ({ assessment, onClose }) 
                     </tr>
                   </thead>
                   <tbody className="divide-y divide-slate-200">
-                    {assessment.components.map((c, index) => (
-                      <tr key={c.id || index} className="hover:bg-slate-50">
-                        <td className="py-1.5 px-3 border-r border-slate-200 text-center font-mono text-slate-500">
-                          {index + 1}
-                        </td>
-                        <td className="py-1.5 px-3 border-r border-slate-200 font-medium text-slate-900">
-                          {c.name}
-                        </td>
-                        <td className="py-1.5 px-3 border-r border-slate-200 text-center font-mono text-slate-700">
-                          {c.weight.toFixed(1)}%
-                        </td>
-                        <td className="py-1.5 px-3 border-r border-slate-200 text-center font-mono text-slate-700">
-                          {c.damagePercent.toFixed(1)}%
-                        </td>
-                        <td className="py-1.5 px-3 text-center font-mono font-bold text-slate-950 bg-slate-50/50">
-                          {c.weightedDamage.toFixed(2)}%
+                    {!assessment.components || assessment.components.length === 0 ? (
+                      <tr>
+                        <td colSpan={5} className="py-4 text-center text-slate-400 italic">
+                          Belum ada rincian komponen yang tersimpan.
                         </td>
                       </tr>
-                    ))}
+                    ) : (
+                      assessment.components.map((c: any, index: number) => {
+                        const weight = safeNumber(c?.bobotPercent ?? c?.weight ?? 0);
+                        const damagePercent = safeNumber(c?.damagePercentInput ?? c?.damagePercent ?? 0);
+                        const weightedDamage = safeNumber(
+                          c?.calculatedScore ?? c?.weightedDamage ?? ((damagePercent * weight) / 100)
+                        );
+                        const compName = c?.subComponentName || c?.name || c?.componentName || `Komponen ${index + 1}`;
+                        const groupName = c?.componentName && c?.componentName !== compName ? c?.componentName : null;
+
+                        return (
+                          <tr key={c?.id || index} className="hover:bg-slate-50">
+                            <td className="py-1.5 px-3 border-r border-slate-200 text-center font-mono text-slate-500">
+                              {c?.componentNo || index + 1}
+                            </td>
+                            <td className="py-1.5 px-3 border-r border-slate-200 font-medium text-slate-900">
+                              {groupName ? (
+                                <div>
+                                  <span className="text-[10px] uppercase font-bold text-slate-500 block">{groupName}</span>
+                                  <span>{compName}</span>
+                                </div>
+                              ) : (
+                                <span>{compName}</span>
+                              )}
+                            </td>
+                            <td className="py-1.5 px-3 border-r border-slate-200 text-center font-mono text-slate-700">
+                              {weight.toFixed(1)}%
+                            </td>
+                            <td className="py-1.5 px-3 border-r border-slate-200 text-center font-mono text-slate-700">
+                              {damagePercent.toFixed(1)}%
+                            </td>
+                            <td className="py-1.5 px-3 text-center font-mono font-bold text-slate-950 bg-slate-50/50">
+                              {weightedDamage.toFixed(2)}%
+                            </td>
+                          </tr>
+                        );
+                      })
+                    )}
                   </tbody>
                   <tfoot className="border-t-2 border-slate-400 bg-slate-100 font-bold text-slate-950">
                     <tr>
@@ -308,7 +339,7 @@ export const AssessmentDetailModal: React.FC<Props> = ({ assessment, onClose }) 
                         Total Tingkat Kerusakan Bangunan:
                       </td>
                       <td className="py-2 px-3 text-center font-mono text-sm bg-amber-100 text-amber-950">
-                        {assessment.totalDamagePercent.toFixed(2)}%
+                        {safeNumber(assessment.totalDamagePercent).toFixed(2)}%
                       </td>
                     </tr>
                   </tfoot>
@@ -323,7 +354,7 @@ export const AssessmentDetailModal: React.FC<Props> = ({ assessment, onClose }) 
                   Kesimpulan Analisis Hasil Pengamatan Lapangan
                 </span>
                 <span className="text-xs font-extrabold px-2.5 py-1 rounded bg-amber-500 text-slate-950">
-                  Kategori: {assessment.damageClassification}
+                  Kategori: {assessment.damageClassification || 'Belum Diklasifikasi'}
                 </span>
               </div>
 
@@ -331,44 +362,44 @@ export const AssessmentDetailModal: React.FC<Props> = ({ assessment, onClose }) 
                 <div className="space-y-1.5">
                   <div className="flex justify-between">
                     <span className="text-slate-600">HSBGN (Biaya Bangunan Baru / M²)</span>
-                    <span className="font-mono font-semibold">{formatRupiah(assessment.hsbgnPerM2)}</span>
+                    <span className="font-mono font-semibold">{formatRupiah(safeNumber(assessment.hsbgnPerM2))}</span>
                   </div>
                   <div className="flex justify-between">
                     <span className="text-slate-600">Tingkat Kerusakan Total</span>
-                    <span className="font-mono font-semibold">{assessment.totalDamagePercent.toFixed(2)}%</span>
+                    <span className="font-mono font-semibold">{safeNumber(assessment.totalDamagePercent).toFixed(2)}%</span>
                   </div>
                   <div className="flex justify-between">
                     <span className="text-slate-600">Biaya Penanganan / M²</span>
-                    <span className="font-mono font-semibold">{formatRupiah(assessment.treatmentCostPerM2)}</span>
+                    <span className="font-mono font-semibold">{formatRupiah(safeNumber(assessment.treatmentCostPerM2))}</span>
                   </div>
                   <div className="flex justify-between">
-                    <span className="text-slate-600">Biaya Pembongkaran ({assessment.demolitionPercent}%) / M²</span>
-                    <span className="font-mono font-semibold">{formatRupiah(assessment.demolitionCostPerM2)}</span>
+                    <span className="text-slate-600">Biaya Pembongkaran ({safeNumber(assessment.demolitionPercent, 8)}%) / M²</span>
+                    <span className="font-mono font-semibold">{formatRupiah(safeNumber(assessment.demolitionCostPerM2))}</span>
                   </div>
                 </div>
 
                 <div className="space-y-1.5 border-t md:border-t-0 md:border-l border-slate-200 pt-2 md:pt-0 md:pl-4">
                   <div className="flex justify-between">
                     <span className="text-slate-600">Total Biaya Per M²</span>
-                    <span className="font-mono font-semibold">{formatRupiah(assessment.totalCostPerM2)}</span>
+                    <span className="font-mono font-semibold">{formatRupiah(safeNumber(assessment.totalCostPerM2))}</span>
                   </div>
                   <div className="flex justify-between">
                     <span className="text-slate-600">Luas Total Bangunan</span>
-                    <span className="font-mono font-semibold">{assessment.totalFloorAreaM2} M²</span>
+                    <span className="font-mono font-semibold">{safeNumber(assessment.totalFloorAreaM2)} M²</span>
                   </div>
                   <div className="flex justify-between font-bold text-slate-900 pt-1 border-t border-slate-200">
                     <span>Estimasi Biaya Rehabilitasi:</span>
-                    <span className="font-mono">{formatRupiah(assessment.totalRehabCost)}</span>
+                    <span className="font-mono">{formatRupiah(safeNumber(assessment.totalRehabCost))}</span>
                   </div>
                   <div className="flex justify-between font-extrabold text-amber-950 bg-amber-100 p-1.5 rounded border border-amber-300">
                     <span>Dibulatkan Menjadi:</span>
-                    <span className="font-mono text-sm">{formatRupiah(assessment.roundedRehabCost)}</span>
+                    <span className="font-mono text-sm">{formatRupiah(safeNumber(assessment.roundedRehabCost))}</span>
                   </div>
                 </div>
               </div>
 
               <div className="text-[11px] text-slate-600 italic border-t border-slate-200 pt-2">
-                Terbilang : {assessment.costTerbilang}
+                Terbilang : {assessment.costTerbilang || '-'}
               </div>
             </div>
 
@@ -379,7 +410,7 @@ export const AssessmentDetailModal: React.FC<Props> = ({ assessment, onClose }) 
                   <div className="flex items-center gap-2">
                     <Camera className="w-4 h-4 text-amber-600" />
                     <span className="text-xs font-bold uppercase tracking-wider text-slate-900">
-                      Dokumentasi Visual Kerusakan Fisik Bangunan ({assessment.photos?.length} / 10 Foto)
+                      Dokumentasi Visual Kerusakan Fisik Bangunan ({assessment.photos?.length || 0} / 10 Foto)
                     </span>
                   </div>
                   <span className="text-[11px] text-slate-500 font-medium">
@@ -402,13 +433,19 @@ export const AssessmentDetailModal: React.FC<Props> = ({ assessment, onClose }) 
                 {/* Left: Mengetahui / Menyetujui Kepala Dinas PUPR */}
                 <div className="space-y-1">
                   <p className="font-semibold text-slate-700">Mengetahui / Menyetujui,</p>
-                  <p className="font-bold text-slate-950">{assessment.headOfDepartment.title}</p>
-                  <p className="font-bold text-slate-950">{assessment.headOfDepartment.subTitle}</p>
+                  <p className="font-bold text-slate-950">{assessment.headOfDepartment?.title || 'Kepala Dinas Pekerjaan Umum dan Penataan Ruang'}</p>
+                  {assessment.headOfDepartment?.subTitle && (
+                    <p className="font-bold text-slate-950">{assessment.headOfDepartment.subTitle}</p>
+                  )}
                   <div className="h-20 flex items-end">
                     <div>
-                      <p className="font-bold underline text-slate-950">{assessment.headOfDepartment.name}</p>
-                      <p className="text-[11px] text-slate-700 font-medium">{assessment.headOfDepartment.rank}</p>
-                      <p className="text-[11px] text-slate-700 font-mono">NIP. {assessment.headOfDepartment.nip}</p>
+                      <p className="font-bold underline text-slate-950">{assessment.headOfDepartment?.name || '-'}</p>
+                      {assessment.headOfDepartment?.rank && (
+                        <p className="text-[11px] text-slate-700 font-medium">{assessment.headOfDepartment.rank}</p>
+                      )}
+                      <p className="text-[11px] text-slate-700 font-mono">
+                        {assessment.headOfDepartment?.nip ? `NIP. ${assessment.headOfDepartment.nip}` : 'NIP. -'}
+                      </p>
                     </div>
                   </div>
                 </div>
@@ -416,16 +453,20 @@ export const AssessmentDetailModal: React.FC<Props> = ({ assessment, onClose }) 
                 {/* Right: Tim Analisis PUPR */}
                 <div className="space-y-1 text-left sm:text-right print:text-right">
                   <p className="text-slate-600 font-medium">
-                    {assessment.cityLocation}, {assessment.reportDateStr}
+                    {assessment.cityLocation || 'Mbay'}, {assessment.reportDateStr || 'September 2026'}
                   </p>
                   <p className="font-bold text-slate-950">Tim Analisis Lapangan:</p>
                   <div className="space-y-2 pt-2 text-left sm:text-right print:text-right">
-                    {assessment.analysisTeam.map((teamMember, i) => (
-                      <div key={i} className="flex items-center justify-between sm:justify-end print:justify-end gap-2 text-[11px]">
-                        <span className="font-semibold text-slate-500">{i + 1}.</span>
-                        <span className="font-semibold text-slate-800 underline">{teamMember}</span>
-                      </div>
-                    ))}
+                    {assessment.analysisTeam && assessment.analysisTeam.length > 0 ? (
+                      assessment.analysisTeam.map((teamMember, i) => (
+                        <div key={i} className="flex items-center justify-between sm:justify-end print:justify-end gap-2 text-[11px]">
+                          <span className="font-semibold text-slate-500">{i + 1}.</span>
+                          <span className="font-semibold text-slate-800 underline">{teamMember}</span>
+                        </div>
+                      ))
+                    ) : (
+                      <p className="text-[11px] text-slate-500 italic">Tim Penilai PUPR / Surveyor</p>
+                    )}
                   </div>
                 </div>
               </div>

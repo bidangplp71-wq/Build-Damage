@@ -851,7 +851,7 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
       'Penilaian Kerusakan',
       `Input Penilaian Baru: ${data.buildingName}`,
       data.code || data.buildingName,
-      `Klasifikasi: ${data.damageClassification} (${data.totalDamagePercent.toFixed(1)}%) — Biaya: Rp ${data.roundedRehabCost.toLocaleString('id-ID')}`
+      `Klasifikasi: ${data.damageClassification} (${Number(data.totalDamagePercent ?? 0).toFixed(1)}%) — Biaya: Rp ${Number(data.roundedRehabCost ?? 0).toLocaleString('id-ID')}`
     );
 
     // Save directly to Google Sheet without needing manual synchronization

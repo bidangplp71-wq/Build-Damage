@@ -264,20 +264,21 @@ export function calculateRehabCosts(
  * Indonesian Rupiah Formatter
  */
 export function formatRupiah(amount: number): string {
+  const safeAmount = Number.isFinite(amount) ? amount : 0;
   return new Intl.NumberFormat('id-ID', {
     style: 'currency',
     currency: 'IDR',
     minimumFractionDigits: 0,
     maximumFractionDigits: 0,
-  }).format(amount);
+  }).format(safeAmount);
 }
 
 /**
  * Converts numbers to Indonesian words (Terbilang)
  */
 export function terbilang(n: number): string {
+  if (!Number.isFinite(n) || n === 0) return 'Nol';
   if (n < 0) return 'Minus ' + terbilang(Math.abs(n));
-  if (n === 0) return 'Nol';
 
   const angka = [
     '', 'Satu', 'Dua', 'Tiga', 'Empat', 'Lima', 'Enam', 'Tujuh', 'Delapan', 'Sembilan',

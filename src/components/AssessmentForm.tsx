@@ -1654,7 +1654,7 @@ export const AssessmentForm: React.FC = () => {
             <div className="flex items-center gap-2 bg-slate-900 text-white px-3 py-1.5 rounded-xl">
               <span className="text-xs text-slate-300">Total:</span>
               <span className="text-sm font-black text-amber-400">
-                {totalDamagePercent.toFixed(2)}%
+                {Number(totalDamagePercent ?? 0).toFixed(2)}%
               </span>
               <span
                 className={`text-[10px] font-bold px-2 py-0.5 rounded-full ${
@@ -1733,7 +1733,7 @@ export const AssessmentForm: React.FC = () => {
                   const currentVal = currentCompState ? currentCompState.damagePercentInput : 0;
                   return (
                     <option key={sub.id} value={sub.id}>
-                      {sub.subComponentName} (Bobot: {sub.bobotPercent.toFixed(2)}% | Nilai saat ini: {currentVal}%)
+                      {sub.subComponentName} (Bobot: {Number(sub.bobotPercent ?? 0).toFixed(2)}% | Nilai saat ini: {currentVal}%)
                     </option>
                   );
                 })}
@@ -1815,10 +1815,10 @@ export const AssessmentForm: React.FC = () => {
                         {c.subComponentName}
                       </td>
                       <td className="py-2.5 px-3 text-center text-slate-600 font-mono">
-                        {c.bobotPercent.toFixed(2)}%
+                        {Number(c.bobotPercent ?? 0).toFixed(2)}%
                       </td>
                       <td className="py-2.5 px-3 text-center text-slate-400 font-mono">
-                        {c.kerusakanMaxPercent.toFixed(2)}%
+                        {Number(c.kerusakanMaxPercent ?? 0).toFixed(2)}%
                       </td>
                       <td className="py-2 px-3 text-center">
                         <div className="flex items-center justify-center gap-1.5">
@@ -1857,7 +1857,7 @@ export const AssessmentForm: React.FC = () => {
                         </div>
                       </td>
                       <td className="py-2.5 px-3 text-right font-bold text-slate-900 font-mono">
-                        {c.calculatedScore.toFixed(2)}%
+                        {Number(c.calculatedScore ?? 0).toFixed(2)}%
                       </td>
                     </tr>
                   );
@@ -1872,7 +1872,7 @@ export const AssessmentForm: React.FC = () => {
                 <td></td>
                 <td></td>
                 <td className="py-3 px-3 text-right text-amber-400 font-mono text-sm">
-                  {totalDamagePercent.toFixed(2)}%
+                  {Number(totalDamagePercent ?? 0).toFixed(2)}%
                 </td>
               </tr>
             </tfoot>
@@ -1949,7 +1949,7 @@ export const AssessmentForm: React.FC = () => {
             <div className="flex items-center justify-between py-1 border-b border-amber-100">
               <span className="text-slate-600">B. Tingkat (%) Kerusakan:</span>
               <strong className="text-slate-900 font-mono font-bold">
-                {totalDamagePercent.toFixed(2)}%
+                {Number(totalDamagePercent ?? 0).toFixed(2)}%
               </strong>
             </div>
 
