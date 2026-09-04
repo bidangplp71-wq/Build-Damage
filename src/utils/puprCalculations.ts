@@ -277,37 +277,47 @@ export function formatRupiah(amount: number): string {
  * Converts numbers to Indonesian words (Terbilang)
  */
 export function terbilang(n: number): string {
-  if (!Number.isFinite(n) || n === 0) return 'Nol';
-  if (n < 0) return 'Minus ' + terbilang(Math.abs(n));
+  if (!Number.isFinite(n)) return 'Nol';
+  const rounded = Math.round(n);
+  if (rounded === 0) return 'Nol';
+  if (rounded < 0) return 'Minus ' + terbilang(Math.abs(rounded));
 
   const angka = [
     '', 'Satu', 'Dua', 'Tiga', 'Empat', 'Lima', 'Enam', 'Tujuh', 'Delapan', 'Sembilan',
     'Sepuluh', 'Sebelas'
   ];
 
-  let hasil = '';
-
-  if (n < 12) {
-    hasil = angka[n];
-  } else if (n < 20) {
-    hasil = terbilang(n - 10) + ' Belas';
-  } else if (n < 100) {
-    hasil = terbilang(Math.floor(n / 10)) + ' Puluh ' + terbilang(n % 10);
-  } else if (n < 200) {
-    hasil = 'Seratus ' + terbilang(n - 100);
-  } else if (n < 1000) {
-    hasil = terbilang(Math.floor(n / 100)) + ' Ratus ' + terbilang(n % 100);
-  } else if (n < 2000) {
-    hasil = 'Seribu ' + terbilang(n - 1000);
-  } else if (n < 1000000) {
-    hasil = terbilang(Math.floor(n / 1000)) + ' Ribu ' + terbilang(n % 1000);
-  } else if (n < 1000000000) {
-    hasil = terbilang(Math.floor(n / 1000000)) + ' Juta ' + terbilang(n % 1000000);
-  } else if (n < 1000000000000) {
-    hasil = terbilang(Math.floor(n / 1000000000)) + ' Milyar ' + terbilang(n % 1000000000);
-  } else {
-    hasil = terbilang(Math.floor(n / 1000000000000)) + ' Triliun ' + terbilang(n % 1000000000000);
+  function toWords(num: number): string {
+    if (num < 12) {
+      return angka[num];
+    } else if (num < 20) {
+      return toWords(num - 10) + ' Belas';
+    } else if (num < 100) {
+      const remainder = num % 10;
+      return toWords(Math.floor(num / 10)) + ' Puluh' + (remainder > 0 ? ' ' + toWords(remainder) : '');
+    } else if (num < 200) {
+      const remainder = num - 100;
+      return 'Seratus' + (remainder > 0 ? ' ' + toWords(remainder) : '');
+    } else if (num < 1000) {
+      const remainder = num % 100;
+      return toWords(Math.floor(num / 100)) + ' Ratus' + (remainder > 0 ? ' ' + toWords(remainder) : '');
+    } else if (num < 2000) {
+      const remainder = num - 1000;
+      return 'Seribu' + (remainder > 0 ? ' ' + toWords(remainder) : '');
+    } else if (num < 1000000) {
+      const remainder = num % 1000;
+      return toWords(Math.floor(num / 1000)) + ' Ribu' + (remainder > 0 ? ' ' + toWords(remainder) : '');
+    } else if (num < 1000000000) {
+      const remainder = num % 1000000;
+      return toWords(Math.floor(num / 1000000)) + ' Juta' + (remainder > 0 ? ' ' + toWords(remainder) : '');
+    } else if (num < 1000000000000) {
+      const remainder = num % 1000000000;
+      return toWords(Math.floor(num / 1000000000)) + ' Milyar' + (remainder > 0 ? ' ' + toWords(remainder) : '');
+    } else {
+      const remainder = num % 1000000000000;
+      return toWords(Math.floor(num / 1000000000000)) + ' Triliun' + (remainder > 0 ? ' ' + toWords(remainder) : '');
+    }
   }
 
-  return hasil.replace(/\s+/g, ' ').trim();
+  return toWords(rounded).replace(/\s+/g, ' ').trim();
 }

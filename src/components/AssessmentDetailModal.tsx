@@ -2,7 +2,7 @@ import React, { useState, useEffect } from 'react';
 import { createPortal } from 'react-dom';
 import { useApp } from '../context/AppContext';
 import { BuildingAssessment, BUILDING_CATEGORY_CONFIGS } from '../types';
-import { formatRupiah } from '../utils/puprCalculations';
+import { formatRupiah, terbilang } from '../utils/puprCalculations';
 import {
   Printer,
   FileSpreadsheet,
@@ -399,7 +399,7 @@ export const AssessmentDetailModal: React.FC<Props> = ({ assessment, onClose }) 
               </div>
 
               <div className="text-[11px] text-slate-600 italic border-t border-slate-200 pt-2">
-                Terbilang : {assessment.costTerbilang || '-'}
+                Terbilang : {assessment.roundedRehabCost !== undefined ? `${terbilang(safeNumber(assessment.roundedRehabCost))} Rupiah` : (assessment.costTerbilang || '-')}
               </div>
             </div>
 

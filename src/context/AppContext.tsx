@@ -289,38 +289,54 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
   
   // Load from Firebase ONCE on mount
   useEffect(() => {
-    if (!db) return;
+    if (!db) {
+      isInitialLoad.current = false;
+      return;
+    }
     
-    getDocs(collection(db, 'users')).then((snapshot) => {
-      if (!snapshot.empty) {
-        setUsers(snapshot.docs.map(doc => doc.data() as UserAccount));
-      } else {
-        // If empty, seed with INITIAL_USERS
-        INITIAL_USERS.forEach(u => {
-          const cleanU = JSON.parse(JSON.stringify(u));
-          setDoc(doc(db, 'users', cleanU.id), cleanU).catch(console.error);
-        });
-      }
-    }).catch(console.error);
+    Promise.allSettled([
+      getDocs(collection(db, 'users')).then((snapshot) => {
+        if (!snapshot.empty) {
+          setUsers(snapshot.docs.map((d) => d.data() as UserAccount));
+        } else {
+          // If empty, seed with INITIAL_USERS
+          INITIAL_USERS.forEach((u) => {
+            const cleanU = JSON.parse(JSON.stringify(u));
+            setDoc(doc(db, 'users', cleanU.id), cleanU).catch(() => {});
+          });
+        }
+      }).catch((err) => {
+        console.warn('Firebase users fetch offline/deferred:', err?.message || err);
+      }),
 
-    getDocs(collection(db, 'assessments')).then((snapshot) => {
-      if (!snapshot.empty) {
-        setAssessments(snapshot.docs.map(doc => doc.data() as BuildingAssessment));
-      } else {
-        INITIAL_ASSESSMENTS.forEach(a => {
-          const cleanA = JSON.parse(JSON.stringify(a));
-          setDoc(doc(db, 'assessments', cleanA.id), cleanA).catch(console.error);
-        });
-      }
-    }).catch(console.error);
+      getDocs(collection(db, 'assessments')).then((snapshot) => {
+        if (!snapshot.empty) {
+          setAssessments(snapshot.docs.map((d) => d.data() as BuildingAssessment));
+        } else {
+          INITIAL_ASSESSMENTS.forEach((a) => {
+            const cleanA = JSON.parse(JSON.stringify(a));
+            setDoc(doc(db, 'assessments', cleanA.id), cleanA).catch(() => {});
+          });
+        }
+      }).catch((err) => {
+        console.warn('Firebase assessments fetch offline/deferred:', err?.message || err);
+      }),
 
-    getDocs(collection(db, 'activity_logs')).then((snapshot) => {
-      if (!snapshot.empty) {
-        const remoteLogs = snapshot.docs.map(doc => doc.data() as UserActivityLog);
-        remoteLogs.sort((a, b) => new Date(b.timestamp).getTime() - new Date(a.timestamp).getTime());
-        setActivityLogs(remoteLogs);
-      }
-    }).catch(console.error);
+      getDocs(collection(db, 'activity_logs')).then((snapshot) => {
+        if (!snapshot.empty) {
+          const remoteLogs = snapshot.docs.map((d) => d.data() as UserActivityLog);
+          remoteLogs.sort((a, b) => new Date(b.timestamp).getTime() - new Date(a.timestamp).getTime());
+          setActivityLogs(remoteLogs);
+        }
+      }).catch((err) => {
+        console.warn('Firebase activity logs fetch offline/deferred:', err?.message || err);
+      }),
+    ]).finally(() => {
+      // Mark initial load finished after initial checks have settled
+      setTimeout(() => {
+        isInitialLoad.current = false;
+      }, 500);
+    });
   }, []);
 
   useEffect(() => {
@@ -330,9 +346,9 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
   useEffect(() => {
     localStorage.setItem(STORAGE_KEYS.USERS, JSON.stringify(users));
     if (db && !isInitialLoad.current) {
-      users.forEach(user => {
+      users.forEach((user) => {
         const cleanUser = JSON.parse(JSON.stringify(user));
-        setDoc(doc(db, 'users', cleanUser.id), cleanUser).catch(console.error);
+        setDoc(doc(db, 'users', cleanUser.id), cleanUser).catch(() => {});
       });
     }
   }, [users]);
@@ -340,18 +356,13 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
   useEffect(() => {
     localStorage.setItem(STORAGE_KEYS.ASSESSMENTS, JSON.stringify(assessments));
     if (db && !isInitialLoad.current) {
-      assessments.forEach(a => {
+      assessments.forEach((a) => {
         // Strip undefined fields for Firebase
         const cleanA = JSON.parse(JSON.stringify(a));
-        setDoc(doc(db, 'assessments', cleanA.id), cleanA).catch(console.error);
+        setDoc(doc(db, 'assessments', cleanA.id), cleanA).catch(() => {});
       });
     }
   }, [assessments]);
-
-  useEffect(() => {
-    const timer = setTimeout(() => { isInitialLoad.current = false; }, 2000);
-    return () => clearTimeout(timer);
-  }, []);
 
 
   useEffect(() => {
@@ -567,7 +578,7 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
 
     if (db) {
       const cleanLog = JSON.parse(JSON.stringify(newLog));
-      setDoc(doc(db, 'activity_logs', cleanLog.id), cleanLog).catch(console.error);
+      setDoc(doc(db, 'activity_logs', cleanLog.id), cleanLog).catch(() => {});
     }
 
     if (googleSheetConfig.webhookUrl && googleSheetConfig.webhookUrl.startsWith('http') && googleSheetConfig.directSaveEnabled) {
@@ -805,7 +816,8 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
       };
     }
 
-    if (db) { import('firebase/firestore').then(({ deleteDoc, doc }) => deleteDoc(doc(db, 'users', id))).catch(console.error); }; setUsers((prev) => prev.filter((u) => u.id !== id));
+    if (db) { import('firebase/firestore').then(({ deleteDoc, doc }) => deleteDoc(doc(db, 'users', id))).catch(() => {}); }
+    setUsers((prev) => prev.filter((u) => u.id !== id));
     return {
       success: true,
       message: `Pengguna ${target.name} berhasil dihapus.`,
@@ -948,7 +960,8 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
       );
     }
 
-    if (db) { import('firebase/firestore').then(({ deleteDoc, doc }) => deleteDoc(doc(db, 'assessments', id))).catch(console.error); }; setAssessments((prev) => prev.filter((a) => a.id !== id));
+    if (db) { import('firebase/firestore').then(({ deleteDoc, doc }) => deleteDoc(doc(db, 'assessments', id))).catch(() => {}); }
+    setAssessments((prev) => prev.filter((a) => a.id !== id));
     return {
       success: true,
       message: 'Data penilaian gedung berhasil dihapus.',

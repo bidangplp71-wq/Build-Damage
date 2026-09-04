@@ -1,0 +1,73 @@
+{
+  "entities": {
+    "UserAccount": {
+      "title": "UserAccount",
+      "description": "Akun pengguna sistem SIPANDU Kerusakan PUPR",
+      "type": "object",
+      "properties": {
+        "id": { "type": "string" },
+        "username": { "type": "string" },
+        "fullName": { "type": "string" },
+        "email": { "type": "string" },
+        "role": { "type": "string", "enum": ["super_admin", "admin_dinas", "verifikator", "surveyor", "kepala_dinas", "guest"] },
+        "isActive": { "type": "boolean" },
+        "createdAt": { "type": "string" },
+        "updatedAt": { "type": "string" }
+      },
+      "required": ["id", "username", "fullName", "role"]
+    },
+    "BuildingAssessment": {
+      "title": "BuildingAssessment",
+      "description": "Data penilaian kerusakan bangunan gedung pasca bencana standar PUPR",
+      "type": "object",
+      "properties": {
+        "id": { "type": "string" },
+        "code": { "type": "string" },
+        "buildingName": { "type": "string" },
+        "buildingCategory": { "type": "string" },
+        "kecamatanId": { "type": "string" },
+        "desaId": { "type": "string" },
+        "totalDamagePercent": { "type": "number" },
+        "damageClassification": { "type": "string" },
+        "totalRehabCost": { "type": "number" },
+        "roundedRehabCost": { "type": "number" },
+        "surveyorName": { "type": "string" },
+        "surveyDate": { "type": "string" },
+        "verificationStatus": { "type": "string" },
+        "googleSheetSynced": { "type": "boolean" },
+        "createdAt": { "type": "string" },
+        "updatedAt": { "type": "string" }
+      },
+      "required": ["id", "buildingName", "damageClassification", "verificationStatus"]
+    },
+    "UserActivityLog": {
+      "title": "UserActivityLog",
+      "description": "Catatan log audit aktivitas pengguna",
+      "type": "object",
+      "properties": {
+        "id": { "type": "string" },
+        "userId": { "type": "string" },
+        "userName": { "type": "string" },
+        "action": { "type": "string" },
+        "actionCategory": { "type": "string" },
+        "actionDescription": { "type": "string" },
+        "timestamp": { "type": "string" }
+      },
+      "required": ["id", "action", "timestamp"]
+    }
+  },
+  "firestore": {
+    "/users/{userId}": {
+      "schema": "#/entities/UserAccount",
+      "description": "Data pengguna terdaftar di aplikasi"
+    },
+    "/assessments/{assessmentId}": {
+      "schema": "#/entities/BuildingAssessment",
+      "description": "Koleksi data penilaian kerusakan bangunan PUPR"
+    },
+    "/activity_logs/{logId}": {
+      "schema": "#/entities/UserActivityLog",
+      "description": "Koleksi jejak audit aktivitas pengguna"
+    }
+  }
+}
