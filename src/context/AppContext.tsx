@@ -31,6 +31,8 @@ import {
   canManageUserPassword,
   canViewUserPassword,
 } from '../utils/security';
+import { db } from '../services/firebase';
+import { collection, onSnapshot, doc, setDoc, getDocs } from 'firebase/firestore';
 
 interface AppContextType {
   // Current user & Auth
@@ -224,13 +226,54 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
   const [toastMessage, setToastMessage] = useState<{ type: 'success' | 'error' | 'info'; text: string } | null>(null);
 
   // Sync to local storage
+
+  const isInitialLoad = React.useRef(true);
+  
+  // Load from Firebase ONCE on mount
+  useEffect(() => {
+    if (!db) return;
+    
+    getDocs(collection(db, 'users')).then((snapshot) => {
+      if (!snapshot.empty) {
+        setUsers(snapshot.docs.map(doc => doc.data() as UserAccount));
+      } else {
+        // If empty, seed with INITIAL_USERS
+        INITIAL_USERS.forEach(u => setDoc(doc(db, 'users', u.id), u));
+      }
+    });
+
+    getDocs(collection(db, 'assessments')).then((snapshot) => {
+      if (!snapshot.empty) {
+        setAssessments(snapshot.docs.map(doc => doc.data() as BuildingAssessment));
+      } else {
+        INITIAL_ASSESSMENTS.forEach(a => setDoc(doc(db, 'assessments', a.id), a));
+      }
+    });
+  }, []);
+
   useEffect(() => {
     localStorage.setItem(STORAGE_KEYS.USERS, JSON.stringify(users));
+    if (db && !isInitialLoad.current) {
+      users.forEach(user => {
+        setDoc(doc(db, 'users', user.id), user).catch(console.error);
+      });
+    }
   }, [users]);
 
   useEffect(() => {
     localStorage.setItem(STORAGE_KEYS.ASSESSMENTS, JSON.stringify(assessments));
+    if (db && !isInitialLoad.current) {
+      assessments.forEach(a => {
+        setDoc(doc(db, 'assessments', a.id), a).catch(console.error);
+      });
+    }
   }, [assessments]);
+
+  useEffect(() => {
+    const timer = setTimeout(() => { isInitialLoad.current = false; }, 2000);
+    return () => clearTimeout(timer);
+  }, []);
+
 
   useEffect(() => {
     localStorage.setItem(STORAGE_KEYS.KECAMATAN, JSON.stringify(kecamatans));
@@ -591,7 +634,7 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
       };
     }
 
-    setUsers((prev) => prev.filter((u) => u.id !== id));
+    if (db) { import('firebase/firestore').then(({ deleteDoc, doc }) => deleteDoc(doc(db, 'users', id))).catch(console.error); }; setUsers((prev) => prev.filter((u) => u.id !== id));
     return {
       success: true,
       message: `Pengguna ${target.name} berhasil dihapus.`,
@@ -703,7 +746,7 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
       );
     }
 
-    setAssessments((prev) => prev.filter((a) => a.id !== id));
+    if (db) { import('firebase/firestore').then(({ deleteDoc, doc }) => deleteDoc(doc(db, 'assessments', id))).catch(console.error); }; setAssessments((prev) => prev.filter((a) => a.id !== id));
     return {
       success: true,
       message: 'Data penilaian gedung berhasil dihapus.',

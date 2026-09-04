@@ -1,17 +1,10 @@
 import { initializeApp, getApps, getApp, FirebaseApp } from 'firebase/app';
 import { getFirestore, Firestore, collection, doc, setDoc, getDocs, deleteDoc } from 'firebase/firestore';
 import { getAuth, Auth } from 'firebase/auth';
+import firebaseAppletConfig from '../../firebase-applet-config.json';
 
-// Configuration provided for SIM-PKBG Firebase Project
-export const firebaseConfig = {
-  apiKey: "AIzaSyAdB8hNlAtVeP5U2_7AId8QnuOWGV9BBG8",
-  authDomain: "simpkbg.firebaseapp.com",
-  projectId: "simpkbg",
-  storageBucket: "simpkbg.firebasestorage.app",
-  messagingSenderId: "819784811353",
-  appId: "1:819784811353:web:71b15df4ca19e73a554248",
-  measurementId: "G-HN60YKJL3Y"
-};
+// Export the generated config
+export const firebaseConfig = firebaseAppletConfig;
 
 let app: FirebaseApp | null = null;
 let db: Firestore | null = null;
@@ -20,7 +13,14 @@ let auth: Auth | null = null;
 try {
   if (typeof window !== 'undefined') {
     app = getApps().length > 0 ? getApp() : initializeApp(firebaseConfig);
-    db = getFirestore(app);
+    
+    // IMPORTANT: Use the specific databaseId if provided in the generated config
+    if (firebaseConfig.firestoreDatabaseId) {
+      db = getFirestore(app, firebaseConfig.firestoreDatabaseId);
+    } else {
+      db = getFirestore(app);
+    }
+    
     auth = getAuth(app);
   }
 } catch (err) {
@@ -39,6 +39,7 @@ export async function testFirebaseConnection(): Promise<{ success: boolean; mess
       message: 'Firebase SDK belum terinisialisasi pada browser ini.'
     };
   }
+
   try {
     const testCol = collection(db, 'system_health');
     const snapshot = await getDocs(testCol);
