@@ -1,10 +1,11 @@
 import * as XLSX from 'xlsx';
-import { BuildingAssessment, GoogleSheetConfig, Kecamatan } from '../types';
+import { BuildingAssessment, GoogleSheetConfig, Kecamatan, UserActivityLog } from '../types';
 import { formatRupiah } from '../utils/puprCalculations';
 
 export interface GoogleSheetRowPayload {
-  action: 'insert' | 'update' | 'delete' | 'sync_all' | 'ping';
+  action: 'insert' | 'update' | 'delete' | 'sync_all' | 'ping' | 'sync_activity_logs' | 'log_user_access';
   sheetName: string;
+  logSheetName?: string;
   kecamatanSheetName?: string;
   splitByKecamatan?: boolean;
   includeMasterSummary?: boolean;
@@ -309,6 +310,35 @@ function doPost(e) {
         message: "Berhasil membuat " + createdTabs.length + " sheet kecamatan + 1 Master Rekap!",
         kecamatanTabs: createdTabs,
         totalRecords: allRows.length
+      })).setMimeType(ContentService.MimeType.JSON);
+    }
+
+    // ACTION 2B: SYNC USER ACCESS LOGS & AUDIT TRAIL TO DEDICATED SHEET
+    if (action === 'sync_activity_logs') {
+      var logRows = json.data || [];
+      var logTabName = json.logSheetName || "Log_Akses_Pengguna";
+      var logSheet = getOrCreateSheet(ss, logTabName);
+      writeTableToSheet(logSheet, logRows, "#4338ca"); // Indigo Header
+
+      return ContentService.createTextOutput(JSON.stringify({
+        status: "success",
+        message: "Berhasil menyinkronkan " + logRows.length + " data log akses pengguna ke sheet '" + logTabName + "'!",
+        totalLogs: logRows.length,
+        sheet: logTabName
+      })).setMimeType(ContentService.MimeType.JSON);
+    }
+
+    // ACTION 2C: APPEND SINGLE USER ACCESS LOG
+    if (action === 'log_user_access') {
+      var singleLog = json.data;
+      if (singleLog) {
+        var logTabName2 = json.logSheetName || "Log_Akses_Pengguna";
+        var logSheet2 = getOrCreateSheet(ss, logTabName2);
+        saveOrUpdateRow(logSheet2, singleLog, singleLog['ID Log'] || "", 'insert', "#4338ca");
+      }
+      return ContentService.createTextOutput(JSON.stringify({
+        status: "success",
+        message: "Log akses tercatat di Google Sheet!"
       })).setMimeType(ContentService.MimeType.JSON);
     }
     
@@ -746,3 +776,185 @@ export function exportAssessmentsToCSV(assessments: BuildingAssessment[], custom
   link.click();
   document.body.removeChild(link);
 }
+
+/**
+ * Formats a UserActivityLog entry into tabular columns for Google Sheets & Excel
+ */
+export function formatActivityLogForGoogleSheet(log: UserActivityLog, index?: number) {
+  const d = new Date(log.timestamp);
+  const formattedWaktu = d.toLocaleDateString('id-ID', {
+    day: '2-digit',
+    month: 'short',
+    year: 'numeric',
+  }) + ' ' + d.toLocaleTimeString('id-ID', { hour: '2-digit', minute: '2-digit', second: '2-digit' });
+
+  return {
+    'No': index !== undefined ? index + 1 : 1,
+    'Waktu Akses': formattedWaktu,
+    'Nama Pengguna': log.userName,
+    'Email': log.userEmail,
+    'Peran / Role': log.roleTitle,
+    'Kategori Aktivitas': log.actionCategory,
+    'Tindakan / Jenis Akses': log.actionDescription,
+    'Objek / Dokumen Target': log.targetResource || '-',
+    'Rincian / Keterangan': log.details || '-',
+    'IP Address': log.ipAddress || '127.0.0.1 (Web Preview)',
+    'Timestamp ISO': log.timestamp,
+    'ID Log': log.id,
+  };
+}
+
+/**
+ * Directly stream a single activity log to Google Sheet
+ */
+export async function directSaveActivityLogToGoogleSheet(
+  log: UserActivityLog,
+  config: GoogleSheetConfig
+): Promise<{ success: boolean; message: string }> {
+  if (!config.webhookUrl || !config.webhookUrl.startsWith('http')) {
+    return { success: false, message: 'Webhook Google Sheet belum dikonfigurasi.' };
+  }
+
+  const spreadsheetId = extractSpreadsheetId(config.spreadsheetUrl);
+  const rowData = formatActivityLogForGoogleSheet(log);
+
+  const payload: GoogleSheetRowPayload = {
+    action: 'log_user_access',
+    sheetName: config.sheetName || 'Data_Kerusakan_PUPR',
+    logSheetName: config.logSheetName || 'Log_Akses_Pengguna',
+    spreadsheetUrl: config.spreadsheetUrl,
+    spreadsheetId: spreadsheetId || undefined,
+    data: rowData,
+    timestamp: new Date().toISOString(),
+  };
+
+  try {
+    await fetch(config.webhookUrl, {
+      method: 'POST',
+      mode: 'no-cors',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify(payload),
+    });
+    return { success: true, message: 'Log akses tercatat di Google Sheet!' };
+  } catch (err: any) {
+    console.error('Error saving activity log to Google Sheet:', err);
+    return { success: false, message: err.message || 'Gagal menyimpan log ke Google Sheet' };
+  }
+}
+
+/**
+ * Sync multiple activity logs to the dedicated 'Log_Akses_Pengguna' sheet tab in Google Sheets
+ */
+export async function syncActivityLogsToGoogleSheet(
+  logs: UserActivityLog[],
+  config: GoogleSheetConfig
+): Promise<{ success: boolean; message: string; count: number }> {
+  if (!config.webhookUrl || !config.webhookUrl.startsWith('http')) {
+    return { success: false, message: 'Webhook Google Sheet belum dikonfigurasi.', count: 0 };
+  }
+
+  if (logs.length === 0) {
+    return { success: false, message: 'Belum ada data log aktivitas untuk disinkronkan.', count: 0 };
+  }
+
+  const rows = logs.map((l, idx) => formatActivityLogForGoogleSheet(l, idx));
+  const spreadsheetId = extractSpreadsheetId(config.spreadsheetUrl);
+  const logTab = config.logSheetName || 'Log_Akses_Pengguna';
+
+  const payload: GoogleSheetRowPayload = {
+    action: 'sync_activity_logs',
+    sheetName: config.sheetName || 'Data_Kerusakan_PUPR',
+    logSheetName: logTab,
+    spreadsheetUrl: config.spreadsheetUrl,
+    spreadsheetId: spreadsheetId || undefined,
+    data: rows,
+    timestamp: new Date().toISOString(),
+  };
+
+  try {
+    await fetch(config.webhookUrl, {
+      method: 'POST',
+      mode: 'no-cors',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify(payload),
+    });
+
+    return {
+      success: true,
+      message: `Berhasil sinkronisasi ${logs.length} catatan log akses ke tab "${logTab}" di Google Sheet!`,
+      count: logs.length,
+    };
+  } catch (err: any) {
+    return {
+      success: false,
+      message: `Gagal sinkronisasi log ke Google Sheet: ${err.message}`,
+      count: 0,
+    };
+  }
+}
+
+/**
+ * Export UserActivityLogs to Excel (.xlsx)
+ */
+export function exportActivityLogsToExcel(logs: UserActivityLog[]): void {
+  if (logs.length === 0) return;
+
+  const rows = logs.map((l, idx) => formatActivityLogForGoogleSheet(l, idx));
+  const wb = XLSX.utils.book_new();
+  const ws = XLSX.utils.json_to_sheet(rows);
+
+  ws['!cols'] = [
+    { wch: 6 },  // No
+    { wch: 22 }, // Waktu Akses
+    { wch: 25 }, // Nama Pengguna
+    { wch: 28 }, // Email
+    { wch: 20 }, // Peran / Role
+    { wch: 22 }, // Kategori Aktivitas
+    { wch: 35 }, // Tindakan / Jenis Akses
+    { wch: 35 }, // Objek / Dokumen Target
+    { wch: 40 }, // Rincian / Keterangan
+    { wch: 20 }, // IP Address
+    { wch: 25 }, // Timestamp ISO
+    { wch: 25 }, // ID Log
+  ];
+
+  XLSX.utils.book_append_sheet(wb, ws, 'Log_Akses_Pengguna');
+  const dateStr = new Date().toISOString().slice(0, 10);
+  XLSX.writeFile(wb, `Log_Akses_Pengguna_SIM_PKBG_${dateStr}.xlsx`);
+}
+
+/**
+ * Export UserActivityLogs to CSV
+ */
+export function exportActivityLogsToCsv(logs: UserActivityLog[]): void {
+  if (logs.length === 0) return;
+
+  const rows = logs.map((l, idx) => formatActivityLogForGoogleSheet(l, idx));
+  const headers = Object.keys(rows[0]);
+
+  const escapeCSV = (str: any) => {
+    if (str === null || str === undefined) return '""';
+    const s = String(str).replace(/"/g, '""');
+    return `"${s}"`;
+  };
+
+  const csvLines: string[] = [];
+  csvLines.push(headers.map(escapeCSV).join(','));
+
+  for (const row of rows) {
+    const values = headers.map((header) => escapeCSV(row[header as keyof typeof row]));
+    csvLines.push(values.join(','));
+  }
+
+  const csvContent = '\uFEFF' + csvLines.join('\r\n');
+  const blob = new Blob([csvContent], { type: 'text/csv;charset=utf-8;' });
+  const url = URL.createObjectURL(blob);
+  const link = document.createElement('a');
+  link.setAttribute('href', url);
+  const dateStr = new Date().toISOString().slice(0, 10);
+  link.setAttribute('download', `Log_Akses_Pengguna_${dateStr}.csv`);
+  document.body.appendChild(link);
+  link.click();
+  document.body.removeChild(link);
+}
+

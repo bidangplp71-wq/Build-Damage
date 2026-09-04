@@ -246,16 +246,39 @@ export const AssessmentForm: React.FC = () => {
 
   // City & Officials
   const [cityLocation, setCityLocation] = useState('Mbay');
-  const [reportDateStr, setReportDateStr] = useState('Agustus 2026');
-  const [headName, setHeadName] = useState('Dionisius T. Ndolu, S.T., M.Si.');
-  const [headNip, setHeadNip] = useState('19740512 200212 1 004');
-  const [headRank, setHeadRank] = useState('Pembina TK I');
-  const [analysisTeam, setAnalysisTeam] = useState<string[]>([
-    'Ir. Fransiskus Xaverius, S.T. (Ketua Tim Teknis)',
-    'Petrus Kanisius, S.T. (Ahli Struktur)',
-    'Yoseph Lodo, A.Md.T. (Surveyor Lapangan)',
-    'Agustina Lali, S.T. (Estimator Anggaran)',
-  ]);
+  const [reportDateStr, setReportDateStr] = useState('September 2026');
+  const [headName, setHeadName] = useState('');
+  const [headNip, setHeadNip] = useState('');
+  const [headRank, setHeadRank] = useState('');
+  const [analysisTeam, setAnalysisTeam] = useState<string[]>([]);
+
+  // Input states for dynamic team member addition
+  const [newTeamMemberName, setNewTeamMemberName] = useState('');
+  const [newTeamMemberRole, setNewTeamMemberRole] = useState('Surveyor Lapangan');
+  const [customTeamRole, setCustomTeamRole] = useState('');
+
+  const handleAddTeamMember = () => {
+    const name = newTeamMemberName.trim();
+    if (!name) return;
+    const role = newTeamMemberRole === 'Lainnya' ? customTeamRole.trim() : newTeamMemberRole;
+    const fullEntry = role ? `${name} (${role})` : name;
+    if (!analysisTeam.includes(fullEntry)) {
+      setAnalysisTeam((prev) => [...prev, fullEntry]);
+    }
+    setNewTeamMemberName('');
+    setCustomTeamRole('');
+  };
+
+  const handleRemoveTeamMember = (indexToRemove: number) => {
+    setAnalysisTeam((prev) => prev.filter((_, idx) => idx !== indexToRemove));
+  };
+
+  const handleAddSelfToTeam = () => {
+    const myEntry = `${currentUser.name} (Surveyor Lapangan)`;
+    if (!analysisTeam.includes(myEntry)) {
+      setAnalysisTeam((prev) => [...prev, myEntry]);
+    }
+  };
 
   // Load existing data if edit mode
   useEffect(() => {
@@ -2218,6 +2241,191 @@ export const AssessmentForm: React.FC = () => {
             onEditPhoto={(p) => setEditingPhoto(p)}
             onSelectPhoto={(idx) => setPreviewPhotoIndex(idx)}
           />
+        </div>
+      </div>
+
+      {/* SECTION VII: TIM LAPANGAN & PENGESAHAN LAPORAN (STANDAR PUPR) */}
+      <div className="bg-white rounded-3xl p-6 border border-slate-200/80 shadow-xs space-y-6">
+        <div className="flex items-center justify-between border-b border-slate-100 pb-4">
+          <div className="flex items-center gap-2">
+            <span className="p-2 rounded-xl bg-amber-50 text-amber-700 border border-amber-100">
+              <Users className="w-5 h-5" />
+            </span>
+            <div>
+              <h3 className="text-base font-bold text-slate-900">
+                VII. Tim Lapangan & Lembar Pengesahan Dokumen (PUPR)
+              </h3>
+              <p className="text-xs text-slate-500">
+                Input personil tim surveyor lapangan yang melakukan verifikasi/penilaian teknis dan rincian pejabat penandatangan.
+              </p>
+            </div>
+          </div>
+        </div>
+
+        {/* 1. Input Tim Lapangan Dinamis */}
+        <div className="space-y-3">
+          <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-2">
+            <label className="block text-xs font-bold text-slate-800 uppercase tracking-wider">
+              Personil Tim Lapangan ({analysisTeam.length} Orang Terdaftar)
+            </label>
+            <button
+              type="button"
+              onClick={handleAddSelfToTeam}
+              className="text-xs text-indigo-600 hover:text-indigo-700 font-bold flex items-center gap-1 cursor-pointer self-start sm:self-auto"
+            >
+              <UserPlus className="w-3.5 h-3.5" />
+              <span>+ Masukkan Akun Saya ({currentUser.name})</span>
+            </button>
+          </div>
+
+          {/* Form baris tambah anggota */}
+          <div className="grid grid-cols-1 sm:grid-cols-12 gap-2 bg-slate-50 p-3.5 rounded-2xl border border-slate-200">
+            <div className="sm:col-span-6">
+              <input
+                type="text"
+                value={newTeamMemberName}
+                onChange={(e) => setNewTeamMemberName(e.target.value)}
+                onKeyDown={(e) => {
+                  if (e.key === 'Enter') {
+                    e.preventDefault();
+                    handleAddTeamMember();
+                  }
+                }}
+                placeholder="Nama Lengkap Petugas & Gelar (cth: Yoseph Lado, A.Md.T.)"
+                className="w-full px-3 py-2 text-xs rounded-xl border border-slate-200 bg-white font-medium text-slate-900 focus:outline-none focus:ring-2 focus:ring-amber-500/20"
+              />
+            </div>
+            <div className="sm:col-span-4">
+              <select
+                value={newTeamMemberRole}
+                onChange={(e) => setNewTeamMemberRole(e.target.value)}
+                className="w-full px-3 py-2 text-xs rounded-xl border border-slate-200 bg-white font-semibold text-slate-700"
+              >
+                <option value="Surveyor Lapangan">Surveyor Lapangan</option>
+                <option value="Ketua Tim Teknis">Ketua Tim Teknis</option>
+                <option value="Ahli Struktur">Ahli Struktur</option>
+                <option value="Ahli Arsitektur">Ahli Arsitektur</option>
+                <option value="Estimator Anggaran">Estimator Anggaran</option>
+                <option value="Verifikator Teknis TABG">Verifikator Teknis TABG</option>
+                <option value="Perangkat Desa / Saksi">Perangkat Desa / Saksi</option>
+                <option value="Lainnya">Peran Lainnya...</option>
+              </select>
+            </div>
+            <div className="sm:col-span-2">
+              <button
+                type="button"
+                onClick={handleAddTeamMember}
+                disabled={!newTeamMemberName.trim()}
+                className="w-full h-full py-2 px-3 bg-slate-900 hover:bg-slate-800 disabled:opacity-40 text-white rounded-xl text-xs font-bold transition-all shadow-xs cursor-pointer flex items-center justify-center gap-1.5"
+              >
+                <Plus className="w-3.5 h-3.5" />
+                <span>Tambah</span>
+              </button>
+            </div>
+            {newTeamMemberRole === 'Lainnya' && (
+              <div className="sm:col-span-12 mt-1">
+                <input
+                  type="text"
+                  value={customTeamRole}
+                  onChange={(e) => setCustomTeamRole(e.target.value)}
+                  placeholder="Ketik peran kustom tim lapangan (cth: Staf Pendamping Bencana)"
+                  className="w-full px-3 py-2 text-xs rounded-xl border border-slate-200 bg-white text-slate-900"
+                />
+              </div>
+            )}
+          </div>
+
+          {/* List anggota tim lapangan */}
+          {analysisTeam.length === 0 ? (
+            <div className="p-4 rounded-2xl bg-slate-50 border border-slate-200/80 text-center">
+              <p className="text-xs text-slate-500 font-medium">
+                Belum ada personil tim lapangan yang diinput. Gunakan form di atas untuk memasukkan nama personil yang bertugas agar tercetak resmi di dokumen laporan.
+              </p>
+            </div>
+          ) : (
+            <div className="grid grid-cols-1 sm:grid-cols-2 gap-2 pt-1">
+              {analysisTeam.map((member, idx) => (
+                <div
+                  key={idx}
+                  className="flex items-center justify-between p-2.5 rounded-xl bg-slate-50 border border-slate-200 shadow-2xs text-xs"
+                >
+                  <div className="flex items-center gap-2 min-w-0">
+                    <span className="w-5 h-5 rounded-full bg-amber-500 text-slate-950 font-bold text-[10px] flex items-center justify-center shrink-0">
+                      {idx + 1}
+                    </span>
+                    <span className="font-semibold text-slate-900 truncate">{member}</span>
+                  </div>
+                  <button
+                    type="button"
+                    onClick={() => handleRemoveTeamMember(idx)}
+                    className="text-slate-400 hover:text-rose-600 p-1 transition-colors cursor-pointer"
+                    title="Hapus personil"
+                  >
+                    <Trash2 className="w-3.5 h-3.5" />
+                  </button>
+                </div>
+              ))}
+            </div>
+          )}
+        </div>
+
+        {/* 2. Informasi Pejabat Pengesah Laporan */}
+        <div className="pt-4 border-t border-slate-100">
+          <h4 className="text-xs font-bold text-slate-800 uppercase tracking-wider mb-3">
+            Pengesahan Dokumen / Pejabat Penandatangan
+          </h4>
+          <div className="grid grid-cols-1 sm:grid-cols-3 gap-3 text-xs">
+            <div>
+              <label className="block font-semibold text-slate-700 mb-1">Nama Kepala Dinas / Pejabat</label>
+              <input
+                type="text"
+                value={headName}
+                onChange={(e) => setHeadName(e.target.value)}
+                placeholder="Contoh: Dionisius T. Ndolu, S.T., M.Si."
+                className="w-full px-3 py-2 rounded-xl border border-slate-200 font-medium text-slate-900"
+              />
+            </div>
+            <div>
+              <label className="block font-semibold text-slate-700 mb-1">NIP Pejabat</label>
+              <input
+                type="text"
+                value={headNip}
+                onChange={(e) => setHeadNip(e.target.value)}
+                placeholder="Contoh: 19740512 200212 1 004"
+                className="w-full px-3 py-2 rounded-xl border border-slate-200 font-mono text-slate-900"
+              />
+            </div>
+            <div>
+              <label className="block font-semibold text-slate-700 mb-1">Pangkat / Golongan</label>
+              <input
+                type="text"
+                value={headRank}
+                onChange={(e) => setHeadRank(e.target.value)}
+                placeholder="Contoh: Pembina TK I"
+                className="w-full px-3 py-2 rounded-xl border border-slate-200 text-slate-900"
+              />
+            </div>
+            <div>
+              <label className="block font-semibold text-slate-700 mb-1">Kota Tempat Pelaporan</label>
+              <input
+                type="text"
+                value={cityLocation}
+                onChange={(e) => setCityLocation(e.target.value)}
+                placeholder="Contoh: Mbay"
+                className="w-full px-3 py-2 rounded-xl border border-slate-200 text-slate-900"
+              />
+            </div>
+            <div className="sm:col-span-2">
+              <label className="block font-semibold text-slate-700 mb-1">Bulan & Tahun Dokumen Pelaporan</label>
+              <input
+                type="text"
+                value={reportDateStr}
+                onChange={(e) => setReportDateStr(e.target.value)}
+                placeholder="Contoh: September 2026"
+                className="w-full px-3 py-2 rounded-xl border border-slate-200 text-slate-900"
+              />
+            </div>
+          </div>
         </div>
       </div>
 

@@ -172,6 +172,7 @@ export const DEFAULT_GOOGLE_SHEET_CONFIG: GoogleSheetConfig = {
   spreadsheetUrl: 'https://docs.google.com/spreadsheets/d/1yZ7K8jN4XoP_ContohSheetGedungPUPR/edit',
   webhookUrl: 'https://script.google.com/macros/s/AKfycbx_ContohGoogleSheetScriptUrl_PUPR/exec',
   sheetName: 'Data_Penilaian_Kerusakan_PUPR',
+  logSheetName: 'Log_Akses_Pengguna',
   autoSync: true,
   directSaveEnabled: true,
   lastTestedAt: '2026-08-25T10:00:00Z',

@@ -11,6 +11,8 @@ import {
   FirebaseShieldConfig,
   VerificationStatus,
   DukcapilRecord,
+  UserActivityLog,
+  ActivityActionType,
 } from '../types';
 import {
   INITIAL_KECAMATAN,
@@ -24,6 +26,8 @@ import {
   syncToGoogleSheetWebhook,
   syncAllToGoogleSheet,
   directSaveToGoogleSheet,
+  syncActivityLogsToGoogleSheet,
+  directSaveActivityLogToGoogleSheet,
 } from '../services/googleSheetsService';
 import {
   encryptPassword,
@@ -91,6 +95,18 @@ interface AppContextType {
   firebaseShieldConfig: FirebaseShieldConfig;
   updateFirebaseShieldConfig: (config: Partial<FirebaseShieldConfig>) => void;
 
+  // User Access & Activity Audit Trail Analytics
+  activityLogs: UserActivityLog[];
+  logUserActivity: (
+    action: ActivityActionType,
+    actionCategory: 'Autentikasi' | 'Penilaian Kerusakan' | 'Pencetakan & Dokumen' | 'Integrasi Google Sheet' | 'Sistem & Pengguna',
+    actionDescription: string,
+    targetResource?: string,
+    details?: string
+  ) => void;
+  syncActivityLogsToSheet: () => Promise<{ success: boolean; message: string; count?: number }>;
+  clearActivityLogs: () => void;
+
   // Global Navigation & UI
   activeTab: string;
   setActiveTab: (tab: string) => void;
@@ -115,6 +131,7 @@ const STORAGE_KEYS = {
   DUKCAPIL: 'sipandu_pupr_dukcapil_v3',
   GOOGLE_SHEET: 'sipandu_pupr_gsheet_v3',
   FIREBASE: 'sipandu_pupr_firebase_v3',
+  ACTIVITY_LOGS: 'sipandu_pupr_activity_logs_v1',
 };
 
 export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children }) => {
@@ -225,6 +242,47 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
   const [selectedAssessmentForEdit, setSelectedAssessmentForEdit] = useState<BuildingAssessment | null>(null);
   const [toastMessage, setToastMessage] = useState<{ type: 'success' | 'error' | 'info'; text: string } | null>(null);
 
+  // User Activity & Access Logs (Audit Trail Analytics)
+  const [activityLogs, setActivityLogs] = useState<UserActivityLog[]>(() => {
+    try {
+      const saved = localStorage.getItem(STORAGE_KEYS.ACTIVITY_LOGS);
+      if (saved) return JSON.parse(saved);
+      return [
+        {
+          id: 'log_init_1',
+          userId: 'user_super_admin',
+          userName: 'Vancy Djogo',
+          userEmail: 'bidangplp71@gmail.com',
+          userRole: 'super_admin',
+          roleTitle: 'Super Admin',
+          action: 'LOGIN',
+          actionCategory: 'Autentikasi',
+          actionDescription: 'Autentikasi login berhasil ke sistem',
+          details: 'Login dengan otoritas penuh Super Administrator',
+          timestamp: new Date(Date.now() - 3600000).toISOString(),
+          ipAddress: '127.0.0.1 (Web Preview)',
+        },
+        {
+          id: 'log_init_2',
+          userId: 'user_super_admin',
+          userName: 'Vancy Djogo',
+          userEmail: 'bidangplp71@gmail.com',
+          userRole: 'super_admin',
+          roleTitle: 'Super Admin',
+          action: 'VIEW_ASSESSMENT',
+          actionCategory: 'Penilaian Kerusakan',
+          actionDescription: 'Membuka pratinjau dan analisis teknis kerusakan gedung',
+          targetResource: 'Modul Penilaian PUPR',
+          details: 'Pemeriksaan standar formulir Permen PUPR No. 22/PRT/M/2018',
+          timestamp: new Date(Date.now() - 1800000).toISOString(),
+          ipAddress: '127.0.0.1 (Web Preview)',
+        },
+      ];
+    } catch {
+      return [];
+    }
+  });
+
   // Sync to local storage
 
   const isInitialLoad = React.useRef(true);
@@ -255,7 +313,19 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
         });
       }
     }).catch(console.error);
+
+    getDocs(collection(db, 'activity_logs')).then((snapshot) => {
+      if (!snapshot.empty) {
+        const remoteLogs = snapshot.docs.map(doc => doc.data() as UserActivityLog);
+        remoteLogs.sort((a, b) => new Date(b.timestamp).getTime() - new Date(a.timestamp).getTime());
+        setActivityLogs(remoteLogs);
+      }
+    }).catch(console.error);
   }, []);
+
+  useEffect(() => {
+    localStorage.setItem(STORAGE_KEYS.ACTIVITY_LOGS, JSON.stringify(activityLogs));
+  }, [activityLogs]);
 
   useEffect(() => {
     localStorage.setItem(STORAGE_KEYS.USERS, JSON.stringify(users));
@@ -467,6 +537,67 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
     };
   };
 
+  // User Activity & Access Logger (Analytics & Audit Trail)
+  const logUserActivity = (
+    action: ActivityActionType,
+    actionCategory: 'Autentikasi' | 'Penilaian Kerusakan' | 'Pencetakan & Dokumen' | 'Integrasi Google Sheet' | 'Sistem & Pengguna',
+    actionDescription: string,
+    targetResource?: string,
+    details?: string
+  ) => {
+    const activeUser = currentUser || users[0];
+    const newLog: UserActivityLog = {
+      id: `log_${Date.now()}_${Math.random().toString(36).substring(2, 7)}`,
+      userId: activeUser?.id || 'guest',
+      userName: activeUser?.name || 'Pengguna',
+      userEmail: activeUser?.email || '-',
+      userRole: activeUser?.role || 'admin_publik',
+      roleTitle: ROLE_LIMITS[activeUser?.role || 'admin_publik']?.title || 'Pengguna',
+      action,
+      actionCategory,
+      actionDescription,
+      targetResource,
+      details,
+      timestamp: new Date().toISOString(),
+      ipAddress: '127.0.0.1 (Web Preview)',
+      deviceInfo: typeof navigator !== 'undefined' ? navigator.userAgent.slice(0, 80) : undefined,
+    };
+
+    setActivityLogs((prev) => [newLog, ...prev.slice(0, 499)]);
+
+    if (db) {
+      const cleanLog = JSON.parse(JSON.stringify(newLog));
+      setDoc(doc(db, 'activity_logs', cleanLog.id), cleanLog).catch(console.error);
+    }
+
+    if (googleSheetConfig.webhookUrl && googleSheetConfig.webhookUrl.startsWith('http') && googleSheetConfig.directSaveEnabled) {
+      directSaveActivityLogToGoogleSheet(newLog, googleSheetConfig).catch(console.error);
+    }
+  };
+
+  const syncActivityLogsToSheet = async () => {
+    const res = await syncActivityLogsToGoogleSheet(activityLogs, googleSheetConfig);
+    if (res.success) {
+      showToast(res.message, 'success');
+      logUserActivity(
+        'SYNC_GOOGLE_SHEET',
+        'Integrasi Google Sheet',
+        `Sinkronisasi ${res.count} Catatan Log Akses Pengguna ke Google Sheet`,
+        `Tab: ${googleSheetConfig.logSheetName || 'Log_Akses_Pengguna'}`,
+        'Tercatat di Google Spreadsheet'
+      );
+    } else {
+      showToast(res.message, 'error');
+    }
+    return res;
+  };
+
+  const clearActivityLogs = () => {
+    setActivityLogs([]);
+    localStorage.removeItem(STORAGE_KEYS.ACTIVITY_LOGS);
+    showToast('Riwayat log aktivitas telah dibersihkan.', 'info');
+  };
+
   // Authenticate user with password
   const loginWithPassword = (user: UserAccount, passwordInput: string) => {
     const isMatched = verifyPassword(passwordInput, user.password);
@@ -483,6 +614,14 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
     setSelectedAssessmentForEdit(null);
     const targetTab = ROLE_NAV_CONFIGS[user.role]?.defaultTab || 'dashboard';
     setActiveTab(targetTab);
+
+    logUserActivity(
+      'LOGIN',
+      'Autentikasi',
+      `Login Berhasil via Kredensial Peran: ${ROLE_LIMITS[user.role].title}`,
+      user.name,
+      `Email: ${user.email} (${ROLE_LIMITS[user.role].title})`
+    );
 
     return {
       success: true,
@@ -515,6 +654,14 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
     setSelectedAssessmentForEdit(null);
     const targetTab = ROLE_NAV_CONFIGS[user.role]?.defaultTab || 'dashboard';
     setActiveTab(targetTab);
+
+    logUserActivity(
+      'LOGIN',
+      'Autentikasi',
+      `Login Berhasil via Email: ${user.email}`,
+      user.name,
+      `Peran: ${ROLE_LIMITS[user.role].title}`
+    );
 
     return {
       success: true,
@@ -555,6 +702,14 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
     const targetTab = ROLE_NAV_CONFIGS[user.role]?.defaultTab || 'dashboard';
     setActiveTab(targetTab);
 
+    logUserActivity(
+      'LOGIN',
+      'Autentikasi',
+      `Login Berhasil via Nama Pengguna: ${user.name}`,
+      user.email,
+      `Peran: ${ROLE_LIMITS[user.role].title}`
+    );
+
     return {
       success: true,
       message: `Autentikasi berhasil. Selamat datang, ${user.name} (${ROLE_LIMITS[user.role].title})!`,
@@ -562,6 +717,13 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
   };
 
   const logout = () => {
+    logUserActivity(
+      'LOGOUT',
+      'Autentikasi',
+      `Pengguna Keluar (Logout) dari Sistem`,
+      currentUser.name,
+      `Peran: ${ROLE_LIMITS[currentUser.role]?.title || currentUser.role}`
+    );
     setIsLoggedIn(false);
     showToast('Anda telah keluar dari sesi.', 'info');
   };
@@ -659,6 +821,13 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
       const targetTab = ROLE_NAV_CONFIGS[role]?.defaultTab || 'dashboard';
       setActiveTab(targetTab);
       showToast(`Beralih ke peran: ${ROLE_LIMITS[role].title} (${existing.name}) — Tampilan disesuaikan`, 'info');
+      logUserActivity(
+        'SWITCH_ROLE',
+        'Sistem & Pengguna',
+        `Beralih ke Peran: ${ROLE_LIMITS[role].title}`,
+        existing.name,
+        `Akun ID: ${existing.id}`
+      );
     } else {
       showToast(`Belum ada akun terdaftar dengan peran ${ROLE_LIMITS[role].title}`, 'error');
     }
@@ -676,6 +845,14 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
     };
 
     setAssessments((prev) => [assessmentToSave, ...prev]);
+
+    logUserActivity(
+      'CREATE_ASSESSMENT',
+      'Penilaian Kerusakan',
+      `Input Penilaian Baru: ${data.buildingName}`,
+      data.code || data.buildingName,
+      `Klasifikasi: ${data.damageClassification} (${data.totalDamagePercent.toFixed(1)}%) — Biaya: Rp ${data.roundedRehabCost.toLocaleString('id-ID')}`
+    );
 
     // Save directly to Google Sheet without needing manual synchronization
     if (hasGSheet) {
@@ -724,6 +901,14 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
     );
 
     const target = assessments.find((a) => a.id === id);
+    logUserActivity(
+      'UPDATE_ASSESSMENT',
+      'Penilaian Kerusakan',
+      `Memperbarui Data Penilaian: ${target?.buildingName || id}`,
+      target?.code || id,
+      'Pembaruan data kerusakan atau pengesahan tim lapangan'
+    );
+
     if (target && hasGSheet) {
       const merged = { ...target, ...data, updatedAt: now };
       directSaveToGoogleSheet(merged, googleSheetConfig, 'update').catch((e) =>
@@ -749,6 +934,14 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
     }
 
     const target = assessments.find((a) => a.id === id);
+    logUserActivity(
+      'DELETE_ASSESSMENT',
+      'Penilaian Kerusakan',
+      `Menghapus Data Penilaian Gedung: ${target?.buildingName || id}`,
+      target?.code || id,
+      `Dihapus oleh ${currentUser.name} (${ROLE_LIMITS[currentUser.role]?.title})`
+    );
+
     if (target && googleSheetConfig.webhookUrl && googleSheetConfig.webhookUrl.startsWith('http')) {
       directSaveToGoogleSheet(target, googleSheetConfig, 'delete').catch((e) =>
         console.error('Direct Google Sheet delete error:', e)
@@ -770,6 +963,7 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
       };
     }
 
+    const target = assessments.find((a) => a.id === id);
     const now = new Date().toISOString();
     setAssessments((prev) =>
       prev.map((a) => {
@@ -785,6 +979,14 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
         }
         return a;
       })
+    );
+
+    logUserActivity(
+      'VERIFY_ASSESSMENT',
+      'Penilaian Kerusakan',
+      `Verifikasi Teknis [${status}]: ${target?.buildingName || id}`,
+      target?.code || id,
+      `Catatan Verifikasi: ${notes || 'Tanpa catatan khusus'}`
     );
 
     return {
@@ -806,6 +1008,13 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
             : a
         )
       );
+      logUserActivity(
+        'SYNC_GOOGLE_SHEET',
+        'Integrasi Google Sheet',
+        `Sinkronisasi Single Data ke Google Sheet: ${target.buildingName}`,
+        target.code || target.id,
+        result.message
+      );
     }
     return result;
   };
@@ -820,6 +1029,13 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
           googleSheetSynced: true,
           googleSheetSyncedAt: now,
         }))
+      );
+      logUserActivity(
+        'SYNC_GOOGLE_SHEET',
+        'Integrasi Google Sheet',
+        `Sinkronisasi Masal ${assessments.length} Data Gedung ke Google Sheet`,
+        'Semua Kecamatan & Master Rekap',
+        result.message
       );
     }
     return {
@@ -1109,6 +1325,11 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
         updateGoogleSheetConfig,
         firebaseShieldConfig,
         updateFirebaseShieldConfig,
+
+        activityLogs,
+        logUserActivity,
+        syncActivityLogsToSheet,
+        clearActivityLogs,
 
         activeTab,
         setActiveTab,

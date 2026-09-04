@@ -20,7 +20,7 @@ interface Props {
 }
 
 export const AssessmentDetailModal: React.FC<Props> = ({ assessment, onClose }) => {
-  const { syncAssessmentToSheet, showToast } = useApp();
+  const { syncAssessmentToSheet, logUserActivity, showToast } = useApp();
   const [isSyncing, setIsSyncing] = useState(false);
   const [showSignatures, setShowSignatures] = useState(true);
 
@@ -30,13 +30,27 @@ export const AssessmentDetailModal: React.FC<Props> = ({ assessment, onClose }) 
   // Manage body class for print isolation & scroll lock
   useEffect(() => {
     document.body.classList.add('pupr-modal-active');
+    logUserActivity(
+      'VIEW_DETAIL',
+      'Penilaian Kerusakan',
+      `Membuka Rincian Penilaian: ${assessment.buildingName}`,
+      assessment.code || assessment.buildingName,
+      `Klasifikasi: ${assessment.damageClassification} (${assessment.totalDamagePercent.toFixed(1)}%)`
+    );
     return () => {
       document.body.classList.remove('pupr-modal-active');
     };
-  }, []);
+  }, [assessment.id]);
 
   const handlePrintWithoutPhotos = () => {
     setShowPhotos(false);
+    logUserActivity(
+      'PRINT_REPORT',
+      'Pencetakan & Dokumen',
+      `Mencetak Dokumen Laporan: ${assessment.buildingName} (Tanpa Foto)`,
+      assessment.code || assessment.buildingName,
+      `Kategori: ${assessment.buildingCategory} — Nilai Rehab: Rp ${assessment.roundedRehabCost.toLocaleString('id-ID')}`
+    );
     setTimeout(() => {
       window.print();
     }, 120);
@@ -49,6 +63,13 @@ export const AssessmentDetailModal: React.FC<Props> = ({ assessment, onClose }) 
     } else {
       setShowPhotos(true);
     }
+    logUserActivity(
+      'PRINT_WITH_PHOTOS',
+      'Pencetakan & Dokumen',
+      `Mencetak Dokumen Laporan + Foto Visual: ${assessment.buildingName}`,
+      assessment.code || assessment.buildingName,
+      `Lampiran Foto: ${assessment.photos?.length || 0} Dokumentasi Visual Lapangan`
+    );
     setTimeout(() => {
       window.print();
     }, 120);

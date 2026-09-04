@@ -77,6 +77,7 @@ export const ROLE_NAV_CONFIGS: Record<UserRole, RoleNavConfig> = {
       'users',
       'google_sheet',
       'googlesheets',
+      'log_aktivitas',
       'firebase_shield',
       'firebase',
     ],
@@ -97,6 +98,7 @@ export const ROLE_NAV_CONFIGS: Record<UserRole, RoleNavConfig> = {
       'users',
       'google_sheet',
       'googlesheets',
+      'log_aktivitas',
       'firebase_shield',
       'firebase',
     ],
@@ -450,6 +452,7 @@ export interface GoogleSheetConfig {
   spreadsheetUrl?: string;
   webhookUrl: string;
   sheetName: string;
+  logSheetName?: string; // Nama tab sheet untuk Log Akses & Analitik Pengguna
   splitByKecamatan?: boolean; // Fitur: Setiap Kecamatan memiliki Tab Sheet tersendiri
   includeMasterSummarySheet?: boolean; // Tetap sertakan Sheet Rekap Gabungan Semua Kecamatan
   autoSync: boolean;
@@ -489,4 +492,39 @@ export interface DukcapilRecord {
   createdAt: string;
   updatedAt: string;
 }
+
+export type ActivityActionType =
+  | 'LOGIN'
+  | 'LOGOUT'
+  | 'CREATE_ASSESSMENT'
+  | 'UPDATE_ASSESSMENT'
+  | 'DELETE_ASSESSMENT'
+  | 'VERIFY_ASSESSMENT'
+  | 'VIEW_ASSESSMENT'
+  | 'PRINT_PDF'
+  | 'PRINT_WITH_PHOTOS'
+  | 'PRINT_WITHOUT_PHOTOS'
+  | 'SYNC_GOOGLE_SHEET'
+  | 'EXPORT_DATA'
+  | 'SWITCH_ROLE'
+  | 'LOCK_SESSION'
+  | 'USER_MANAGEMENT';
+
+export interface UserActivityLog {
+  id: string;
+  userId: string;
+  userName: string;
+  userEmail: string;
+  userRole: UserRole;
+  roleTitle: string;
+  action: ActivityActionType;
+  actionCategory: 'Autentikasi' | 'Penilaian Kerusakan' | 'Pencetakan & Dokumen' | 'Integrasi Google Sheet' | 'Sistem & Pengguna';
+  actionDescription: string;
+  targetResource?: string;
+  details?: string;
+  timestamp: string;
+  ipAddress?: string;
+  deviceInfo?: string;
+}
+
 

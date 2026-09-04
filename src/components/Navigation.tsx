@@ -19,6 +19,7 @@ import {
   Search,
   Lock,
   LogOut,
+  Activity,
 } from 'lucide-react';
 
 interface NavigationProps {
@@ -32,6 +33,7 @@ export const Navigation: React.FC<NavigationProps> = ({ mobileOpen, onCloseMobil
     setActiveTab,
     assessments,
     dukcapilRecords,
+    activityLogs,
     currentUser,
     switchUserRole,
     getUserCountsByRole,
@@ -174,6 +176,14 @@ export const Navigation: React.FC<NavigationProps> = ({ mobileOpen, onCloseMobil
             icon: FileSpreadsheet,
             badge: assessments.filter((a) => a.googleSheetSynced).length,
             badgeLabel: 'tersimpan',
+          },
+          {
+            id: 'log_aktivitas',
+            label: 'Log Akses & Analitik',
+            desc: 'Audit trail user, role & sheet',
+            icon: Activity,
+            badge: activityLogs.length,
+            badgeLabel: 'log',
           },
           {
             id: 'firebase_shield',

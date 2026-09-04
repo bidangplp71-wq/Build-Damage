@@ -13,6 +13,7 @@ import { DukcapilManagement } from './components/DukcapilManagement';
 import { UserManagement } from './components/UserManagement';
 import { GoogleSheetIntegration } from './components/GoogleSheetIntegration';
 import { FirebaseProtection } from './components/FirebaseProtection';
+import { UserActivityLogView } from './components/UserActivityLogView';
 import { SessionLockScreen } from './components/SessionLockScreen';
 import { CheckCircle2, AlertCircle, Info, X, ShieldAlert } from 'lucide-react';
 
@@ -67,6 +68,7 @@ const MainLayout: React.FC = () => {
             {activeTab === 'dukcapil' && <DukcapilManagement />}
             {(activeTab === 'manajemen_user' || activeTab === 'users') && <UserManagement />}
             {(activeTab === 'google_sheet' || activeTab === 'googlesheets') && <GoogleSheetIntegration />}
+            {activeTab === 'log_aktivitas' && <UserActivityLogView />}
             {(activeTab === 'firebase_shield' || activeTab === 'firebase') && <FirebaseProtection />}
           </ErrorBoundary>
         </main>
