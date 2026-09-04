@@ -571,7 +571,7 @@ function doPost(e) {
  * Mendapatkan sheet berdasarkan nama atau membuatnya baru bila belum ada
  */
 function getOrCreateSheet(ss, name) {
-  var cleanName = name.replace(/[:\\\\/?*\\[\\]]/g, '').trim().substring(0, 30);
+  var cleanName = (name || 'Sheet').replace(/[^a-zA-Z0-9 _-]/g, '').trim().substring(0, 30) || 'Sheet1';
   var sheet = ss.getSheetByName(cleanName);
   if (!sheet) {
     sheet = ss.insertSheet(cleanName);
@@ -768,11 +768,20 @@ function extractDriveFolderIdFromScript(input) {
   if (/^[a-zA-Z0-9_-]{15,}$/.test(str)) {
     return str;
   }
-  var m1 = str.match(/\/folders\/([a-zA-Z0-9_-]+)/);
-  if (m1 && m1[1]) return m1[1];
-  var m2 = str.match(/[?&]id=([a-zA-Z0-9_-]+)/);
-  if (m2 && m2[1]) return m2[1];
-  return str.replace(/^https?:\/\/[^\/]+\//, '').split('?')[0].replace(/^folders\//, '').replace(/\/+$/, '').trim();
+  var fIndex = str.indexOf("folders/");
+  if (fIndex !== -1) {
+    var rest = str.substring(fIndex + 8);
+    var endSlash = rest.indexOf("/");
+    if (endSlash !== -1) rest = rest.substring(0, endSlash);
+    var endQ = rest.indexOf("?");
+    if (endQ !== -1) rest = rest.substring(0, endQ);
+    return rest.trim();
+  }
+  var idMatch = str.match(/[?&]id=([a-zA-Z0-9_-]+)/);
+  if (idMatch && idMatch[1]) {
+    return idMatch[1];
+  }
+  return str.replace(/\\s+/g, '');
 }
 
 /**
@@ -805,7 +814,7 @@ function savePhotosToGoogleDrive(photos, regCode, buildingName, parentFolderId) 
     }
     
     // Buat / dapatkan subfolder khusus untuk gedung terkait
-    var safeBuilding = (buildingName || "Gedung").replace(/[:\\\\/?*\\[\\]]/g, "_").trim();
+    var safeBuilding = (buildingName || "Gedung").replace(/[^a-zA-Z0-9 _-]/g, "_").trim();
     var folderName = safeBuilding + (regCode ? (" - " + regCode) : "");
     var subFolders = parentFolder.getFoldersByName(folderName);
     var targetFolder = subFolders.hasNext() ? subFolders.next() : parentFolder.createFolder(folderName);
@@ -838,7 +847,7 @@ function savePhotosToGoogleDrive(photos, regCode, buildingName, parentFolderId) 
       }
       
       if (decoded) {
-        var safeLoc = (p.damageLocation || ("Foto_" + (i + 1))).replace(/[:\\\\/?*\\[\\]]/g, "_");
+        var safeLoc = (p.damageLocation || ("Foto_" + (i + 1))).replace(/[^a-zA-Z0-9 _-]/g, "_");
         var fileName = ("0" + (i + 1)).slice(-2) + "_" + safeLoc + ".jpg";
         var existingFiles = targetFolder.getFilesByName(fileName);
         if (existingFiles.hasNext()) {
