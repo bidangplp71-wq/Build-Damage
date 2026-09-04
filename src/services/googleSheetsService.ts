@@ -361,7 +361,7 @@ function getOrCreateSheet(ss, name) {
 }
 
 /**
- * Menyimpan atau memperbarui satu baris data pada sheet tertentu
+ * Menyimpan, memperbarui, atau menghapus satu baris data pada sheet tertentu
  */
 function saveOrUpdateRow(sheet, rowData, regCode, action, headerBgColor) {
   var headers = Object.keys(rowData);
@@ -379,7 +379,7 @@ function saveOrUpdateRow(sheet, rowData, regCode, action, headerBgColor) {
   // Baca header yang sudah ada di sheet untuk menyelaraskan urutan kolom
   var currentHeaders = sheet.getRange(1, 1, 1, sheet.getLastColumn()).getValues()[0];
   
-  // Cek apakah data dengan No Registrasi ini sudah ada (untuk update)
+  // Cek apakah data dengan No Registrasi ini sudah ada (untuk update/delete)
   if (regCode && sheet.getLastRow() > 1) {
     var allData = sheet.getDataRange().getValues();
     var foundIndex = -1;
@@ -391,23 +391,30 @@ function saveOrUpdateRow(sheet, rowData, regCode, action, headerBgColor) {
     }
     
     if (foundIndex > 0) {
-      var updateValues = [];
-      for (var c = 0; c < currentHeaders.length; c++) {
-        var hName = currentHeaders[c];
-        updateValues.push(rowData[hName] !== undefined ? rowData[hName] : "");
+      if (action === 'delete') {
+        sheet.deleteRow(foundIndex);
+        return;
+      } else {
+        var updateValues = [];
+        for (var c = 0; c < currentHeaders.length; c++) {
+          var hName = currentHeaders[c];
+          updateValues.push(rowData[hName] !== undefined ? rowData[hName] : "");
+        }
+        sheet.getRange(foundIndex, 1, 1, currentHeaders.length).setValues([updateValues]);
+        return;
       }
-      sheet.getRange(foundIndex, 1, 1, currentHeaders.length).setValues([updateValues]);
-      return;
     }
   }
   
-  // Bila belum ada, tambahkan baris baru (append)
-  var newRow = [];
-  for (var c2 = 0; c2 < currentHeaders.length; c2++) {
-    var hName2 = currentHeaders[c2];
-    newRow.push(rowData[hName2] !== undefined ? rowData[hName2] : "");
+  // Bila belum ada dan BUKAN delete, tambahkan baris baru (append)
+  if (action !== 'delete') {
+    var newRow = [];
+    for (var c2 = 0; c2 < currentHeaders.length; c2++) {
+      var hName2 = currentHeaders[c2];
+      newRow.push(rowData[hName2] !== undefined ? rowData[hName2] : "");
+    }
+    sheet.appendRow(newRow);
   }
-  sheet.appendRow(newRow);
 }
 
 /**
