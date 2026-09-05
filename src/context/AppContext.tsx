@@ -74,10 +74,10 @@ interface AppContextType {
   // Wilayah (Kecamatan & Desa Pemekaran / Baru)
   kecamatans: Kecamatan[];
   desas: Desa[];
-  addKecamatan: (data: Omit<Kecamatan, 'id' | 'createdAt'>) => { success: boolean; message: string; kecamatan?: Kecamatan };
+  addKecamatan: (data: Omit<Kecamatan, 'id' | 'createdAt'>) => { success: boolean; message: string; kecamatan?: Kecamatan; data?: Kecamatan };
   updateKecamatan: (id: string, data: Partial<Kecamatan>) => { success: boolean; message: string };
   deleteKecamatan: (id: string) => { success: boolean; message: string };
-  addDesa: (data: Omit<Desa, 'id' | 'createdAt'>) => { success: boolean; message: string; desa?: Desa };
+  addDesa: (data: Omit<Desa, 'id' | 'createdAt'>) => { success: boolean; message: string; desa?: Desa; data?: Desa };
   updateDesa: (id: string, data: Partial<Desa>) => { success: boolean; message: string };
   deleteDesa: (id: string) => { success: boolean; message: string };
 
@@ -124,6 +124,7 @@ interface AppContextType {
 const AppContext = createContext<AppContextType | undefined>(undefined);
 
 const STORAGE_KEYS = {
+  AUTH: 'sipandu_pupr_auth_v3',
   USERS: 'sipandu_pupr_users_v3',
   ASSESSMENTS: 'sipandu_pupr_assessments_v3',
   KECAMATAN: 'sipandu_pupr_kecamatan_v3',
@@ -157,10 +158,33 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
     }
   });
 
-  // Initialize current user
-  const [isLoggedIn, setIsLoggedIn] = useState<boolean>(false);
+  // Initialize current user & persistent session
+  const [isLoggedIn, setIsLoggedIn] = useState<boolean>(() => {
+    try {
+      const savedAuth = localStorage.getItem(STORAGE_KEYS.AUTH);
+      if (savedAuth) {
+        const parsed = JSON.parse(savedAuth);
+        return parsed.isLoggedIn === true;
+      }
+      return false;
+    } catch {
+      return false;
+    }
+  });
 
   const [currentUser, setCurrentUser] = useState<UserAccount>(() => {
+    try {
+      const savedAuth = localStorage.getItem(STORAGE_KEYS.AUTH);
+      if (savedAuth) {
+        const parsed = JSON.parse(savedAuth);
+        if (parsed.userId) {
+          const found = users.find((u) => u.id === parsed.userId);
+          if (found) return found;
+        }
+      }
+    } catch {
+      // ignore
+    }
     return users[0] || INITIAL_USERS[0];
   });
 
@@ -384,6 +408,14 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
   useEffect(() => {
     localStorage.setItem(STORAGE_KEYS.FIREBASE, JSON.stringify(firebaseShieldConfig));
   }, [firebaseShieldConfig]);
+
+  useEffect(() => {
+    if (isLoggedIn && currentUser) {
+      localStorage.setItem(STORAGE_KEYS.AUTH, JSON.stringify({ isLoggedIn: true, userId: currentUser.id }));
+    } else {
+      localStorage.removeItem(STORAGE_KEYS.AUTH);
+    }
+  }, [isLoggedIn, currentUser]);
 
   const showToast = (text: string, type: 'success' | 'error' | 'info' = 'info') => {
     setToastMessage({ text, type });
@@ -1077,7 +1109,7 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
       createdAt: new Date().toISOString(),
     };
     setKecamatans((prev) => [...prev, newKec]);
-    return { success: true, message: `Kecamatan ${newKec.name} berhasil ditambahkan.`, kecamatan: newKec };
+    return { success: true, message: `Kecamatan ${newKec.name} berhasil ditambahkan.`, kecamatan: newKec, data: newKec };
   };
 
   const updateKecamatan = (id: string, data: Partial<Kecamatan>) => {
@@ -1128,7 +1160,7 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
       createdAt: new Date().toISOString(),
     };
     setDesas((prev) => [...prev, newDesa]);
-    return { success: true, message: `${newDesa.type} ${newDesa.name} berhasil didaftarkan.`, desa: newDesa };
+    return { success: true, message: `${newDesa.type} ${newDesa.name} berhasil didaftarkan.`, desa: newDesa, data: newDesa };
   };
 
   const updateDesa = (id: string, data: Partial<Desa>) => {

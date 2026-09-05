@@ -451,8 +451,11 @@ export const AssessmentForm: React.FC = () => {
     setShowQuickAddKecModal(true);
   };
 
-  const handleSaveQuickKec = (e: React.FormEvent) => {
-    e.preventDefault();
+  const handleSaveQuickKec = (e?: React.FormEvent | React.MouseEvent) => {
+    if (e) {
+      e.preventDefault();
+      e.stopPropagation();
+    }
     if (!quickKecNewName.trim()) {
       showToast('Nama kecamatan wajib diisi!', 'error');
       return;
@@ -462,8 +465,9 @@ export const AssessmentForm: React.FC = () => {
       name: quickKecNewName.trim(),
       capitalCity: quickKecNewName.trim(),
     });
-    if (res.success && res.data) {
-      setKecamatanId(res.data.id);
+    const createdKec = res.kecamatan || res.data;
+    if (res.success && createdKec) {
+      setKecamatanId(createdKec.id);
       setShowQuickAddKecModal(false);
       showToast(res.message, 'success');
     } else {
@@ -488,8 +492,11 @@ export const AssessmentForm: React.FC = () => {
     setShowQuickAddDesaModal(true);
   };
 
-  const handleSaveQuickDesa = (e: React.FormEvent) => {
-    e.preventDefault();
+  const handleSaveQuickDesa = (e?: React.FormEvent | React.MouseEvent) => {
+    if (e) {
+      e.preventDefault();
+      e.stopPropagation();
+    }
     if (!quickDesaNewName.trim()) {
       showToast('Nama desa wajib diisi!', 'error');
       return;
@@ -503,8 +510,9 @@ export const AssessmentForm: React.FC = () => {
       isPemekaran: quickDesaIsPemekaran,
       notes: quickDesaNotes.trim() || (quickDesaIsPemekaran ? 'Pemekaran Desa Baru' : 'Desa Baru Terdaftar'),
     });
-    if (res.success && res.data) {
-      setDesaId(res.data.id);
+    const createdDesa = res.desa || res.data;
+    if (res.success && createdDesa) {
+      setDesaId(createdDesa.id);
       setShowQuickAddDesaModal(false);
       showToast(res.message, 'success');
     } else {
@@ -660,8 +668,11 @@ export const AssessmentForm: React.FC = () => {
     showToast('Foto berhasil dihapus.', 'info');
   };
 
-  const handleSaveEditPhoto = (e: React.FormEvent) => {
-    e.preventDefault();
+  const handleSaveEditPhoto = (e?: React.FormEvent | React.MouseEvent) => {
+    if (e) {
+      e.preventDefault();
+      e.stopPropagation();
+    }
     if (!editingPhoto) return;
     setPhotos((prev) =>
       prev.map((p) => (p.id === editingPhoto.id ? editingPhoto : p))
@@ -806,7 +817,8 @@ export const AssessmentForm: React.FC = () => {
   };
 
   return (
-    <form onSubmit={handleSubmit} className="space-y-6 max-w-5xl mx-auto pb-12">
+    <>
+      <form onSubmit={handleSubmit} className="space-y-6 max-w-5xl mx-auto pb-12">
       {/* Header bar */}
       <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-4 bg-white p-5 rounded-2xl border border-slate-200 shadow-xs">
         <div className="flex items-center gap-3">
@@ -2524,6 +2536,7 @@ export const AssessmentForm: React.FC = () => {
           <span>{isEditMode ? 'Simpan Perubahan Penilaian' : 'Simpan & Sinkronkan Data'}</span>
         </button>
       </div>
+      </form>
 
       {/* MODAL 1: Quick Add Dukcapil Citizen */}
       {showQuickAddDukcapilModal && (
@@ -2543,7 +2556,7 @@ export const AssessmentForm: React.FC = () => {
               </button>
             </div>
 
-            <form onSubmit={handleSaveQuickDukcapil} className="p-6 space-y-4 text-xs">
+            <div className="p-6 space-y-4 text-xs">
               <p className="text-slate-500">
                 Warga ini belum tercatat di master data Dukcapil. Masukkan data identitas agar tersimpan permanen dan otomatis mengisi form penilaian saat ini.
               </p>
@@ -2676,13 +2689,14 @@ export const AssessmentForm: React.FC = () => {
                   Batal
                 </button>
                 <button
-                  type="submit"
-                  className="px-5 py-2 text-xs font-bold text-white bg-indigo-600 hover:bg-indigo-700 rounded-xl shadow-xs"
+                  type="button"
+                  onClick={handleSaveQuickDukcapil}
+                  className="px-5 py-2 text-xs font-bold text-white bg-indigo-600 hover:bg-indigo-700 rounded-xl shadow-xs cursor-pointer"
                 >
                   Simpan ke Dukcapil & Terapkan
                 </button>
               </div>
-            </form>
+            </div>
           </div>
         </div>
       )}
@@ -2705,13 +2719,19 @@ export const AssessmentForm: React.FC = () => {
               </button>
             </div>
 
-            <form onSubmit={handleSaveQuickKec} className="p-6 space-y-4 text-xs">
+            <div className="p-6 space-y-4 text-xs">
               <div>
                 <label className="block font-semibold text-slate-700 mb-1">Kode Kecamatan</label>
                 <input
                   type="text"
                   value={quickKecCode}
                   onChange={(e) => setQuickKecCode(e.target.value)}
+                  onKeyDown={(e) => {
+                    if (e.key === 'Enter') {
+                      e.preventDefault();
+                      handleSaveQuickKec(e);
+                    }
+                  }}
                   placeholder="53.16.08"
                   required
                   className="w-full px-3 py-2 rounded-xl border border-slate-200 font-mono text-slate-900"
@@ -2726,6 +2746,12 @@ export const AssessmentForm: React.FC = () => {
                   type="text"
                   value={quickKecNewName}
                   onChange={(e) => setQuickKecNewName(e.target.value)}
+                  onKeyDown={(e) => {
+                    if (e.key === 'Enter') {
+                      e.preventDefault();
+                      handleSaveQuickKec(e);
+                    }
+                  }}
                   placeholder="Contoh: Aesesa Selatan"
                   required
                   className="w-full px-3 py-2 rounded-xl border border-slate-200 font-bold text-slate-900"
@@ -2736,18 +2762,19 @@ export const AssessmentForm: React.FC = () => {
                 <button
                   type="button"
                   onClick={() => setShowQuickAddKecModal(false)}
-                  className="px-4 py-2 text-xs font-semibold text-slate-700 bg-slate-100 hover:bg-slate-200 rounded-xl"
+                  className="px-4 py-2 text-xs font-semibold text-slate-700 bg-slate-100 hover:bg-slate-200 rounded-xl cursor-pointer"
                 >
                   Batal
                 </button>
                 <button
-                  type="submit"
-                  className="px-5 py-2 text-xs font-bold text-white bg-slate-900 hover:bg-slate-800 rounded-xl shadow-xs"
+                  type="button"
+                  onClick={handleSaveQuickKec}
+                  className="px-5 py-2 text-xs font-bold text-white bg-slate-900 hover:bg-slate-800 rounded-xl shadow-xs cursor-pointer"
                 >
                   Simpan & Gunakan
                 </button>
               </div>
-            </form>
+            </div>
           </div>
         </div>
       )}
@@ -2772,7 +2799,7 @@ export const AssessmentForm: React.FC = () => {
               </button>
             </div>
 
-            <form onSubmit={handleSaveQuickDesa} className="p-6 space-y-4 text-xs">
+            <div className="p-6 space-y-4 text-xs">
               <div>
                 <label className="block font-semibold text-slate-700 mb-1">Kecamatan Induk</label>
                 <div className="p-2.5 rounded-xl bg-slate-100 font-bold text-slate-900 border border-slate-200">
@@ -2798,6 +2825,12 @@ export const AssessmentForm: React.FC = () => {
                     type="text"
                     value={quickDesaCode}
                     onChange={(e) => setQuickDesaCode(e.target.value)}
+                    onKeyDown={(e) => {
+                      if (e.key === 'Enter') {
+                        e.preventDefault();
+                        handleSaveQuickDesa(e);
+                      }
+                    }}
                     placeholder="53.16.01.2009"
                     required
                     className="w-full px-3 py-2 rounded-xl border border-slate-200 font-mono"
@@ -2813,6 +2846,12 @@ export const AssessmentForm: React.FC = () => {
                   type="text"
                   value={quickDesaNewName}
                   onChange={(e) => setQuickDesaNewName(e.target.value)}
+                  onKeyDown={(e) => {
+                    if (e.key === 'Enter') {
+                      e.preventDefault();
+                      handleSaveQuickDesa(e);
+                    }
+                  }}
                   placeholder="Contoh: Tedakisa Timur"
                   required
                   className="w-full px-3 py-2 rounded-xl border border-slate-200 font-bold text-slate-900"
@@ -2847,18 +2886,19 @@ export const AssessmentForm: React.FC = () => {
                 <button
                   type="button"
                   onClick={() => setShowQuickAddDesaModal(false)}
-                  className="px-4 py-2 text-xs font-semibold text-slate-700 bg-slate-100 hover:bg-slate-200 rounded-xl"
+                  className="px-4 py-2 text-xs font-semibold text-slate-700 bg-slate-100 hover:bg-slate-200 rounded-xl cursor-pointer"
                 >
                   Batal
                 </button>
                 <button
-                  type="submit"
-                  className="px-5 py-2 text-xs font-bold text-slate-950 bg-amber-500 hover:bg-amber-400 rounded-xl shadow-xs"
+                  type="button"
+                  onClick={handleSaveQuickDesa}
+                  className="px-5 py-2 text-xs font-bold text-slate-950 bg-amber-500 hover:bg-amber-400 rounded-xl shadow-xs cursor-pointer"
                 >
                   Simpan Desa & Terapkan
                 </button>
               </div>
-            </form>
+            </div>
           </div>
         </div>
       )}
@@ -2881,7 +2921,7 @@ export const AssessmentForm: React.FC = () => {
               </button>
             </div>
 
-            <form onSubmit={handleSaveEditPhoto} className="p-5 space-y-4 text-xs">
+            <div className="p-5 space-y-4 text-xs">
               <div className="w-full h-44 bg-slate-100 rounded-2xl overflow-hidden border border-slate-200 flex items-center justify-center relative">
                 <img
                   src={editingPhoto.url}
@@ -2943,13 +2983,14 @@ export const AssessmentForm: React.FC = () => {
                   Batal
                 </button>
                 <button
-                  type="submit"
+                  type="button"
+                  onClick={handleSaveEditPhoto}
                   className="px-5 py-2 text-xs font-bold text-slate-950 bg-amber-500 hover:bg-amber-400 rounded-xl shadow-xs cursor-pointer"
                 >
                   Simpan Perubahan Foto
                 </button>
               </div>
-            </form>
+            </div>
           </div>
         </div>
       )}
@@ -2971,6 +3012,6 @@ export const AssessmentForm: React.FC = () => {
           onClose={() => setPreviewAssessment(null)}
         />
       )}
-    </form>
+    </>
   );
 };
