@@ -148,17 +148,25 @@ export async function uploadPhotoToFirebaseStorage(
     const cleanPhotoId = (photoId || `photo_${Date.now()}`).replace(/[^a-zA-Z0-9_-]/g, '_');
     const fileRef = ref(storage, `assessments/${cleanAssId}/${cleanPhotoId}.jpg`);
 
-    if (dataUrlOrBase64.startsWith('data:')) {
-      await uploadString(fileRef, dataUrlOrBase64, 'data_url', {
-        contentType: 'image/jpeg',
-      });
-    } else {
-      await uploadString(fileRef, dataUrlOrBase64, 'base64', {
-        contentType: 'image/jpeg',
-      });
-    }
+    const uploadTask = (async () => {
+      if (dataUrlOrBase64.startsWith('data:')) {
+        await uploadString(fileRef, dataUrlOrBase64, 'data_url', {
+          contentType: 'image/jpeg',
+        });
+      } else {
+        await uploadString(fileRef, dataUrlOrBase64, 'base64', {
+          contentType: 'image/jpeg',
+        });
+      }
+      return await getDownloadURL(fileRef);
+    })();
 
-    const downloadUrl = await getDownloadURL(fileRef);
+    // 4 seconds strict timeout so network lag or offline status never freezes the UI
+    const timeoutPromise = new Promise<never>((_, reject) =>
+      setTimeout(() => reject(new Error('Firebase Storage upload timeout (4s)')), 4000)
+    );
+
+    const downloadUrl = await Promise.race([uploadTask, timeoutPromise]);
     return { success: true, url: downloadUrl, isCloudStorage: true };
   } catch (err: any) {
     console.warn('Firebase Storage upload notice (using optimized fallback):', err?.message || err);
