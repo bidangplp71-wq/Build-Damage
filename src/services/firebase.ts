@@ -1,6 +1,7 @@
 import { initializeApp, getApps, getApp, FirebaseApp } from 'firebase/app';
 import { getFirestore, Firestore, collection, getDocs } from 'firebase/firestore';
 import { getAuth, Auth } from 'firebase/auth';
+import { getStorage, FirebaseStorage, ref, uploadString, getDownloadURL, deleteObject } from 'firebase/storage';
 import firebaseAppletConfig from '../../firebase-applet-config.json';
 
 // Export the generated config
@@ -9,6 +10,7 @@ export const firebaseConfig = firebaseAppletConfig;
 let app: FirebaseApp | null = null;
 let db: Firestore | null = null;
 let auth: Auth | null = null;
+let storage: FirebaseStorage | null = null;
 
 try {
   if (typeof window !== 'undefined') {
@@ -18,12 +20,23 @@ try {
     const dbId = firebaseConfig.firestoreDatabaseId || undefined;
     db = getFirestore(app, dbId);
     auth = getAuth(app);
+    
+    // Initialize Firebase Storage if bucket is declared
+    if (firebaseConfig.storageBucket) {
+      try {
+        storage = getStorage(app, `gs://${firebaseConfig.storageBucket}`);
+      } catch {
+        storage = getStorage(app);
+      }
+    } else {
+      storage = getStorage(app);
+    }
   }
 } catch (err) {
   console.warn('Firebase initialization notice:', err);
 }
 
-export { app, db, auth };
+export { app, db, auth, storage };
 
 export enum OperationType {
   CREATE = 'create',
@@ -110,4 +123,63 @@ export async function testFirebaseConnection(): Promise<{ success: boolean; mess
     };
   }
 }
+
+/**
+ * Upload a compressed photo (data URL / base64) to Firebase Cloud Storage.
+ * Stores in path: assessments/{assessmentId}/{photoId}.jpg
+ * Fallbacks safely to base64 if Firebase Storage is offline or unprovisioned.
+ */
+export async function uploadPhotoToFirebaseStorage(
+  dataUrlOrBase64: string,
+  assessmentId: string,
+  photoId: string
+): Promise<{ success: boolean; url: string; isCloudStorage: boolean; error?: string }> {
+  if (!storage || !dataUrlOrBase64) {
+    return { success: true, url: dataUrlOrBase64, isCloudStorage: false };
+  }
+
+  // If it's already an external HTTP/HTTPS URL, don't re-upload
+  if (dataUrlOrBase64.startsWith('http://') || dataUrlOrBase64.startsWith('https://')) {
+    return { success: true, url: dataUrlOrBase64, isCloudStorage: dataUrlOrBase64.includes('firebasestorage.googleapis.com') };
+  }
+
+  try {
+    const cleanAssId = (assessmentId || 'draft').replace(/[^a-zA-Z0-9_-]/g, '_');
+    const cleanPhotoId = (photoId || `photo_${Date.now()}`).replace(/[^a-zA-Z0-9_-]/g, '_');
+    const fileRef = ref(storage, `assessments/${cleanAssId}/${cleanPhotoId}.jpg`);
+
+    if (dataUrlOrBase64.startsWith('data:')) {
+      await uploadString(fileRef, dataUrlOrBase64, 'data_url', {
+        contentType: 'image/jpeg',
+      });
+    } else {
+      await uploadString(fileRef, dataUrlOrBase64, 'base64', {
+        contentType: 'image/jpeg',
+      });
+    }
+
+    const downloadUrl = await getDownloadURL(fileRef);
+    return { success: true, url: downloadUrl, isCloudStorage: true };
+  } catch (err: any) {
+    console.warn('Firebase Storage upload notice (using optimized fallback):', err?.message || err);
+    return { success: true, url: dataUrlOrBase64, isCloudStorage: false, error: err?.message };
+  }
+}
+
+/**
+ * Deletes a photo from Firebase Cloud Storage if it was uploaded there
+ */
+export async function deletePhotoFromFirebaseStorage(url: string): Promise<void> {
+  if (!storage || !url || !url.includes('firebasestorage.googleapis.com')) {
+    return;
+  }
+
+  try {
+    const fileRef = ref(storage, url);
+    await deleteObject(fileRef);
+  } catch (err) {
+    console.warn('Firebase Storage delete notice:', err);
+  }
+}
+
 

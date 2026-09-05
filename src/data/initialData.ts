@@ -137,7 +137,7 @@ export const INITIAL_USERS: UserAccount[] = [
     passwordLastChanged: '2026-01-10T10:00:00Z',
     createdAt: '2026-01-10T10:00:00Z',
   },
-  // Admin User (Surveyor): Dibatasi 100 (sekarang 1 aktif)
+  // Admin User (Surveyor): Dibatasi 125 (sekarang 1 aktif)
   {
     id: 'user_surveyor_1',
     name: 'Petugas Surveyor Lapangan PUPR',

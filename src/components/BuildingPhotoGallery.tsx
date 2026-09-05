@@ -25,7 +25,7 @@ export const BuildingPhotoGallery: React.FC<BuildingPhotoGalleryProps> = ({
       <div className="p-6 text-center rounded-2xl border-2 border-dashed border-slate-200 bg-slate-50/50 text-slate-400">
         <ImageIcon className="w-8 h-8 mx-auto mb-2 opacity-50" />
         <p className="text-xs font-semibold text-slate-600">Belum ada foto dokumentasi kerusakan visual</p>
-        <p className="text-[11px] text-slate-400 mt-0.5">Maksimal 10 foto kerusakan dengan keterangan bagian yang difoto.</p>
+        <p className="text-[11px] text-slate-400 mt-0.5">Maksimal 20 foto kerusakan dengan keterangan bagian yang difoto (tersimpan aman di Firebase Cloud Storage / Firestore).</p>
       </div>
     );
   }
@@ -36,7 +36,7 @@ export const BuildingPhotoGallery: React.FC<BuildingPhotoGalleryProps> = ({
         <div className="flex items-center gap-2">
           <Camera className="w-4 h-4 text-amber-600" />
           <span className="text-xs font-bold text-slate-800">
-            Dokumentasi Visual Kerusakan ({photos.length} / 10 Foto)
+            Dokumentasi Visual Kerusakan ({photos.length} / 20 Foto)
           </span>
         </div>
         <span className="text-[11px] text-slate-500 italic">

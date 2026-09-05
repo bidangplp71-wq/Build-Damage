@@ -434,7 +434,7 @@ export const AssessmentDetailModal: React.FC<Props> = ({ assessment, onClose }) 
                   <div className="flex items-center gap-2">
                     <Camera className="w-4 h-4 text-amber-600" />
                     <span className="text-xs font-bold uppercase tracking-wider text-slate-900">
-                      Dokumentasi Visual Kerusakan Fisik Bangunan ({assessment.photos?.length || 0} / 10 Foto)
+                      Dokumentasi Visual Kerusakan Fisik Bangunan ({assessment.photos?.length || 0} / 20 Foto)
                     </span>
                   </div>
                   <div className="flex items-center gap-2 print:hidden">

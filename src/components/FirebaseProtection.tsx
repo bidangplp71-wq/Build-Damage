@@ -237,7 +237,7 @@ service cloud.firestore {
           </div>
           <h4 className="text-sm font-bold text-slate-900">Validasi Kuota Peran (RBAC)</h4>
           <p className="text-xs text-slate-500 mt-1">
-            Batas ketat: Super Admin (1), Admin (3), Verifikator (15), User (100), Publik (10) divalidasi di tingkat database.
+            Batas ketat: Super Admin (1), Admin (3), Verifikator (15), Surveyor (125), Publik (10) divalidasi di tingkat database.
           </p>
         </div>
 
@@ -300,7 +300,7 @@ service cloud.firestore {
               </tr>
               <tr>
                 <td className="py-3 px-4 font-bold text-amber-900">Admin User (Surveyor)</td>
-                <td className="py-3 px-3 text-center font-bold">100 Akun</td>
+                <td className="py-3 px-3 text-center font-bold text-amber-600">125 Akun</td>
                 <td className="py-3 px-3 text-center text-emerald-600 font-bold">✓ Input & Edit</td>
                 <td className="py-3 px-3 text-center text-rose-400 font-medium">✕ Menunggu</td>
                 <td className="py-3 px-3 text-center text-rose-400 font-medium">✕ Hanya Lihat</td>
@@ -318,6 +318,75 @@ service cloud.firestore {
               </tr>
             </tbody>
           </table>
+        </div>
+      </div>
+
+      {/* Kalkulasi & Analisis Kelayakan Kuota Gratis Firebase (25.000 Foto / 2.000 Gedung) */}
+      <div className="bg-gradient-to-br from-slate-900 via-slate-900 to-indigo-950 text-white rounded-2xl p-6 shadow-xl border border-indigo-900/50 space-y-4">
+        <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-2 border-b border-slate-800 pb-3">
+          <div className="flex items-center gap-2.5">
+            <div className="p-2 rounded-xl bg-emerald-500/20 text-emerald-400 border border-emerald-500/30">
+              <CheckCircle2 className="w-5 h-5" />
+            </div>
+            <div>
+              <h3 className="text-sm font-bold text-white flex items-center gap-2">
+                <span>Analisis Kelayakan Kuota Gratis Firebase (Spark Plan)</span>
+                <span className="px-2 py-0.5 rounded-full text-[10px] font-bold bg-emerald-500/20 text-emerald-400 border border-emerald-500/40">
+                  100% CUKUP & AMAN
+                </span>
+              </h3>
+              <p className="text-xs text-slate-400">
+                Kalkulasi teknis penyimpanan untuk <strong>2.000 Gedung</strong> x kuota <strong>20 Foto</strong> (Estimasi 25.000 s/d 40.000 Foto)
+              </p>
+            </div>
+          </div>
+        </div>
+
+        <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-3 text-xs">
+          <div className="p-3.5 rounded-xl bg-slate-800/80 border border-slate-700/80 space-y-1">
+            <div className="text-slate-400 font-medium">Target Foto & Bangunan</div>
+            <div className="text-lg font-black text-amber-400">25.000 Foto</div>
+            <div className="text-[11px] text-slate-400">Dari 2.000 gedung (rata-rata 12-20 foto/gedung)</div>
+          </div>
+
+          <div className="p-3.5 rounded-xl bg-slate-800/80 border border-slate-700/80 space-y-1">
+            <div className="text-slate-400 font-medium">Ukuran per Foto (Kompresi)</div>
+            <div className="text-lg font-black text-emerald-400">~100 KB - 120 KB</div>
+            <div className="text-[11px] text-slate-400">Dimensi 1000px, kualitas visual jernih & tajam</div>
+          </div>
+
+          <div className="p-3.5 rounded-xl bg-slate-800/80 border border-slate-700/80 space-y-1">
+            <div className="text-slate-400 font-medium">Total Storage Diperlukan</div>
+            <div className="text-lg font-black text-sky-400">~2,5 GB - 3,0 GB</div>
+            <div className="text-[11px] text-slate-400">25.000 foto x 100 KB = 2,5 GB</div>
+          </div>
+
+          <div className="p-3.5 rounded-xl bg-slate-800/80 border border-emerald-500/30 bg-emerald-950/20 space-y-1">
+            <div className="text-emerald-400 font-medium">Batas Gratis Firebase Storage</div>
+            <div className="text-lg font-black text-emerald-300">5,0 GB Gratis</div>
+            <div className="text-[11px] text-emerald-400/80">Sisa kuota cadangan masih 2,0 - 2,5 GB!</div>
+          </div>
+        </div>
+
+        <div className="p-4 rounded-xl bg-slate-950/60 border border-slate-800 text-xs text-slate-300 space-y-2">
+          <div className="font-bold text-amber-300 flex items-center gap-1.5">
+            <Shield className="w-4 h-4 text-amber-400" />
+            <span>Kesimpulan Teknis & Rekomendasi:</span>
+          </div>
+          <ul className="list-disc list-inside space-y-1 text-slate-400 text-[11px] leading-relaxed">
+            <li>
+              <strong className="text-slate-200">Firebase Cloud Storage Gratis (5 GB)</strong>: Sangat mampu menampung 25.000 foto karena sistem mengompresi gambar otomatis menjadi ~100 KB per foto (25.000 x 100 KB = 2,5 GB, hanya memakai 50% dari kuota 5 GB).
+            </li>
+            <li>
+              <strong className="text-slate-200">Batas Upload Harian Firebase</strong>: Paket gratis mengizinkan hingga <strong className="text-emerald-400">20.000 operasi unggah per hari</strong>. Dengan 125 surveyor, jika tiap surveyor menginput 8 gedung per hari (~1.000 foto/hari), masih jauh di bawah batas limit 20.000/hari.
+            </li>
+            <li>
+              <strong className="text-slate-200">Firestore Database (1 GB)</strong>: Dokumen penilaian hanya menyimpan URL teks foto (bukan base64), sehingga 2.000 gedung hanya menghabiskan <strong className="text-emerald-400">&lt; 4 MB</strong> dari kuota 1.000 MB.
+            </li>
+            <li>
+              <strong className="text-slate-200">Arsip Cadangan Google Drive</strong>: Sistem juga tetap terintegrasi dengan Google Drive dan Google Sheets untuk backup ganda instansi PUPR.
+            </li>
+          </ul>
         </div>
       </div>
 

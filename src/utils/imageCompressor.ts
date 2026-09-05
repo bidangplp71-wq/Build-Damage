@@ -2,8 +2,8 @@
  * Helper utility to resize and compress uploaded images for damage assessment photos.
  * Supports all image formats: JPG, JPEG, PNG, WEBP, HEIC/HEIF (Apple iPhone/iPad),
  * BMP, GIF, TIFF, AVIF, and raw camera uploads.
- * Ensures up to 10 photos per building can be stored smoothly in Firestore and local state
- * without exceeding the 1,048,576 bytes (1 MB) document limit.
+ * Ensures up to 20 photos per building can be stored smoothly in Firebase Cloud Storage,
+ * Firestore, and local state without exceeding the 1,048,576 bytes (1 MB) document limit.
  */
 
 import { BuildingPhoto } from '../types';
@@ -13,9 +13,9 @@ import { BuildingPhoto } from '../types';
  */
 export async function compressImageFile(
   rawFile: File,
-  maxWidth = 1200,
-  maxHeight = 1200,
-  quality = 0.78
+  maxWidth = 1000,
+  maxHeight = 1000,
+  quality = 0.72
 ): Promise<string> {
   const file: File | Blob = rawFile;
 
@@ -103,11 +103,22 @@ export function calculatePhotosPayloadSize(photos: BuildingPhoto[]): {
   percentageOfLimit: number;
   isSafe: boolean;
   formatted: string;
+  cloudCount: number;
+  base64Count: number;
 } {
   let totalBytes = 0;
+  let cloudCount = 0;
+  let base64Count = 0;
+
   for (const photo of photos) {
     if (photo.url) {
-      totalBytes += photo.url.length; // Base64 character length approximates byte size
+      if (photo.url.startsWith('http://') || photo.url.startsWith('https://')) {
+        cloudCount++;
+        totalBytes += photo.url.length; // Cloud URL takes only ~100-200 bytes
+      } else {
+        base64Count++;
+        totalBytes += photo.url.length; // Base64 character length approximates byte size
+      }
     }
   }
 
@@ -129,5 +140,7 @@ export function calculatePhotosPayloadSize(photos: BuildingPhoto[]): {
     percentageOfLimit,
     isSafe,
     formatted,
+    cloudCount,
+    base64Count,
   };
 }

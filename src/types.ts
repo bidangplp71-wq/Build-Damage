@@ -5,7 +5,7 @@
 export type UserRole = 
   | 'super_admin'       // Max 1
   | 'admin'             // Max 3
-  | 'admin_user'        // Max 100
+  | 'admin_user'        // Max 125 (Surveyor Lapangan)
   | 'admin_publik'      // Max 10
   | 'admin_verifikator';// Max 15
 
@@ -42,8 +42,8 @@ export const ROLE_LIMITS: Record<UserRole, RoleLimit> = {
   admin_user: {
     role: 'admin_user',
     title: 'Surveyor Lapangan',
-    max: 100,
-    description: 'Petugas lapangan dan perwakilan unit kerja yang menginput penilaian cepat fisik bangunan pasca bencana.',
+    max: 125,
+    description: 'Petugas lapangan dan perwakilan unit kerja yang menginput penilaian cepat fisik bangunan pasca bencana (Kapasitas diperluas s.d 125 surveyor).',
     badgeColor: 'bg-emerald-100 text-emerald-800 border-emerald-200'
   },
   admin_publik: {
@@ -357,6 +357,8 @@ export const STANDARD_DAMAGE_LOCATIONS = [
 
 export type StandardDamageLocation = typeof STANDARD_DAMAGE_LOCATIONS[number];
 
+export const MAX_BUILDING_PHOTOS = 20;
+
 export interface BuildingAssessment {
   id: string;
   code?: string; // Optional / dapat dikosongkan (e.g. REG-PUPR-2026-001 atau kosong jika belum terdaftar)
@@ -398,7 +400,7 @@ export interface BuildingAssessment {
   roundedRehabCost: number; // dibulatkan
   costTerbilang: string; // Terbilang Rupiah
   
-  // Visual Evidence (Maksimal 10 Foto Kerusakan dengan Keterangan Bagian)
+  // Visual Evidence (Maksimal 20 Foto Kerusakan dengan Keterangan Bagian)
   photos: BuildingPhoto[];
   
   // Signatures & Analysis Team

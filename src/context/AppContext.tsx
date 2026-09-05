@@ -364,11 +364,19 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
   }, []);
 
   useEffect(() => {
-    localStorage.setItem(STORAGE_KEYS.ACTIVITY_LOGS, JSON.stringify(activityLogs));
+    try {
+      localStorage.setItem(STORAGE_KEYS.ACTIVITY_LOGS, JSON.stringify(activityLogs));
+    } catch (e) {
+      console.warn('LocalStorage activity logs save notice:', e);
+    }
   }, [activityLogs]);
 
   useEffect(() => {
-    localStorage.setItem(STORAGE_KEYS.USERS, JSON.stringify(users));
+    try {
+      localStorage.setItem(STORAGE_KEYS.USERS, JSON.stringify(users));
+    } catch (e) {
+      console.warn('LocalStorage users save notice:', e);
+    }
     if (db && !isInitialLoad.current) {
       users.forEach((user) => {
         const cleanUser = JSON.parse(JSON.stringify(user));
@@ -378,7 +386,25 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
   }, [users]);
 
   useEffect(() => {
-    localStorage.setItem(STORAGE_KEYS.ASSESSMENTS, JSON.stringify(assessments));
+    try {
+      localStorage.setItem(STORAGE_KEYS.ASSESSMENTS, JSON.stringify(assessments));
+    } catch (e) {
+      console.warn('LocalStorage assessments save exceeded quota, saving lightweight references:', e);
+      try {
+        // Fallback: strip heavy base64 strings if local storage quota exceeded
+        const lightweight = assessments.map((a) => ({
+          ...a,
+          photos: a.photos.map((p) => ({
+            ...p,
+            url: p.url && (p.url.startsWith('http') || p.url.length < 500) ? p.url : '',
+          })),
+        }));
+        localStorage.setItem(STORAGE_KEYS.ASSESSMENTS, JSON.stringify(lightweight));
+      } catch (err2) {
+        console.warn('LocalStorage secondary fallback notice:', err2);
+      }
+    }
+
     if (db && !isInitialLoad.current) {
       assessments.forEach((a) => {
         // Strip undefined fields for Firebase
@@ -388,32 +414,55 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
     }
   }, [assessments]);
 
-
   useEffect(() => {
-    localStorage.setItem(STORAGE_KEYS.KECAMATAN, JSON.stringify(kecamatans));
+    try {
+      localStorage.setItem(STORAGE_KEYS.KECAMATAN, JSON.stringify(kecamatans));
+    } catch (e) {
+      console.warn('LocalStorage kecamatan save notice:', e);
+    }
   }, [kecamatans]);
 
   useEffect(() => {
-    localStorage.setItem(STORAGE_KEYS.DESA, JSON.stringify(desas));
+    try {
+      localStorage.setItem(STORAGE_KEYS.DESA, JSON.stringify(desas));
+    } catch (e) {
+      console.warn('LocalStorage desa save notice:', e);
+    }
   }, [desas]);
 
   useEffect(() => {
-    localStorage.setItem(STORAGE_KEYS.DUKCAPIL, JSON.stringify(dukcapilRecords));
+    try {
+      localStorage.setItem(STORAGE_KEYS.DUKCAPIL, JSON.stringify(dukcapilRecords));
+    } catch (e) {
+      console.warn('LocalStorage dukcapil save notice:', e);
+    }
   }, [dukcapilRecords]);
 
   useEffect(() => {
-    localStorage.setItem(STORAGE_KEYS.GOOGLE_SHEET, JSON.stringify(googleSheetConfig));
+    try {
+      localStorage.setItem(STORAGE_KEYS.GOOGLE_SHEET, JSON.stringify(googleSheetConfig));
+    } catch (e) {
+      console.warn('LocalStorage google sheet save notice:', e);
+    }
   }, [googleSheetConfig]);
 
   useEffect(() => {
-    localStorage.setItem(STORAGE_KEYS.FIREBASE, JSON.stringify(firebaseShieldConfig));
+    try {
+      localStorage.setItem(STORAGE_KEYS.FIREBASE, JSON.stringify(firebaseShieldConfig));
+    } catch (e) {
+      console.warn('LocalStorage firebase save notice:', e);
+    }
   }, [firebaseShieldConfig]);
 
   useEffect(() => {
-    if (isLoggedIn && currentUser) {
-      localStorage.setItem(STORAGE_KEYS.AUTH, JSON.stringify({ isLoggedIn: true, userId: currentUser.id }));
-    } else {
-      localStorage.removeItem(STORAGE_KEYS.AUTH);
+    try {
+      if (isLoggedIn && currentUser) {
+        localStorage.setItem(STORAGE_KEYS.AUTH, JSON.stringify({ isLoggedIn: true, userId: currentUser.id }));
+      } else {
+        localStorage.removeItem(STORAGE_KEYS.AUTH);
+      }
+    } catch (e) {
+      console.warn('LocalStorage auth save notice:', e);
     }
   }, [isLoggedIn, currentUser]);
 
