@@ -1,7 +1,8 @@
-import React from 'react';
+import React, { useMemo } from 'react';
 import { useApp } from '../context/AppContext';
 import { formatRupiah } from '../utils/puprCalculations';
 import { BuildingCategory, BUILDING_CATEGORY_CONFIGS } from '../types';
+import { detectAllDuplicateGroups } from '../utils/duplicateDetector';
 import {
   Building,
   AlertTriangle,
@@ -26,6 +27,7 @@ import {
   ShoppingBag,
   ShoppingCart,
   Landmark,
+  Copy,
 } from 'lucide-react';
 
 export const DashboardAnalytics: React.FC = () => {
@@ -33,6 +35,7 @@ export const DashboardAnalytics: React.FC = () => {
     assessments,
     kecamatans,
     desas,
+    currentUser,
     setActiveTab,
     setSelectedAssessmentForDetail,
     googleSheetConfig,
@@ -42,6 +45,16 @@ export const DashboardAnalytics: React.FC = () => {
 
   const totalBuildings = assessments.length;
   const totalCost = assessments.reduce((acc, curr) => acc + curr.roundedRehabCost, 0);
+
+  // Duplicates detection
+  const duplicateGroups = useMemo(() => {
+    let ignored: string[] = [];
+    try {
+      const saved = localStorage.getItem('sipandu_ignored_duplicates');
+      if (saved) ignored = JSON.parse(saved);
+    } catch {}
+    return detectAllDuplicateGroups(assessments, ignored);
+  }, [assessments]);
 
   const lightDamage = assessments.filter((a) => a.damageClassification === 'Rusak Ringan').length;
   const moderateDamage = assessments.filter((a) => a.damageClassification === 'Rusak Sedang').length;
@@ -126,7 +139,7 @@ export const DashboardAnalytics: React.FC = () => {
             </button>
             <button
               onClick={() => setActiveTab('penilaian')}
-              className="flex items-center gap-2 px-4 py-2.5 rounded-xl bg-slate-800/90 hover:bg-slate-700 text-white font-medium text-sm border border-slate-600 transition-all"
+              className="flex items-center gap-2 px-4 py-2.5 rounded-xl bg-slate-800/90 hover:bg-slate-700 text-white font-medium text-sm border border-slate-600 transition-all cursor-pointer"
             >
               <span>Lihat Tabel Data</span>
               <ArrowRight className="w-4 h-4" />
@@ -134,6 +147,37 @@ export const DashboardAnalytics: React.FC = () => {
           </div>
         </div>
       </div>
+
+      {/* DUPLICATE DETECTION PROACTIVE ALERT BANNER ON DASHBOARD */}
+      {duplicateGroups.length > 0 && (currentUser.role === 'super_admin' || currentUser.role === 'admin' || currentUser.role === 'admin_verifikator') && (
+        <div className="bg-amber-50 border-2 border-amber-400/80 rounded-2xl p-4 flex flex-col sm:flex-row items-start sm:items-center justify-between gap-3 shadow-xs">
+          <div className="flex items-center gap-3">
+            <div className="w-10 h-10 rounded-xl bg-amber-500 text-slate-950 flex items-center justify-center shrink-0 font-bold shadow-xs">
+              <AlertTriangle className="w-5 h-5 animate-bounce" />
+            </div>
+            <div>
+              <div className="flex items-center gap-2">
+                <h3 className="font-extrabold text-sm text-amber-950">
+                  Perhatian: Terdeteksi {duplicateGroups.length} Kelompok Data Survei Ganda
+                </h3>
+                <span className="px-2 py-0.5 rounded-full bg-amber-200 text-amber-900 font-bold text-[10px]">
+                  Perlu Ditinjau
+                </span>
+              </div>
+              <p className="text-xs text-amber-900 mt-0.5">
+                Ada survei yang diinput 2 kali atau lebih oleh surveyor (kesamaan nama gedung, kode registrasi, atau lokasi & pemilik).
+              </p>
+            </div>
+          </div>
+          <button
+            onClick={() => setActiveTab('penilaian')}
+            className="px-4 py-2 rounded-xl bg-amber-500 hover:bg-amber-400 text-slate-950 font-bold text-xs shadow-xs transition-colors shrink-0 flex items-center gap-1.5 cursor-pointer"
+          >
+            <Copy className="w-3.5 h-3.5" />
+            <span>Audit di Tabel Data &rarr;</span>
+          </button>
+        </div>
+      )}
 
       {/* Main KPI Cards */}
       <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-4">

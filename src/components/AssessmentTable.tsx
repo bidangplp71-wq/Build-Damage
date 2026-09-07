@@ -1,4 +1,4 @@
-import React, { useState, useMemo } from 'react';
+import React, { useState, useMemo, useEffect } from 'react';
 import { useApp } from '../context/AppContext';
 import {
   BuildingAssessment,
@@ -11,6 +11,11 @@ import {
 import { formatRupiah } from '../utils/puprCalculations';
 import { exportAssessmentsToCSV, exportAssessmentsToExcelMultiSheet } from '../services/googleSheetsService';
 import {
+  detectAllDuplicateGroups,
+  getDuplicateIdsMap,
+  DuplicateGroup,
+} from '../utils/duplicateDetector';
+import {
   Search,
   Filter,
   RefreshCw,
@@ -20,6 +25,7 @@ import {
   FileSpreadsheet,
   CheckCircle,
   AlertCircle,
+  AlertTriangle,
   Printer,
   ChevronLeft,
   ChevronRight,
@@ -34,8 +40,10 @@ import {
   Camera,
   Layers,
   ZoomIn,
+  Copy,
 } from 'lucide-react';
 import { PhotoViewerModal } from './PhotoViewerModal';
+import { DuplicateAuditModal } from './DuplicateAuditModal';
 
 export const AssessmentTable: React.FC = () => {
   const {
@@ -82,6 +90,46 @@ export const AssessmentTable: React.FC = () => {
   // Syncing state per ID
   const [syncingId, setSyncingId] = useState<string | null>(null);
 
+  // Duplicate detection & audit states
+  const [showDuplicateAuditModal, setShowDuplicateAuditModal] = useState(false);
+  const [showOnlyDuplicates, setShowOnlyDuplicates] = useState(false);
+  const [ignoredDuplicatePairs, setIgnoredDuplicatePairs] = useState<string[]>(() => {
+    try {
+      const saved = localStorage.getItem('sipandu_ignored_duplicates');
+      return saved ? JSON.parse(saved) : [];
+    } catch {
+      return [];
+    }
+  });
+
+  const handleIgnoreDuplicatePair = (pairKey: string) => {
+    setIgnoredDuplicatePairs((prev) => {
+      const updated = prev.includes(pairKey) ? prev : [...prev, pairKey];
+      try {
+        localStorage.setItem('sipandu_ignored_duplicates', JSON.stringify(updated));
+      } catch {}
+      return updated;
+    });
+  };
+
+  const handleClearIgnoredDuplicates = () => {
+    setIgnoredDuplicatePairs([]);
+    try {
+      localStorage.removeItem('sipandu_ignored_duplicates');
+    } catch {}
+    showToast('Daftar duplikasi yang diabaikan telah dibersihkan', 'info');
+  };
+
+  // Detect all duplicate groups
+  const duplicateGroups = useMemo(() => {
+    return detectAllDuplicateGroups(assessments, ignoredDuplicatePairs);
+  }, [assessments, ignoredDuplicatePairs]);
+
+  // Map of assessmentId -> info for fast lookup
+  const duplicateMap = useMemo(() => {
+    return getDuplicateIdsMap(duplicateGroups);
+  }, [duplicateGroups]);
+
   const pendingVerificationCount = useMemo(() => {
     return assessments.filter((a) => a.verificationStatus === 'Menunggu Verifikasi').length;
   }, [assessments]);
@@ -102,6 +150,11 @@ export const AssessmentTable: React.FC = () => {
   // Filtered Assessments
   const filteredAssessments = useMemo(() => {
     return assessments.filter((item) => {
+      // Duplicate only filter
+      if (showOnlyDuplicates && !duplicateMap.has(item.id)) {
+        return false;
+      }
+
       // Search matches
       if (searchTerm) {
         const q = searchTerm.toLowerCase();
@@ -302,6 +355,53 @@ export const AssessmentTable: React.FC = () => {
         </div>
       )}
 
+      {/* DUPLICATE DETECTION PROACTIVE ALERT BANNER */}
+      {duplicateGroups.length > 0 && (currentUser.role === 'super_admin' || currentUser.role === 'admin' || currentUser.role === 'admin_verifikator') && (
+        <div className="bg-gradient-to-r from-amber-500 via-orange-500 to-amber-600 text-slate-950 rounded-2xl p-4 flex flex-col md:flex-row items-start md:items-center justify-between gap-3 shadow-md border border-amber-300/80 animate-in fade-in">
+          <div className="flex items-center gap-3">
+            <div className="w-10 h-10 rounded-xl bg-slate-950 text-amber-400 flex items-center justify-center shrink-0 font-black shadow-xs">
+              <AlertTriangle className="w-5 h-5 animate-pulse" />
+            </div>
+            <div>
+              <div className="flex flex-wrap items-center gap-2">
+                <span className="font-extrabold text-sm text-slate-950">
+                  Peringatan Duplikasi Data: Terdeteksi {duplicateGroups.length} Kelompok / Pasang Survei Ganda
+                </span>
+                <span className="px-2 py-0.5 rounded-full bg-slate-950 text-amber-300 font-bold text-[10px]">
+                  {duplicateGroups.reduce((acc, g) => acc + g.items.length, 0)} Total Survei Terduplikasi
+                </span>
+              </div>
+              <p className="text-xs text-amber-950/90 font-medium mt-0.5">
+                Terdapat entri survei dengan nama, kode, atau pemilik & lokasi yang sama persis / sangat serupa. Admin dapat memeriksa dan menghapus data input ganda agar rekapitulasi data tidak terhitung dobel.
+              </p>
+            </div>
+          </div>
+
+          <div className="flex items-center gap-2 self-end md:self-auto shrink-0">
+            <button
+              onClick={() => {
+                setShowOnlyDuplicates(!showOnlyDuplicates);
+                setCurrentPage(1);
+              }}
+              className={`px-3 py-1.5 rounded-xl text-xs font-bold transition-all cursor-pointer shadow-xs ${
+                showOnlyDuplicates
+                  ? 'bg-white text-slate-950 border border-slate-300'
+                  : 'bg-slate-950/20 hover:bg-slate-950/30 text-slate-950 border border-slate-950/30'
+              }`}
+            >
+              {showOnlyDuplicates ? 'Tampilkan Semua Data' : 'Filter Data Ganda'}
+            </button>
+            <button
+              onClick={() => setShowDuplicateAuditModal(true)}
+              className="px-3.5 py-1.5 rounded-xl bg-slate-950 hover:bg-slate-900 text-amber-400 font-bold text-xs shadow-md transition-transform active:scale-95 cursor-pointer flex items-center gap-1.5"
+            >
+              <Copy className="w-3.5 h-3.5" />
+              <span>Audit & Bersihkan ({duplicateGroups.length})</span>
+            </button>
+          </div>
+        </div>
+      )}
+
       {/* Header Bar: Title, Count, and Global Actions */}
       <div className="flex flex-col sm:flex-row items-start sm:items-center justify-between gap-4 bg-white p-4 rounded-2xl border border-slate-200 shadow-xs">
         <div>
@@ -316,6 +416,16 @@ export const AssessmentTable: React.FC = () => {
             <span className="text-xs px-2.5 py-0.5 rounded-full bg-slate-100 text-slate-700 font-semibold border border-slate-200">
               {filteredAssessments.length} Data
             </span>
+            {duplicateGroups.length > 0 && (
+              <span
+                onClick={() => setShowDuplicateAuditModal(true)}
+                className="text-xs px-2.5 py-0.5 rounded-full bg-amber-100 text-amber-900 font-bold border border-amber-300 flex items-center gap-1 cursor-pointer hover:bg-amber-200 transition-colors"
+                title="Klik untuk membuka audit data ganda"
+              >
+                <AlertTriangle className="w-3 h-3 text-amber-600" />
+                <span>{duplicateGroups.length} Ganda</span>
+              </span>
+            )}
           </h2>
           <p className="text-xs text-slate-500 mt-0.5">
             {currentUser.role === 'admin_verifikator'
@@ -327,6 +437,22 @@ export const AssessmentTable: React.FC = () => {
         </div>
 
         <div className="flex flex-wrap items-center gap-2 w-full sm:w-auto">
+          {/* Audit Data Ganda button for Admin */}
+          {(currentUser.role === 'super_admin' || currentUser.role === 'admin') && (
+            <button
+              onClick={() => setShowDuplicateAuditModal(true)}
+              title="Audit dan kelola data survei yang diinput ganda"
+              className={`flex items-center gap-1.5 px-3 py-2 text-xs font-bold rounded-xl border transition-colors cursor-pointer ${
+                duplicateGroups.length > 0
+                  ? 'bg-amber-100 hover:bg-amber-200 text-amber-950 border-amber-300'
+                  : 'bg-slate-100 hover:bg-slate-200 text-slate-700 border-slate-200'
+              }`}
+            >
+              <AlertTriangle className={`w-3.5 h-3.5 ${duplicateGroups.length > 0 ? 'text-amber-600' : 'text-slate-500'}`} />
+              <span>Audit Data Ganda ({duplicateGroups.length})</span>
+            </button>
+          )}
+
           {/* Refresh button */}
           <button
             onClick={handleRefresh}
@@ -627,7 +753,20 @@ export const AssessmentTable: React.FC = () => {
 
                     {/* Building Name & Code */}
                     <td className="py-3 px-3">
-                      <div className="font-bold text-slate-900">{item.buildingName}</div>
+                      <div className="flex items-center gap-1.5 flex-wrap">
+                        <span className="font-bold text-slate-900">{item.buildingName}</span>
+                        {duplicateMap.has(item.id) && (
+                          <button
+                            type="button"
+                            onClick={() => setShowDuplicateAuditModal(true)}
+                            title={`Peringatan: Data ini terdeteksi ganda (${duplicateMap.get(item.id)!.group.reason}). Klik untuk audit.`}
+                            className="inline-flex items-center gap-1 px-1.5 py-0.5 rounded-md bg-amber-100 hover:bg-amber-200 text-amber-900 border border-amber-300 text-[10px] font-bold cursor-pointer transition-colors"
+                          >
+                            <AlertTriangle className="w-3 h-3 text-amber-600 shrink-0" />
+                            <span>Ganda ({duplicateMap.get(item.id)!.count}x)</span>
+                          </button>
+                        )}
+                      </div>
                       <div className="text-[11px] text-slate-500 flex flex-wrap items-center gap-1.5 mt-1">
                         {item.code ? (
                           <span className="font-mono text-slate-700 font-semibold bg-slate-100 px-1.5 py-0.5 rounded border border-slate-200">
@@ -1023,6 +1162,26 @@ export const AssessmentTable: React.FC = () => {
           onClose={() => setPhotoViewerAssessment(null)}
         />
       )}
+
+      {/* MODAL AUDIT DATA GANDA (ADMIN / SUPER ADMIN) */}
+      <DuplicateAuditModal
+        isOpen={showDuplicateAuditModal}
+        onClose={() => setShowDuplicateAuditModal(false)}
+        duplicateGroups={duplicateGroups}
+        onDeleteAssessment={(id) => {
+          const res = deleteAssessment(id);
+          if (res.success) {
+            showToast('Satu data ganda berhasil dihapus', 'success');
+          } else {
+            showToast(res.message, 'error');
+          }
+        }}
+        onViewDetail={(item) => {
+          setSelectedAssessmentForDetail(item);
+        }}
+        onIgnorePair={handleIgnoreDuplicatePair}
+        onClearIgnored={handleClearIgnoredDuplicates}
+      />
     </div>
   );
 };

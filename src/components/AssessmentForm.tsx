@@ -25,6 +25,7 @@ import {
 import { compressImageFile, calculatePhotosPayloadSize } from '../utils/imageCompressor';
 import { savePhotoLocally } from '../utils/photoStorage';
 import { uploadPhotoToFirebaseStorage } from '../services/firebase';
+import { checkDuplicateBeforeSave, DuplicateMatchInfo } from '../utils/duplicateDetector';
 import { BuildingPhotoGallery } from './BuildingPhotoGallery';
 import { PhotoViewerModal } from './PhotoViewerModal';
 import { AssessmentDetailModal } from './AssessmentDetailModal';
@@ -78,6 +79,7 @@ import {
 
 export const AssessmentForm: React.FC = () => {
   const {
+    assessments,
     currentUser,
     kecamatans,
     desas,
@@ -628,6 +630,44 @@ export const AssessmentForm: React.FC = () => {
     Number(demolitionPercent) || 0
   );
 
+  // Live duplicate detection as user enters name, location, and owner details
+  const liveDuplicateCheck = React.useMemo(() => {
+    const currentKec = kecamatans.find((k) => k.id === kecamatanId);
+    const currentDesa = desas.find((d) => d.id === desaId);
+    return checkDuplicateBeforeSave(
+      {
+        buildingName,
+        kecamatanId,
+        kecamatanName: currentKec?.name,
+        desaId,
+        desaName: currentDesa?.name,
+        nikPemilik,
+        namaPemilikRumah,
+        namaPemilikGedung,
+        ownerAgency,
+        code,
+      },
+      assessments,
+      selectedAssessmentForEdit?.id
+    );
+  }, [
+    buildingName,
+    kecamatanId,
+    desaId,
+    nikPemilik,
+    namaPemilikRumah,
+    namaPemilikGedung,
+    ownerAgency,
+    code,
+    kecamatans,
+    desas,
+    assessments,
+    selectedAssessmentForEdit,
+  ]);
+
+  const [showDuplicateConfirmModal, setShowDuplicateConfirmModal] = useState(false);
+  const [pendingSubmitPayload, setPendingSubmitPayload] = useState<BuildingAssessment | null>(null);
+
   // Photo Handlers (Maksimal 20 Foto Visual per Bangunan Gedung)
   const handlePhotoFilesSelected = async (e: React.ChangeEvent<HTMLInputElement>) => {
     const fileList = e.target.files;
@@ -902,14 +942,27 @@ export const AssessmentForm: React.FC = () => {
       updatedAt: new Date().toISOString(),
     };
 
+    // If new entry and identical or high-confidence duplicate found, request surveyor confirmation first
+    if (!isEditMode && liveDuplicateCheck.isDuplicate) {
+      setPendingSubmitPayload(assessmentPayload);
+      setShowDuplicateConfirmModal(true);
+      return;
+    }
+
+    await executeSaveAssessment(assessmentPayload);
+  };
+
+  const executeSaveAssessment = async (payload: BuildingAssessment) => {
     if (isEditMode) {
-      const res = await updateAssessment(selectedAssessmentForEdit!.id, assessmentPayload);
+      const res = await updateAssessment(selectedAssessmentForEdit!.id, payload);
       showToast(res.message, res.success ? 'success' : 'error');
     } else {
-      const res = await addAssessment(assessmentPayload);
+      const res = await addAssessment(payload);
       showToast(res.message, res.success ? 'success' : 'error');
     }
 
+    setShowDuplicateConfirmModal(false);
+    setPendingSubmitPayload(null);
     setSelectedAssessmentForEdit(null);
     setActiveTab('penilaian');
   };
@@ -1898,6 +1951,75 @@ export const AssessmentForm: React.FC = () => {
             />
           </div>
         </div>
+
+        {/* LIVE DUPLICATE ALERT BANNER (If duplicate is detected in real time) */}
+        {!isEditMode && liveDuplicateCheck.isDuplicate && (
+          <div className="mt-4 p-4 rounded-2xl bg-amber-500/10 border-2 border-amber-500/40 text-amber-950 space-y-2.5 animate-in fade-in">
+            <div className="flex items-start gap-3">
+              <div className="p-2 rounded-xl bg-amber-500 text-slate-950 font-bold shrink-0 mt-0.5 shadow-xs">
+                <AlertTriangle className="w-5 h-5" />
+              </div>
+              <div className="flex-1 min-w-0">
+                <div className="flex flex-wrap items-center gap-2">
+                  <h4 className="font-extrabold text-sm text-amber-950">
+                    Peringatan: Potensi Data Survei Ganda Terdeteksi!
+                  </h4>
+                  <span className="px-2 py-0.5 rounded-full bg-amber-200 text-amber-950 font-bold text-[10px] border border-amber-300">
+                    {liveDuplicateCheck.matches.length} Data Mirip Ditemukan
+                  </span>
+                </div>
+                <p className="text-xs text-amber-900 mt-1 font-medium">
+                  {liveDuplicateCheck.primaryMatch?.description}
+                </p>
+
+                {/* List of matched existing records */}
+                <div className="mt-2.5 space-y-1.5">
+                  {liveDuplicateCheck.matches.slice(0, 3).map((match, idx) => (
+                    <div
+                      key={match.assessment.id || idx}
+                      className="p-2.5 bg-white/90 rounded-xl border border-amber-300/70 text-xs flex flex-col sm:flex-row sm:items-center justify-between gap-2 shadow-2xs"
+                    >
+                      <div>
+                        <div className="font-bold text-slate-900 flex items-center gap-1.5">
+                          <span>{match.assessment.buildingName}</span>
+                          {match.assessment.code && (
+                            <span className="font-mono text-[10px] bg-slate-100 text-slate-700 px-1.5 py-0.2 rounded">
+                              {match.assessment.code}
+                            </span>
+                          )}
+                        </div>
+                        <div className="text-[11px] text-slate-600 mt-0.5">
+                          <span>Kec. {match.assessment.kecamatanName} &bull; Ds. {match.assessment.desaName}</span>
+                          {match.assessment.nikPemilik && match.assessment.nikPemilik !== '0' && (
+                            <span className="ml-1 font-mono text-[10px] text-slate-500">
+                              (NIK: {match.assessment.nikPemilik})
+                            </span>
+                          )}
+                        </div>
+                        <div className="text-[10px] text-slate-500 mt-0.5">
+                          Disurvei oleh: <strong>{match.assessment.createdByName || 'Surveyor'}</strong> ({new Date(match.assessment.createdAt || '').toLocaleDateString('id-ID')})
+                        </div>
+                      </div>
+
+                      <div className="flex items-center gap-2 self-start sm:self-center shrink-0">
+                        <span className="px-2 py-0.5 rounded-md bg-amber-100 text-amber-900 font-bold text-[10px]">
+                          {match.reason}
+                        </span>
+                        <button
+                          type="button"
+                          onClick={() => setPreviewAssessment(match.assessment)}
+                          className="px-2.5 py-1 rounded-lg bg-slate-900 hover:bg-slate-800 text-white font-semibold text-[10px] cursor-pointer"
+                        >
+                          Lihat Data
+                        </button>
+                      </div>
+                    </div>
+                  ))}
+                </div>
+              </div>
+            </div>
+          </div>
+        )}
       </div>
 
       {/* SECTION 3: TABEL BOBOT & TINGKAT KERUSAKAN 8 KOMPONEN PUPR */}
@@ -3267,6 +3389,97 @@ export const AssessmentForm: React.FC = () => {
         onClose={() => setShowInputGuide(false)}
         onApplySampleData={handleApplySampleData}
       />
+
+      {/* MODAL KONFIRMASI DATA GANDA SEBELUM DISIMPAN */}
+      {showDuplicateConfirmModal && pendingSubmitPayload && (
+        <div className="fixed inset-0 z-50 flex items-center justify-center p-4 bg-slate-950/70 backdrop-blur-xs animate-in fade-in duration-150">
+          <div className="bg-white rounded-3xl shadow-2xl max-w-lg w-full overflow-hidden border border-amber-300">
+            <div className="px-6 py-4 bg-gradient-to-r from-amber-500 via-orange-500 to-amber-600 text-slate-950 flex items-center justify-between">
+              <div className="flex items-center gap-2.5">
+                <div className="p-2 bg-slate-950 text-amber-400 rounded-xl">
+                  <AlertTriangle className="w-5 h-5" />
+                </div>
+                <div>
+                  <h3 className="font-black text-sm text-slate-950">Konfirmasi Penyimpanan Data Ganda</h3>
+                  <p className="text-[11px] text-amber-950 font-semibold">Peringatan Duplikasi Survei Lapangan</p>
+                </div>
+              </div>
+              <button
+                type="button"
+                onClick={() => {
+                  setShowDuplicateConfirmModal(false);
+                  setPendingSubmitPayload(null);
+                }}
+                className="text-slate-900 hover:text-white p-1 rounded-lg"
+              >
+                <X className="w-5 h-5" />
+              </button>
+            </div>
+
+            <div className="p-6 space-y-4 text-xs">
+              <div className="p-3.5 bg-amber-50 rounded-2xl border border-amber-200 text-amber-950 leading-relaxed space-y-1">
+                <p className="font-bold text-xs">
+                  Sistem mendeteksi bahwa bangunan gedung ini kemungkinan sudah pernah disurvei dan tersimpan di database:
+                </p>
+                <p className="text-[11px] text-amber-900">
+                  {liveDuplicateCheck.primaryMatch?.description}
+                </p>
+              </div>
+
+              {/* Duplicate Target Detail comparison */}
+              <div className="space-y-2">
+                <div className="text-[11px] font-bold text-slate-500 uppercase tracking-wider">
+                  Data yang Sudah Ada di Database:
+                </div>
+                {liveDuplicateCheck.matches.slice(0, 2).map((match, idx) => (
+                  <div
+                    key={match.assessment.id || idx}
+                    className="p-3 rounded-xl bg-slate-50 border border-slate-200 space-y-1 text-slate-700"
+                  >
+                    <div className="font-bold text-slate-900 flex items-center justify-between">
+                      <span>{match.assessment.buildingName}</span>
+                      <span className="px-2 py-0.5 rounded bg-amber-100 text-amber-900 text-[10px] font-bold">
+                        {match.reason}
+                      </span>
+                    </div>
+                    <div className="text-[11px] text-slate-600">
+                      Kecamatan: <strong>{match.assessment.kecamatanName}</strong> &bull; Desa: <strong>{match.assessment.desaName}</strong>
+                    </div>
+                    <div className="text-[10px] text-slate-500">
+                      Disurvei oleh: <strong>{match.assessment.createdByName}</strong> pada {new Date(match.assessment.createdAt || '').toLocaleDateString('id-ID')}
+                    </div>
+                  </div>
+                ))}
+              </div>
+
+              <div className="p-3 bg-slate-100 rounded-xl text-[11px] text-slate-600">
+                💡 <em>Jika Anda yakin ini adalah survei bangunan yang berbeda atau penilaian ulang tahap lanjutan, Anda dapat melanjutkan penyimpanan. Jika tidak sengaja terinput ganda, silakan klik Batal.</em>
+              </div>
+
+              <div className="pt-2 flex flex-col sm:flex-row items-center justify-end gap-2.5 border-t border-slate-100">
+                <button
+                  type="button"
+                  onClick={() => {
+                    setShowDuplicateConfirmModal(false);
+                    setPendingSubmitPayload(null);
+                  }}
+                  className="w-full sm:w-auto px-4 py-2.5 text-xs font-bold text-slate-700 bg-slate-100 hover:bg-slate-200 rounded-xl cursor-pointer transition-colors text-center"
+                >
+                  Batal & Periksa Kembali
+                </button>
+                <button
+                  type="button"
+                  onClick={() => executeSaveAssessment(pendingSubmitPayload)}
+                  className="w-full sm:w-auto px-5 py-2.5 text-xs font-bold text-slate-950 bg-amber-500 hover:bg-amber-400 rounded-xl shadow-sm cursor-pointer transition-colors text-center flex items-center justify-center gap-1.5"
+                >
+                  <CheckCircle2 className="w-4 h-4" />
+                  <span>Tetap Simpan Sebagai Data Baru</span>
+                </button>
+              </div>
+            </div>
+          </div>
+        </div>
+      )}
     </>
   );
 };
