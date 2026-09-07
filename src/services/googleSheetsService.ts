@@ -1592,6 +1592,9 @@ export async function fetchAssessmentsFromGoogleSheet(
       }
       if (typeof val === 'string') {
         const trimmed = val.trim();
+        if (trimmed === '-' || trimmed === '' || trimmed.toLowerCase() === 'n/a' || trimmed.toLowerCase() === 'invalid date') {
+          return new Date().toISOString().split('T')[0];
+        }
         if (/^\d{4}-\d{2}-\d{2}$/.test(trimmed)) return trimmed;
         const dmy = trimmed.match(/^(\d{1,2})[\/\-](\d{1,2})[\/\-](\d{4})$/);
         if (dmy) {
@@ -1600,7 +1603,10 @@ export async function fetchAssessmentsFromGoogleSheet(
         }
         const parsed = Date.parse(trimmed);
         if (!isNaN(parsed)) {
-          return new Date(parsed).toISOString().split('T')[0];
+          const dObj = new Date(parsed);
+          if (!isNaN(dObj.getTime())) {
+            return dObj.toISOString().split('T')[0];
+          }
         }
       }
       return new Date().toISOString().split('T')[0];
@@ -1658,7 +1664,16 @@ export async function fetchAssessmentsFromGoogleSheet(
       const disasterDate = parseExcelDate(getVal(rowObj, ['Tanggal Bencana', 'Tgl Bencana']));
       const assessmentDate = parseExcelDate(getVal(rowObj, ['Tanggal Penilaian', 'Tanggal Survei', 'Tgl Penilaian']));
       const lastUpdatedRaw = getVal(rowObj, ['Terakhir Diperbarui', 'Diperbarui Pada', 'Timestamp']);
-      const lastUpdated = lastUpdatedRaw ? new Date(lastUpdatedRaw).toISOString() : new Date().toISOString();
+      let lastUpdated = new Date().toISOString();
+      if (lastUpdatedRaw && lastUpdatedRaw !== '-' && String(lastUpdatedRaw).trim() !== '') {
+        const parsedTime = Date.parse(String(lastUpdatedRaw));
+        if (!isNaN(parsedTime)) {
+          const dObj = new Date(parsedTime);
+          if (!isNaN(dObj.getTime())) {
+            lastUpdated = dObj.toISOString();
+          }
+        }
+      }
 
       const rawKec = String(getVal(rowObj, ['Kecamatan', 'Kec', 'Nama Kecamatan']) || 'Nangaroro').trim();
       const kecInfo = resolveKecamatan(rawKec);
