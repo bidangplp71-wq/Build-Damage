@@ -112,6 +112,12 @@ export async function testFirebaseConnection(): Promise<{ success: boolean; mess
         message: `Terhubung ke project "${firebaseConfig.projectId}" (Aturan Keamanan Firestore Rules aktif).`,
       };
     }
+    if (error?.code === 'resource-exhausted' || error?.message?.includes('Quota limit') || error?.message?.includes('resource-exhausted')) {
+      return {
+        success: true,
+        message: `Batas kuota harian gratis Firestore tercapai. Aplikasi otomatis beralih ke Cache Lokal & IndexedDB yang 100% aman dan lancar hingga kuota reset harian.`,
+      };
+    }
     if (error?.code === 'unavailable' || error?.message?.includes('unavailable') || error?.message?.includes('offline')) {
       return {
         success: true,

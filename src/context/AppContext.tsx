@@ -610,12 +610,6 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
     } catch (e) {
       console.warn('LocalStorage users save notice:', e);
     }
-    if (db && !isInitialLoad.current) {
-      users.forEach((user) => {
-        const cleanUser = JSON.parse(JSON.stringify(user));
-        setDoc(doc(db, 'users', cleanUser.id), cleanUser).catch(() => {});
-      });
-    }
   }, [users]);
 
   useEffect(() => {
@@ -643,17 +637,6 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
       } catch (err2) {
         console.warn('LocalStorage secondary fallback notice:', err2);
       }
-    }
-
-    if (db && !isInitialLoad.current) {
-      assessments.forEach((a) => {
-        if (deletedAssessmentIds.current.has(a.id)) return;
-        // Strip undefined fields for Firebase
-        const cleanA = JSON.parse(JSON.stringify(a));
-        setDoc(doc(db, 'assessments', cleanA.id), cleanA).catch((err) => {
-          console.warn('Firebase assessment doc write deferred:', err?.message || err);
-        });
-      });
     }
   }, [assessments]);
 
@@ -778,6 +761,10 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
     };
 
     setUsers((prev) => [...prev, newUser]);
+    if (db) {
+      const cleanU = JSON.parse(JSON.stringify(newUser));
+      setDoc(doc(db, 'users', cleanU.id), cleanU).catch(() => {});
+    }
     return {
       success: true,
       message: `Akun pengguna ${newUser.name} (${roleLimit.title}) berhasil ditambahkan dengan kata sandi terenkripsi.`,
@@ -820,6 +807,12 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
 
     const { plainPassword, ...restData } = userData;
 
+    const updatedUserObj = { ...target, ...restData };
+    if (db) {
+      const cleanU = JSON.parse(JSON.stringify(updatedUserObj));
+      setDoc(doc(db, 'users', id), cleanU, { merge: true }).catch(() => {});
+    }
+
     setUsers((prev) =>
       prev.map((u) => {
         if (u.id === id) {
@@ -857,6 +850,10 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
 
     const encrypted = encryptPassword(newPlainPassword.trim());
     const now = new Date().toISOString();
+
+    if (db) {
+      setDoc(doc(db, 'users', targetUserId), { password: encrypted, passwordLastChanged: now }, { merge: true }).catch(() => {});
+    }
 
     setUsers((prev) =>
       prev.map((u) => (u.id === targetUserId ? { ...u, password: encrypted, passwordLastChanged: now } : u))
@@ -900,7 +897,9 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
 
     setActivityLogs((prev) => [newLog, ...prev.slice(0, 499)]);
 
-    if (db) {
+    // Only record major audit actions to Firestore to conserve quota
+    const isMajorAuditAction = ['LOGIN', 'CREATE_ASSESSMENT', 'DELETE_ASSESSMENT', 'VERIFY_ASSESSMENT'].includes(action);
+    if (db && isMajorAuditAction) {
       const cleanLog = JSON.parse(JSON.stringify(newLog));
       setDoc(doc(db, 'activity_logs', cleanLog.id), cleanLog).catch(() => {});
     }
@@ -1182,6 +1181,13 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
 
     setAssessments((prev) => [assessmentToSave, ...prev]);
 
+    if (db) {
+      const cleanA = JSON.parse(JSON.stringify(assessmentToSave));
+      setDoc(doc(db, 'assessments', cleanA.id), cleanA).catch((err) => {
+        console.warn('Firebase assessment save notice:', err?.message || err);
+      });
+    }
+
     // Real-time notification when new building data enters the system
     const newNotif: DataNotification = {
       id: `notif_${Date.now()}_${Math.random().toString(36).substring(2, 6)}`,
@@ -1258,6 +1264,14 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
     );
 
     const target = assessments.find((a) => a.id === id);
+    if (db && target) {
+      const merged = { ...target, ...data, updatedAt: now };
+      const cleanA = JSON.parse(JSON.stringify(merged));
+      setDoc(doc(db, 'assessments', id), cleanA, { merge: true }).catch((err) => {
+        console.warn('Firebase assessment update notice:', err?.message || err);
+      });
+    }
+
     logUserActivity(
       'UPDATE_ASSESSMENT',
       'Penilaian Kerusakan',
@@ -1341,6 +1355,23 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
 
     const target = assessments.find((a) => a.id === id);
     const now = new Date().toISOString();
+
+    if (db) {
+      setDoc(
+        doc(db, 'assessments', id),
+        {
+          verificationStatus: status,
+          verificationNotes: notes,
+          verifiedBy: currentUser.name,
+          verifiedAt: now,
+          updatedAt: now,
+        },
+        { merge: true }
+      ).catch((err) => {
+        console.warn('Firebase assessment verification save notice:', err?.message || err);
+      });
+    }
+
     setAssessments((prev) =>
       prev.map((a) => {
         if (a.id === id) {
