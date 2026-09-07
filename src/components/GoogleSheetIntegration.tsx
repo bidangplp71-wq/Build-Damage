@@ -29,6 +29,10 @@ import {
   Image,
   FolderCheck,
   UploadCloud,
+  Eye,
+  Settings,
+  ShieldCheck,
+  Info,
 } from 'lucide-react';
 
 export const GoogleSheetIntegration: React.FC = () => {
@@ -39,7 +43,11 @@ export const GoogleSheetIntegration: React.FC = () => {
     kecamatans,
     syncAllToSheet,
     showToast,
+    currentUser,
   } = useApp();
+
+  const isAdmin = currentUser.role === 'super_admin' || currentUser.role === 'admin';
+  const [activeSubTab, setActiveSubTab] = useState<'view_sheet' | 'settings'>('view_sheet');
 
   const [spreadsheetUrlInput, setSpreadsheetUrlInput] = useState(googleSheetConfig.spreadsheetUrl || '');
   const [webhookUrlInput, setWebhookUrlInput] = useState(googleSheetConfig.webhookUrl || '');
@@ -69,9 +77,14 @@ export const GoogleSheetIntegration: React.FC = () => {
   const scriptTemplate = getGoogleAppsScriptTemplate();
   const groupedData = groupAssessmentsByKecamatan(assessments);
   const activeKecamatanCount = Object.keys(groupedData).length;
+  const spreadsheetId = extractSpreadsheetId(googleSheetConfig.spreadsheetUrl);
 
   const handleSaveConfig = (e: React.FormEvent) => {
     e.preventDefault();
+    if (!isAdmin) {
+      showToast('Hanya Super Admin dan Admin yang memiliki hak akses untuk mengubah konfigurasi link Google Sheet', 'error');
+      return;
+    }
     let sheetUrl = spreadsheetUrlInput.trim();
     let hookUrl = webhookUrlInput.trim();
 
@@ -94,7 +107,7 @@ export const GoogleSheetIntegration: React.FC = () => {
       lastTestStatus: 'success',
       lastTestMessage: 'Pengaturan penyimpanan multi-sheet dan Google Drive aktif.',
     });
-    showToast('Tautan Google Sheet & Google Drive berhasil disimpan! Foto dan data akan otomatis tersinkron.', 'success');
+    showToast('Tautan Google Sheet & Google Drive berhasil disimpan oleh Admin!', 'success');
   };
 
   const handleTestConnection = async () => {
@@ -203,141 +216,346 @@ export const GoogleSheetIntegration: React.FC = () => {
   const syncedCount = assessments.filter((a) => a.googleSheetSynced).length;
 
   return (
-    <div className="space-y-6 max-w-5xl mx-auto pb-12">
-      {/* Header Banner */}
+    <div className="space-y-6 max-w-6xl mx-auto pb-12">
+      {/* Top Header & Role Switcher */}
       <div className="bg-white p-6 rounded-2xl border border-slate-200 shadow-xs flex flex-col md:flex-row items-start md:items-center justify-between gap-4">
         <div>
-          <div className="flex flex-wrap items-center gap-2 mb-1">
+          <div className="flex flex-wrap items-center gap-2 mb-1.5">
             <span className="inline-flex items-center gap-1 px-2.5 py-0.5 rounded-full bg-emerald-100 text-emerald-800 text-xs font-bold border border-emerald-300">
               <CheckCircle2 className="w-3.5 h-3.5 text-emerald-600" />
-              Sistem Multi-Sheet Per Kecamatan Aktif
+              SIMPKBG Data Center
             </span>
-            <span className="text-xs text-slate-500 font-medium">Otomatis Terpisah per Tab Kecamatan</span>
+            <span className="text-xs text-slate-500 font-medium">Google Spreadsheet Terpadu</span>
+            {!isAdmin && (
+              <span className="inline-flex items-center gap-1 px-2 py-0.5 rounded-full bg-slate-100 text-slate-600 text-[11px] font-semibold border border-slate-200">
+                Mode: Buka & Pantau Lembar Kerja
+              </span>
+            )}
           </div>
-          <h2 className="text-lg font-bold text-slate-900 flex items-center gap-2">
-            <FileSpreadsheet className="w-5 h-5 text-emerald-600" />
-            <span>Penyimpanan Google Sheet & Excel Multi-Sheet Per Kecamatan</span>
+          <h2 className="text-lg sm:text-xl font-bold text-slate-900 flex items-center gap-2">
+            <FileSpreadsheet className="w-6 h-6 text-emerald-600 shrink-0" />
+            <span>Lembar Kerja Google Sheet SIMPKBG</span>
           </h2>
-          <p className="text-xs text-slate-600 mt-1 max-w-2xl">
-            Setiap Kecamatan (misal: <strong>Kec. Aesesa</strong>, <strong>Kec. Mauponggo</strong>, <strong>Kec. Boawae</strong>, dll) otomatis memiliki tab lembar kerja (*sheet*) masing-masing, ditambah 1 Sheet Master Rekapitulasi untuk pimpinan dinas.
+          <p className="text-xs text-slate-600 mt-1 max-w-2xl leading-relaxed">
+            Data penilaian kerusakan bangunan gedung pasca bencana tercatat secara terpusat pada Google Sheet utama dengan tab terpisah per kecamatan dan rekapitulasi konsolidasi.
           </p>
         </div>
 
+        {/* Action Buttons Header */}
         <div className="flex flex-wrap items-center gap-2 shrink-0">
-          {googleSheetConfig.spreadsheetUrl && (
+          {googleSheetConfig.spreadsheetUrl ? (
             <a
               href={googleSheetConfig.spreadsheetUrl}
               target="_blank"
               rel="noopener noreferrer"
-              className="flex items-center gap-1.5 px-3.5 py-2 text-xs font-bold bg-emerald-700 hover:bg-emerald-800 text-white rounded-xl shadow-xs transition-colors"
+              title="Buka dokumen Google Spreadsheet langsung di tab baru"
+              className="flex items-center gap-2 px-4 py-2.5 text-xs font-bold bg-emerald-600 hover:bg-emerald-700 text-white rounded-xl shadow-xs transition-colors cursor-pointer"
             >
-              <span>Buka Dokumen Sheet</span>
+              <FileSpreadsheet className="w-4 h-4" />
+              <span>Buka Google Sheet</span>
+              <ExternalLink className="w-3.5 h-3.5" />
+            </a>
+          ) : (
+            <button
+              type="button"
+              onClick={() => {
+                if (isAdmin) {
+                  setActiveSubTab('settings');
+                } else {
+                  showToast('Link Google Sheet utama belum diatur oleh Administrator.', 'info');
+                }
+              }}
+              className="flex items-center gap-2 px-4 py-2 text-xs font-bold bg-slate-100 hover:bg-slate-200 text-slate-700 rounded-xl border border-slate-300 transition-colors cursor-pointer"
+            >
+              <FileSpreadsheet className="w-4 h-4 text-slate-500" />
+              <span>{isAdmin ? 'Atur Link Google Sheet' : 'Google Sheet (Belum Ditautkan)'}</span>
+            </button>
+          )}
+
+          {googleSheetConfig.driveFolderId && getDriveFolderUrl(googleSheetConfig.driveFolderId) && (
+            <a
+              href={getDriveFolderUrl(googleSheetConfig.driveFolderId)!}
+              target="_blank"
+              rel="noopener noreferrer"
+              title="Buka folder arsip foto visual di Google Drive"
+              className="flex items-center gap-1.5 px-3.5 py-2 text-xs font-bold bg-indigo-50 hover:bg-indigo-100 text-indigo-800 rounded-xl border border-indigo-200 transition-colors"
+            >
+              <FolderCheck className="w-4 h-4 text-indigo-600" />
+              <span className="hidden sm:inline">Folder Foto Drive</span>
               <ExternalLink className="w-3.5 h-3.5" />
             </a>
           )}
+
           <button
             onClick={() => exportAssessmentsToExcelMultiSheet(assessments, kecamatans)}
             title="Download file Excel (.xlsx) dengan 1 Tab per Kecamatan + Ringkasan Master"
-            className="flex items-center gap-1.5 px-3.5 py-2 text-xs font-bold bg-emerald-600 hover:bg-emerald-700 text-white rounded-xl shadow-xs transition-colors cursor-pointer"
-          >
-            <Download className="w-4 h-4" />
-            <span>Unduh Excel Multi-Sheet (.xlsx)</span>
-          </button>
-          <button
-            onClick={() => exportAssessmentsToCSV(assessments)}
             className="flex items-center gap-1.5 px-3.5 py-2 text-xs font-semibold bg-slate-100 hover:bg-slate-200 text-slate-700 rounded-xl transition-colors cursor-pointer"
           >
-            <Download className="w-4 h-4" />
+            <Download className="w-4 h-4 text-slate-600" />
+            <span className="hidden sm:inline">Unduh Excel</span>
+          </button>
+
+          <button
+            onClick={() => exportAssessmentsToCSV(assessments)}
+            title="Download file CSV"
+            className="flex items-center gap-1.5 px-3.5 py-2 text-xs font-semibold bg-slate-100 hover:bg-slate-200 text-slate-700 rounded-xl transition-colors cursor-pointer"
+          >
             <span>CSV</span>
           </button>
         </div>
       </div>
 
-      {/* Info Status Cards */}
-      <div className="grid grid-cols-1 sm:grid-cols-3 gap-4">
-        <div className="bg-white p-5 rounded-2xl border border-slate-200 shadow-xs">
-          <span className="text-xs font-bold text-slate-500 uppercase tracking-wider">Distribusi Tab Sheet</span>
-          <div className="mt-2 flex items-center gap-2">
-            <span className="w-3 h-3 rounded-full bg-blue-500 animate-pulse"></span>
-            <span className="text-base font-bold text-slate-900">{kecamatans.length} Sheet Kecamatan</span>
-          </div>
-          <p className="text-[11px] text-slate-500 mt-1">
-            {activeKecamatanCount} kecamatan telah memiliki data survei terisi
-          </p>
+      {/* Admin Tab Switcher (Only Visible to Super Admin & Admin) */}
+      {isAdmin && (
+        <div className="flex items-center gap-2 p-1.5 bg-slate-100 rounded-2xl w-fit border border-slate-200 shadow-2xs">
+          <button
+            type="button"
+            onClick={() => setActiveSubTab('view_sheet')}
+            className={`flex items-center gap-2 px-4 py-2 text-xs font-bold rounded-xl transition-all cursor-pointer ${
+              activeSubTab === 'view_sheet'
+                ? 'bg-white text-emerald-900 shadow-xs'
+                : 'text-slate-600 hover:text-slate-900'
+            }`}
+          >
+            <Eye className="w-4 h-4 text-emerald-600" />
+            <span>Buka Lembar Kerja Sheet</span>
+          </button>
+          <button
+            type="button"
+            onClick={() => setActiveSubTab('settings')}
+            className={`flex items-center gap-2 px-4 py-2 text-xs font-bold rounded-xl transition-all cursor-pointer ${
+              activeSubTab === 'settings'
+                ? 'bg-white text-slate-900 shadow-xs'
+                : 'text-slate-600 hover:text-slate-900'
+            }`}
+          >
+            <Settings className="w-4 h-4 text-slate-600" />
+            <span>Pengaturan Link & Webhook (Khusus Admin)</span>
+          </button>
         </div>
+      )}
 
-        <div className="bg-white p-5 rounded-2xl border border-slate-200 shadow-xs">
-          <span className="text-xs font-bold text-slate-500 uppercase tracking-wider">Total Bangunan Tersimpan</span>
-          <div className="mt-2 flex items-baseline gap-1.5">
-            <span className="text-2xl font-black text-emerald-600">{syncedCount}</span>
-            <span className="text-xs font-bold text-slate-400">/ {assessments.length} Bangunan</span>
-          </div>
-          <p className="text-[11px] text-slate-500 mt-1">
-            Tersimpan langsung pada tab kecamatan masing-masing
-          </p>
-        </div>
-
-        <div className="bg-white p-5 rounded-2xl border border-slate-200 shadow-xs">
-          <span className="text-xs font-bold text-slate-500 uppercase tracking-wider">Mode Pemisahan Tab</span>
-          <div className="mt-2 font-mono text-sm font-bold text-slate-800 truncate">
-            {splitByKecamatan ? '✓ Tab per Kecamatan (Aktif)' : '1 Tab Master Tunggal'}
-          </div>
-          <p className="text-[11px] text-slate-500 mt-1 truncate">
-            {googleSheetConfig.lastTestedAt
-              ? `Status: Terverifikasi (${new Date(googleSheetConfig.lastTestedAt).toLocaleTimeString('id-ID')})`
-              : 'Siap menerima kiriman data'}
-          </p>
-        </div>
-      </div>
-
-      {/* Preview Tab Sheet yang Akan Dibuat */}
-      <div className="bg-slate-50 p-5 rounded-2xl border border-slate-200/80 space-y-3">
-        <div className="flex items-center justify-between">
-          <div className="flex items-center gap-2">
-            <Layers className="w-4 h-4 text-blue-600" />
-            <h4 className="text-xs font-bold text-slate-900 uppercase tracking-wider">
-              Daftar Tab Sheet yang Dibuat di Google Spreadsheet & Excel:
-            </h4>
-          </div>
-          <span className="text-[11px] text-slate-500 font-medium">
-            1 Tab Ringkasan + 1 Tab Master + {kecamatans.length} Tab Kecamatan
-          </span>
-        </div>
-
-        <div className="flex flex-wrap gap-2 pt-1">
-          <div className="px-3 py-1.5 rounded-xl bg-emerald-700 text-white font-mono text-xs font-bold shadow-xs flex items-center gap-1.5">
-            <Sparkles className="w-3.5 h-3.5 text-amber-300" />
-            <span>00_RINGKASAN_KECAMATAN</span>
-          </div>
-          <div className="px-3 py-1.5 rounded-xl bg-slate-900 text-white font-mono text-xs font-bold shadow-xs flex items-center gap-1.5">
-            <Database className="w-3.5 h-3.5 text-slate-300" />
-            <span>REKAP_SEMUA_KECAMATAN</span>
-          </div>
-          {kecamatans.map((kec) => {
-            const count = groupedData[kec.name]?.length || 0;
-            return (
-              <div
-                key={kec.id}
-                className={`px-3 py-1.5 rounded-xl border text-xs font-semibold flex items-center gap-1.5 ${
-                  count > 0
-                    ? 'bg-blue-50 border-blue-300 text-blue-900'
-                    : 'bg-white border-slate-200 text-slate-600'
-                }`}
-              >
-                <MapPin className="w-3 h-3 text-blue-600" />
-                <span>Kec. {kec.name}</span>
+      {/* VIEW SHEET TAB: Available to all roles (Surveyor, Verifikator, Publik, Camat, Admin) */}
+      {(!isAdmin || activeSubTab === 'view_sheet') && (
+        <div className="space-y-6">
+          {/* Info Status Cards */}
+          <div className="grid grid-cols-1 sm:grid-cols-3 gap-4">
+            <div className="bg-white p-5 rounded-2xl border border-slate-200 shadow-xs">
+              <span className="text-xs font-bold text-slate-500 uppercase tracking-wider">Status Dokumen Sheet</span>
+              <div className="mt-2 flex items-center gap-2">
                 <span
-                  className={`px-1.5 py-0.2 rounded-md text-[10px] font-mono font-bold ${
-                    count > 0 ? 'bg-blue-600 text-white' : 'bg-slate-100 text-slate-500'
+                  className={`w-3 h-3 rounded-full ${
+                    googleSheetConfig.spreadsheetUrl ? 'bg-emerald-500 animate-pulse' : 'bg-amber-500'
                   }`}
-                >
-                  {count}
+                ></span>
+                <span className="text-sm sm:text-base font-bold text-slate-900">
+                  {googleSheetConfig.spreadsheetUrl ? 'Terhubung ke Google Sheet' : 'Belum Ditautkan Admin'}
                 </span>
               </div>
-            );
-          })}
+              <p className="text-[11px] text-slate-500 mt-1 truncate">
+                {googleSheetConfig.spreadsheetUrl
+                  ? `ID: ${spreadsheetId ? spreadsheetId.slice(0, 16) + '...' : 'Tersambung'}`
+                  : 'Menunggu penautan link oleh Super Admin / Admin'}
+              </p>
+            </div>
+
+            <div className="bg-white p-5 rounded-2xl border border-slate-200 shadow-xs">
+              <span className="text-xs font-bold text-slate-500 uppercase tracking-wider">Total Bangunan Tercatat</span>
+              <div className="mt-2 flex items-baseline gap-1.5">
+                <span className="text-2xl font-black text-emerald-600">{syncedCount}</span>
+                <span className="text-xs font-bold text-slate-400">/ {assessments.length} Bangunan Terdata</span>
+              </div>
+              <p className="text-[11px] text-slate-500 mt-1">
+                Tersimpan langsung pada tab kecamatan masing-masing
+              </p>
+            </div>
+
+            <div className="bg-white p-5 rounded-2xl border border-slate-200 shadow-xs">
+              <span className="text-xs font-bold text-slate-500 uppercase tracking-wider">Tab Lembar Kerja</span>
+              <div className="mt-2 flex items-center gap-2">
+                <span className="w-3 h-3 rounded-full bg-blue-500"></span>
+                <span className="text-base font-bold text-slate-900">{kecamatans.length} Sheet Kecamatan</span>
+              </div>
+              <p className="text-[11px] text-slate-500 mt-1">
+                {activeKecamatanCount} kecamatan memiliki data survei aktif
+              </p>
+            </div>
+          </div>
+
+          {/* Preview Tab Sheet yang Akan Dibuat */}
+          <div className="bg-slate-50 p-5 rounded-2xl border border-slate-200/80 space-y-3">
+            <div className="flex items-center justify-between">
+              <div className="flex items-center gap-2">
+                <Layers className="w-4 h-4 text-blue-600" />
+                <h4 className="text-xs font-bold text-slate-900 uppercase tracking-wider">
+                  Daftar Tab Sheet di Google Spreadsheet:
+                </h4>
+              </div>
+              <span className="text-[11px] text-slate-500 font-medium">
+                1 Tab Ringkasan + 1 Tab Master + {kecamatans.length} Tab Kecamatan
+              </span>
+            </div>
+
+            <div className="flex flex-wrap gap-2 pt-1">
+              <div className="px-3 py-1.5 rounded-xl bg-emerald-700 text-white font-mono text-xs font-bold shadow-xs flex items-center gap-1.5">
+                <Sparkles className="w-3.5 h-3.5 text-amber-300" />
+                <span>00_RINGKASAN_KECAMATAN</span>
+              </div>
+              <div className="px-3 py-1.5 rounded-xl bg-slate-900 text-white font-mono text-xs font-bold shadow-xs flex items-center gap-1.5">
+                <Database className="w-3.5 h-3.5 text-slate-300" />
+                <span>REKAP_SEMUA_KECAMATAN</span>
+              </div>
+              {kecamatans.map((kec) => {
+                const count = groupedData[kec.name]?.length || 0;
+                return (
+                  <div
+                    key={kec.id}
+                    className={`px-3 py-1.5 rounded-xl border text-xs font-semibold flex items-center gap-1.5 ${
+                      count > 0
+                        ? 'bg-blue-50 border-blue-300 text-blue-900'
+                        : 'bg-white border-slate-200 text-slate-600'
+                    }`}
+                  >
+                    <MapPin className="w-3 h-3 text-blue-600" />
+                    <span>Kec. {kec.name}</span>
+                    <span
+                      className={`px-1.5 py-0.2 rounded-md text-[10px] font-mono font-bold ${
+                        count > 0 ? 'bg-blue-600 text-white' : 'bg-slate-100 text-slate-500'
+                      }`}
+                    >
+                      {count}
+                    </span>
+                  </div>
+                );
+              })}
+            </div>
+          </div>
+
+          {/* Interactive Live Google Sheet Viewer */}
+          {googleSheetConfig.spreadsheetUrl && spreadsheetId ? (
+            <div className="bg-white rounded-2xl border border-slate-200 shadow-xs overflow-hidden">
+              <div className="p-4 bg-gradient-to-r from-emerald-50/80 via-white to-slate-50 border-b border-slate-200 flex flex-wrap items-center justify-between gap-3">
+                <div className="flex items-center gap-3">
+                  <div className="w-9 h-9 rounded-xl bg-emerald-600 text-white flex items-center justify-center shadow-xs shrink-0">
+                    <FileSpreadsheet className="w-5 h-5" />
+                  </div>
+                  <div>
+                    <div className="text-xs sm:text-sm font-bold text-slate-900 flex items-center gap-2">
+                      <span>Tampilan Langsung Lembar Kerja Google Sheet</span>
+                      <span className="px-2 py-0.5 rounded-full bg-emerald-100 text-emerald-800 text-[10px] font-bold border border-emerald-300">
+                        Live Preview
+                      </span>
+                    </div>
+                    <div className="text-[11px] text-slate-500">
+                      Anda dapat melihat data baris, tab per kecamatan, dan rekapitulasi langsung di bawah ini.
+                    </div>
+                  </div>
+                </div>
+
+                <a
+                  href={googleSheetConfig.spreadsheetUrl}
+                  target="_blank"
+                  rel="noopener noreferrer"
+                  className="inline-flex items-center gap-1.5 px-4 py-2 text-xs font-bold bg-emerald-600 hover:bg-emerald-700 text-white rounded-xl shadow-xs transition-colors cursor-pointer"
+                >
+                  <span>Buka di Google Sheet (Tab Baru)</span>
+                  <ExternalLink className="w-3.5 h-3.5" />
+                </a>
+              </div>
+
+              {/* Iframe Viewport */}
+              <div className="w-full h-[650px] bg-slate-100 relative">
+                <iframe
+                  src={`https://docs.google.com/spreadsheets/d/${spreadsheetId}/htmlembed?widget=true&headers=false`}
+                  className="w-full h-full border-0"
+                  title="Google Spreadsheet SIMPKBG"
+                  allowFullScreen
+                />
+              </div>
+
+              <div className="p-3.5 bg-slate-50 border-t border-slate-200 flex flex-col sm:flex-row sm:items-center justify-between gap-2 text-[11px] text-slate-500">
+                <div className="flex items-center gap-2">
+                  <Info className="w-4 h-4 text-slate-400 shrink-0" />
+                  <span>
+                    Pratinjau menampilkan spreadsheet secara langsung. Seluruh perubahan atau data baru otomatis masuk ke lembar kerja ini.
+                  </span>
+                </div>
+                <a
+                  href={googleSheetConfig.spreadsheetUrl}
+                  target="_blank"
+                  rel="noopener noreferrer"
+                  className="text-emerald-700 hover:text-emerald-900 font-bold inline-flex items-center gap-1 shrink-0"
+                >
+                  <span>Buka Dokumen Asli</span>
+                  <ExternalLink className="w-3 h-3" />
+                </a>
+              </div>
+            </div>
+          ) : (
+            <div className="bg-white rounded-2xl border border-slate-200 p-8 text-center space-y-4 shadow-xs">
+              <div className="w-16 h-16 rounded-2xl bg-amber-50 border border-amber-200 text-amber-600 flex items-center justify-center mx-auto shadow-xs">
+                <FileSpreadsheet className="w-8 h-8" />
+              </div>
+              <div className="max-w-md mx-auto space-y-2">
+                <h3 className="text-base font-bold text-slate-900">
+                  Tautan Google Sheet Utama Belum Ditetapkan
+                </h3>
+                <p className="text-xs text-slate-600 leading-relaxed">
+                  {isAdmin
+                    ? 'Anda belum menentukan URL spreadsheet utama untuk pencatatan data penilaian. Silakan buka tab "Pengaturan Link & Webhook" di atas untuk mengisi URL Google Sheet dan Apps Script.'
+                    : 'Administrator instansi PUPR (Super Admin / Admin) belum menautkan alamat Google Spreadsheet utama. Seluruh data survei Anda saat ini tetap tersimpan aman di database SIMPKBG dan akan otomatis tersinkronisasi ke Google Sheet begitu tautan diatur oleh Admin.'}
+                </p>
+                {!isAdmin && (
+                  <div className="pt-2">
+                    <span className="inline-flex items-center gap-1.5 px-3 py-1.5 bg-slate-50 border border-slate-200 rounded-xl text-[11px] font-semibold text-slate-600">
+                      <ShieldCheck className="w-3.5 h-3.5 text-slate-400" />
+                      Hak pengisian link dibatasi hanya untuk Super Admin dan Admin
+                    </span>
+                  </div>
+                )}
+              </div>
+
+              {isAdmin && (
+                <button
+                  type="button"
+                  onClick={() => setActiveSubTab('settings')}
+                  className="inline-flex items-center gap-2 px-4 py-2.5 bg-emerald-600 hover:bg-emerald-700 text-white text-xs font-bold rounded-xl shadow-xs transition-colors cursor-pointer"
+                >
+                  <Settings className="w-4 h-4" />
+                  <span>Isi & Tentukan Link Google Sheet Sekarang</span>
+                </button>
+              )}
+            </div>
+          )}
         </div>
-      </div>
+      )}
+
+      {/* SETTINGS TAB: Strictly for Super Admin & Admin Only */}
+      {isAdmin && activeSubTab === 'settings' && (
+        <div className="space-y-6">
+          {/* Admin Authority Banner */}
+          <div className="p-4 rounded-2xl bg-amber-50 border border-amber-200 text-amber-950 flex flex-col sm:flex-row items-start sm:items-center justify-between gap-3 shadow-2xs">
+            <div className="flex items-start gap-3">
+              <div className="p-2 rounded-xl bg-amber-500 text-slate-950 font-bold shrink-0 mt-0.5 sm:mt-0">
+                <ShieldCheck className="w-5 h-5" />
+              </div>
+              <div>
+                <span className="text-xs font-bold uppercase tracking-wider block">
+                  Hak Khusus Super Admin & Admin
+                </span>
+                <span className="text-xs text-amber-900 mt-0.5 block leading-relaxed">
+                  Hanya akun dengan hak akses Super Admin atau Admin yang berhak menentukan link Google Spreadsheet, URL Webhook Apps Script, dan Folder Google Drive. Peran pengguna lain (Surveyor, Verifikator, Camat, Publik) hanya memiliki akses untuk membuka dan melihat lembar kerja.
+                </span>
+              </div>
+            </div>
+            <button
+              type="button"
+              onClick={() => setActiveSubTab('view_sheet')}
+              className="px-3.5 py-1.5 bg-white border border-amber-300 rounded-xl text-xs font-bold text-amber-900 hover:bg-amber-100 shrink-0 cursor-pointer shadow-2xs"
+            >
+              Lihat Lembar Kerja
+            </button>
+          </div>
 
       {/* Sheet Configuration Form */}
       <div className="bg-white p-6 rounded-2xl border border-slate-200 shadow-xs space-y-4">
@@ -738,5 +956,7 @@ export const GoogleSheetIntegration: React.FC = () => {
         </div>
       </div>
     </div>
-  );
+  )}
+</div>
+);
 };
