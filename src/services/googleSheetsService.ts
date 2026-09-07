@@ -1394,12 +1394,13 @@ export async function fetchAssessmentsFromGoogleSheet(
 
   // Multiple export endpoints for maximum compatibility and avoiding 400 Bad Request
   const candidateUrls: string[] = [];
+  const cacheBuster = Date.now();
   if (gid) {
-    candidateUrls.push(`https://docs.google.com/spreadsheets/d/${spreadsheetId}/gviz/tq?tqx=out:csv&gid=${gid}`);
-    candidateUrls.push(`https://docs.google.com/spreadsheets/d/${spreadsheetId}/export?format=csv&gid=${gid}`);
+    candidateUrls.push(`https://docs.google.com/spreadsheets/d/${spreadsheetId}/export?format=csv&gid=${gid}&_t=${cacheBuster}`);
+    candidateUrls.push(`https://docs.google.com/spreadsheets/d/${spreadsheetId}/gviz/tq?tqx=out:csv&gid=${gid}&_t=${cacheBuster}`);
   }
-  candidateUrls.push(`https://docs.google.com/spreadsheets/d/${spreadsheetId}/gviz/tq?tqx=out:csv`);
-  candidateUrls.push(`https://docs.google.com/spreadsheets/d/${spreadsheetId}/export?format=csv`);
+  candidateUrls.push(`https://docs.google.com/spreadsheets/d/${spreadsheetId}/export?format=csv&_t=${cacheBuster}`);
+  candidateUrls.push(`https://docs.google.com/spreadsheets/d/${spreadsheetId}/gviz/tq?tqx=out:csv&_t=${cacheBuster}`);
 
   try {
     let csvText = '';
@@ -1408,7 +1409,7 @@ export async function fetchAssessmentsFromGoogleSheet(
 
     for (const url of candidateUrls) {
       try {
-        const res = await fetch(url);
+        const res = await fetch(url, { cache: 'no-store' });
         lastStatus = res.status;
         if (res.ok) {
           const text = await res.text();
@@ -1442,21 +1443,114 @@ export async function fetchAssessmentsFromGoogleSheet(
       };
     }
 
-    const workbook = XLSX.read(csvText, { type: 'string' });
+    const workbook = XLSX.read(csvText, { type: 'string', raw: true });
     const firstSheetName = workbook.SheetNames[0];
     const worksheet = workbook.Sheets[firstSheetName];
     
-    // Read rows starting from row A2 (row 1 is header)
-    const rawRows: Record<string, any>[] = XLSX.utils.sheet_to_json(worksheet);
+    // Read entire sheet as a 2D matrix (header: 1, defval: '') to ensure NO ROW is truncated or skipped
+    const matrix: any[][] = XLSX.utils.sheet_to_json(worksheet, { header: 1, defval: '' });
 
-    if (!rawRows || rawRows.length === 0) {
+    if (!matrix || matrix.length === 0) {
       return {
         success: true,
         data: [],
-        message: 'Google Sheet tidak memiliki baris data (hanya header di baris 1).',
+        message: 'Google Sheet kosong (tidak ada baris data).',
         totalRows: 0,
       };
     }
+
+    // Automatically locate the header row (handling title banners or empty rows before headers)
+    const headerKeywords = ['nama', 'bangunan', 'gedung', 'registrasi', 'kode', 'no', 'kecamatan', 'desa', 'kerusakan', 'biaya', 'alamat', 'luas'];
+    let headerRowIdx = 0;
+    let maxKeywordMatches = 0;
+
+    for (let r = 0; r < Math.min(matrix.length, 10); r++) {
+      const row = matrix[r];
+      if (!Array.isArray(row)) continue;
+      let matches = 0;
+      for (const cell of row) {
+        const str = String(cell || '').toLowerCase().trim();
+        if (headerKeywords.some((kw) => str.includes(kw))) matches++;
+      }
+      if (matches > maxKeywordMatches) {
+        maxKeywordMatches = matches;
+        headerRowIdx = r;
+      }
+    }
+
+    const rawHeaderRow = Array.isArray(matrix[headerRowIdx]) ? matrix[headerRowIdx] : [];
+    const headers = rawHeaderRow.map((c, i) => String(c || '').trim() || `kolom_${i + 1}`);
+
+    // Read ALL data rows starting after headerRowIdx without any row cutoff
+    interface ExtractedRow {
+      rowObj: Record<string, any>;
+      sheetRowNumber: number;
+    }
+    const extractedRows: ExtractedRow[] = [];
+
+    for (let r = headerRowIdx + 1; r < matrix.length; r++) {
+      const row = matrix[r];
+      if (!Array.isArray(row)) continue;
+      // Keep row if it has at least one non-empty cell
+      const hasContent = row.some((cell) => cell !== undefined && cell !== null && String(cell).trim().length > 0);
+      if (!hasContent) continue;
+
+      const rowObj: Record<string, any> = {};
+      for (let c = 0; c < Math.max(headers.length, row.length); c++) {
+        const colName = headers[c] || `kolom_${c + 1}`;
+        rowObj[colName] = row[c] !== undefined ? row[c] : '';
+      }
+      extractedRows.push({
+        rowObj,
+        sheetRowNumber: r + 1, // 1-indexed sheet row number
+      });
+    }
+
+    if (extractedRows.length === 0) {
+      return {
+        success: true,
+        data: [],
+        message: 'Google Sheet tidak memiliki baris data (hanya header).',
+        totalRows: 0,
+      };
+    }
+
+    // Flexible column value retriever supporting varied headers, casings, and spacings
+    const getVal = (rowObj: Record<string, any>, candidates: string[]): any => {
+      const keys = Object.keys(rowObj);
+      for (const cand of candidates) {
+        if (rowObj[cand] !== undefined && String(rowObj[cand]).trim() !== '') return rowObj[cand];
+      }
+      for (const cand of candidates) {
+        const candLower = cand.toLowerCase().trim();
+        for (const k of keys) {
+          if (k.toLowerCase().trim() === candLower && rowObj[k] !== undefined && String(rowObj[k]).trim() !== '') {
+            return rowObj[k];
+          }
+        }
+      }
+      for (const cand of candidates) {
+        const candNorm = cand.toLowerCase().replace(/[^a-z0-9]/g, '');
+        for (const k of keys) {
+          const kNorm = k.toLowerCase().replace(/[^a-z0-9]/g, '');
+          if (kNorm === candNorm && rowObj[k] !== undefined && String(rowObj[k]).trim() !== '') {
+            return rowObj[k];
+          }
+        }
+      }
+      for (const cand of candidates) {
+        const candNorm = cand.toLowerCase().replace(/[^a-z0-9]/g, '');
+        if (candNorm.length >= 3) {
+          for (const k of keys) {
+            const kNorm = k.toLowerCase().replace(/[^a-z0-9]/g, '');
+            if (kNorm.includes(candNorm) && rowObj[k] !== undefined && String(rowObj[k]).trim() !== '') {
+              return rowObj[k];
+            }
+          }
+        }
+      }
+      return '';
+    };
 
     const parseExcelDate = (val: any): string => {
       if (!val) return new Date().toISOString().split('T')[0];
@@ -1482,55 +1576,81 @@ export async function fetchAssessmentsFromGoogleSheet(
       return new Date().toISOString().split('T')[0];
     };
 
-    const parsedData: BuildingAssessment[] = rawRows.map((row, index) => {
-      const sheetRowNumber = index + 2;
-      const rawCode = String(row['No Registrasi'] || '').trim();
-      const code = rawCode || `REG-PUPR-2026-${String(index + 1).padStart(4, '0')}`;
-      const buildingName = String(row['Nama Bangunan'] || `Bangunan Baris ${sheetRowNumber}`).trim();
-      const id = rawCode || `sheet_row_${sheetRowNumber}_${code}`;
+    const resolveKecamatan = (rawKec: string): { id: string; name: string } => {
+      const lower = rawKec.toLowerCase().trim();
+      if (lower.includes('selatan') || lower.includes('aesesa selatan')) return { id: 'kec_2', name: 'Aesesa Selatan' };
+      if (lower.includes('aesesa')) return { id: 'kec_1', name: 'Aesesa' };
+      if (lower.includes('boawae')) return { id: 'kec_3', name: 'Boawae' };
+      if (lower.includes('mauponggo')) return { id: 'kec_4', name: 'Mauponggo' };
+      if (lower.includes('nangaroro')) return { id: 'kec_5', name: 'Nangaroro' };
+      if (lower.includes('keo') || lower.includes('tengah')) return { id: 'kec_6', name: 'Keo Tengah' };
+      if (lower.includes('wolowae')) return { id: 'kec_7', name: 'Wolowae' };
+      return { id: `kec_${lower.replace(/[^a-z0-9]/g, '_') || '1'}`, name: rawKec || 'Nangaroro' };
+    };
 
-      const totalFloorAreaM2 = Number(row['Luas Lantai (M2)']) || 0;
-      const numberOfFloors = Number(row['Jumlah Tingkat']) || 1;
-      const yearBuilt = Number(row['Tahun Dibangun']) || new Date().getFullYear();
-      const totalDamagePercent = Number(row['Tingkat Kerusakan (%)']) || 0;
+    const parsedData: BuildingAssessment[] = extractedRows.map(({ rowObj, sheetRowNumber }, index) => {
+      const rawCode = String(
+        getVal(rowObj, ['No Registrasi', 'No.', 'Nomor Registrasi', 'No Reg', 'Kode Registrasi', 'Kode', 'No', 'Nomor']) || ''
+      ).trim();
+      const code = rawCode || `REG-PUPR-2026-${String(index + 1).padStart(4, '0')}`;
+      const buildingName = String(
+        getVal(rowObj, ['Nama Bangunan', 'Nama Gedung', 'Nama Objek', 'Nama Fasilitas', 'Nama', 'Bangunan']) || `Bangunan Baris ${sheetRowNumber}`
+      ).trim();
+
+      // Guarantee unique ID per sheet row to prevent any row from overwriting another
+      const id = rawCode ? `sheet_reg_${rawCode.replace(/[^a-zA-Z0-9_-]/g, '_')}_r${sheetRowNumber}` : `sheet_row_${sheetRowNumber}_${code}`;
+
+      const totalFloorAreaM2 = Number(getVal(rowObj, ['Luas Lantai (M2)', 'Luas Lantai', 'Luas (M2)', 'Luas', 'Luas Bangunan'])) || 0;
+      const numberOfFloors = Number(getVal(rowObj, ['Jumlah Tingkat', 'Jumlah Lantai', 'Tingkat', 'Lantai'])) || 1;
+      const yearBuilt = Number(getVal(rowObj, ['Tahun Dibangun', 'Tahun Pembangunan', 'Tahun'])) || new Date().getFullYear();
+      const totalDamagePercent = Number(getVal(rowObj, ['Tingkat Kerusakan (%)', 'Tingkat Kerusakan', '% Kerusakan', 'Persentase Kerusakan'])) || 0;
       
-      let damageClassification = row['Klasifikasi Kerusakan'] as any;
+      let damageClassification = getVal(rowObj, ['Klasifikasi Kerusakan', 'Klasifikasi', 'Kategori Kerusakan']) as any;
       if (!damageClassification || typeof damageClassification !== 'string') {
         damageClassification = totalDamagePercent > 45 ? 'Rusak Berat' : totalDamagePercent > 20 ? 'Rusak Sedang' : 'Rusak Ringan';
       }
 
-      const hsbgnPerM2 = Number(row['HSBGN / M2 (Rp)']) || 0;
-      const treatmentCostPerM2 = Number(row['Biaya Perawatan / M2 (Rp)']) || 0;
-      const demolitionCostPerM2 = Number(row['Biaya Bongkaran / M2 (Rp)']) || 0;
-      const totalCostPerM2 = Number(row['Total Biaya / M2 (Rp)']) || 0;
-      const roundedRehabCost = Number(row['Ajuan Biaya Rehab (Rp)']) || 0;
-      const costTerbilang = String(row['Terbilang'] || '');
+      const hsbgnPerM2 = Number(getVal(rowObj, ['HSBGN / M2 (Rp)', 'HSBGN / M2', 'HSBGN'])) || 0;
+      const treatmentCostPerM2 = Number(getVal(rowObj, ['Biaya Perawatan / M2 (Rp)', 'Biaya Perawatan'])) || 0;
+      const demolitionCostPerM2 = Number(getVal(rowObj, ['Biaya Bongkaran / M2 (Rp)', 'Biaya Bongkaran'])) || 0;
+      const totalCostPerM2 = Number(getVal(rowObj, ['Total Biaya / M2 (Rp)', 'Total Biaya / M2'])) || 0;
+      const roundedRehabCost = Number(getVal(rowObj, ['Ajuan Biaya Rehab (Rp)', 'Ajuan Biaya', 'Total Biaya', 'Estimasi Biaya', 'RAB'])) || 0;
+      const costTerbilang = String(getVal(rowObj, ['Terbilang']) || '');
 
-      const verificationStatus = (row['Status Verifikasi'] as any) || 'Menunggu Verifikasi';
-      const verifiedBy = row['Diverifikasi Oleh'] && row['Diverifikasi Oleh'] !== '-' ? String(row['Diverifikasi Oleh']) : undefined;
-      const verificationNotes = row['Catatan Verifikator'] && row['Catatan Verifikator'] !== '-' ? String(row['Catatan Verifikator']) : undefined;
-      const googleDriveFolderUrl = row['Link Folder Foto Google Drive'] && row['Link Folder Foto Google Drive'] !== '-' ? String(row['Link Folder Foto Google Drive']) : undefined;
+      const verificationStatus = (getVal(rowObj, ['Status Verifikasi', 'Status']) as any) || 'Menunggu Verifikasi';
+      const verifiedByRaw = getVal(rowObj, ['Diverifikasi Oleh', 'Verifikator']);
+      const verifiedBy = verifiedByRaw && verifiedByRaw !== '-' ? String(verifiedByRaw) : undefined;
+      const verificationNotesRaw = getVal(rowObj, ['Catatan Verifikator', 'Catatan']);
+      const verificationNotes = verificationNotesRaw && verificationNotesRaw !== '-' ? String(verificationNotesRaw) : undefined;
+      const driveFolderRaw = getVal(rowObj, ['Link Folder Foto Google Drive', 'Link Drive', 'Folder Foto']);
+      const googleDriveFolderUrl = driveFolderRaw && driveFolderRaw !== '-' ? String(driveFolderRaw) : undefined;
 
-      const disasterDate = parseExcelDate(row['Tanggal Bencana']);
-      const assessmentDate = parseExcelDate(row['Tanggal Penilaian']);
-      const lastUpdated = row['Terakhir Diperbarui'] ? new Date(row['Terakhir Diperbarui']).toISOString() : new Date().toISOString();
+      const disasterDate = parseExcelDate(getVal(rowObj, ['Tanggal Bencana', 'Tgl Bencana']));
+      const assessmentDate = parseExcelDate(getVal(rowObj, ['Tanggal Penilaian', 'Tanggal Survei', 'Tgl Penilaian']));
+      const lastUpdatedRaw = getVal(rowObj, ['Terakhir Diperbarui', 'Diperbarui Pada', 'Timestamp']);
+      const lastUpdated = lastUpdatedRaw ? new Date(lastUpdatedRaw).toISOString() : new Date().toISOString();
+
+      const rawKec = String(getVal(rowObj, ['Kecamatan', 'Kec', 'Nama Kecamatan']) || 'Nangaroro').trim();
+      const kecInfo = resolveKecamatan(rawKec);
+      const desaName = String(getVal(rowObj, ['Desa / Kelurahan', 'Desa', 'Kelurahan', 'Nama Desa']) || '').trim();
+      const desaId = `desa_${desaName.toLowerCase().replace(/\s+/g, '_') || 'umum'}`;
 
       return {
         id,
         code,
         buildingName,
-        buildingCategory: (row['Kategori / Fungsi Bangunan'] as any) || 'Gedung Pemerintah',
-        disasterType: (row['Jenis Bencana'] as any) || 'Gempa Bumi',
+        buildingCategory: (getVal(rowObj, ['Kategori / Fungsi Bangunan', 'Kategori', 'Fungsi Bangunan']) as any) || 'Gedung Pemerintah',
+        disasterType: (getVal(rowObj, ['Jenis Bencana', 'Bencana']) as any) || 'Gempa Bumi',
         disasterDate,
         assessmentDate,
-        ownerAgency: String(row['Pengguna / Pemilik'] || ''),
-        responsibleDepartment: String(row['Dinas Teknis'] || 'Dinas Pekerjaan Umum dan Penataan Ruang'),
-        buildingClass: (row['Kelas Bangunan'] as any) || 'Bangunan Sederhana',
-        kecamatanId: 'kec_nangaroro',
-        kecamatanName: String(row['Kecamatan'] || 'Nangaroro'),
-        desaId: `desa_${String(row['Desa / Kelurahan'] || 'umum').toLowerCase().replace(/\s+/g, '_')}`,
-        desaName: String(row['Desa / Kelurahan'] || ''),
-        detailedAddress: String(row['Alamat Lengkap'] || ''),
+        ownerAgency: String(getVal(rowObj, ['Pengguna / Pemilik', 'Pemilik', 'Pengguna', 'Instansi']) || ''),
+        responsibleDepartment: String(getVal(rowObj, ['Dinas Teknis', 'Dinas']) || 'Dinas Pekerjaan Umum dan Penataan Ruang'),
+        buildingClass: (getVal(rowObj, ['Kelas Bangunan', 'Kelas']) as any) || 'Bangunan Sederhana',
+        kecamatanId: kecInfo.id,
+        kecamatanName: kecInfo.name,
+        desaId,
+        desaName,
+        detailedAddress: String(getVal(rowObj, ['Alamat Lengkap', 'Alamat', 'Lokasi']) || ''),
         totalFloorAreaM2,
         numberOfFloors,
         yearBuilt,
@@ -1546,7 +1666,7 @@ export async function fetchAssessmentsFromGoogleSheet(
         roundedRehabCost,
         costTerbilang,
         photos: [],
-        cityLocation: String(row['Kota Laporan'] || 'Mbay'),
+        cityLocation: String(getVal(rowObj, ['Kota Laporan', 'Kota']) || 'Mbay'),
         reportDateStr: 'September 2026',
         headOfDepartment: {
           title: 'Kepala Dinas Pekerjaan Umum dan Penataan Ruang',
@@ -1563,7 +1683,7 @@ export async function fetchAssessmentsFromGoogleSheet(
         googleSheetSyncedAt: new Date().toISOString(),
         googleDriveFolderUrl,
         createdBy: 'surveyor_google_sheet',
-        createdByName: String(row['Surveyor / Petugas'] || 'Surveyor Lapangan'),
+        createdByName: String(getVal(rowObj, ['Surveyor / Petugas', 'Surveyor', 'Petugas']) || 'Surveyor Lapangan'),
         createdAt: disasterDate ? `${disasterDate}T08:00:00.000Z` : new Date().toISOString(),
         updatedAt: lastUpdated,
       };
@@ -1573,7 +1693,7 @@ export async function fetchAssessmentsFromGoogleSheet(
       success: true,
       data: parsedData,
       totalRows: parsedData.length,
-      message: `Berhasil memuat ${parsedData.length} data penilaian gedung dari Google Sheet (Baris A2 s/d A${parsedData.length + 1}).`,
+      message: `Berhasil memuat seluruh ${parsedData.length} data penilaian gedung dari Google Sheet (semua baris dengan data termuat lengkap tanpa pembatasan baris).`,
     };
   } catch (err: any) {
     console.warn('fetchAssessmentsFromGoogleSheet notice:', err?.message || err);

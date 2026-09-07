@@ -1960,36 +1960,29 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
           }
         });
 
-        // Overlay Google Sheet records starting from row A2
+        // Set of keys already claimed by a sheet item to prevent duplicate assignment
+        const claimedKeys = new Set<string>();
+
+        // Overlay Google Sheet records: every row from Google Sheet is preserved
         sheetItems.forEach((s) => {
           let matchedKey: string | undefined = undefined;
           if (map.has(s.id)) {
             matchedKey = s.id;
           } else if (s.code) {
             for (const [k, v] of map.entries()) {
-              if (v.code && v.code.trim().toUpperCase() === s.code.trim().toUpperCase()) {
+              if (!claimedKeys.has(k) && v.code && v.code.trim().toUpperCase() === s.code.trim().toUpperCase()) {
                 matchedKey = k;
                 break;
               }
             }
           }
 
-          if (!matchedKey) {
-            const sName = (s.buildingName || '').trim().toLowerCase();
-            const sDesa = (s.desaName || '').trim().toLowerCase();
-            if (sName) {
-              for (const [k, v] of map.entries()) {
-                const vName = (v.buildingName || '').trim().toLowerCase();
-                const vDesa = (v.desaName || '').trim().toLowerCase();
-                if (vName === sName && (!sDesa || !vDesa || sDesa === vDesa)) {
-                  matchedKey = k;
-                  break;
-                }
-              }
-            }
-          }
+          // IMPORTANT: Do NOT fuzzy match by buildingName or desaName!
+          // Multiple survey rows can legitimately have identical or empty building names (e.g. "Rumah Warga").
+          // Matching by name caused different sheet rows to collapse into fewer rows.
 
           if (matchedKey) {
+            claimedKeys.add(matchedKey);
             const existing = map.get(matchedKey)!;
             const regCode = s.code || existing.code || generateNextRegistrationCode(Array.from(map.values()));
             map.set(matchedKey, {
@@ -2003,6 +1996,7 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
               googleSheetSyncedAt: new Date().toISOString(),
             });
           } else {
+            claimedKeys.add(s.id);
             // New record from Google Sheet: guarantee registration code
             const regCode = s.code || generateNextRegistrationCode(Array.from(map.values()));
             map.set(s.id, {
@@ -2026,13 +2020,13 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
         return mergedList;
       });
 
-      const msg = `Berhasil memuat ${sheetItems.length} data survei dari Google Sheet (Mulai Baris A2 ke bawah).`;
+      const msg = `Berhasil memuat seluruh ${sheetItems.length} data survei dari Google Sheet (semua baris dengan data ditampilkan tanpa batasan).`;
       if (showToastAlert) showToast(msg, 'success');
       logUserActivity(
         'SYNC_GOOGLE_SHEET',
         'Integrasi Google Sheet',
-        `Tarik Data dari Google Sheet: ${sheetItems.length} Data Termuat`,
-        'Baris A2 s/d selesai',
+        `Tarik Data dari Google Sheet: Seluruh ${sheetItems.length} Data Termuat`,
+        'Semua baris dengan data',
         `Sumber: ${googleSheetConfig.spreadsheetUrl}`
       );
       return { success: true, message: msg, count: sheetItems.length };

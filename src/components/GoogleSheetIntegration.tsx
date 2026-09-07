@@ -872,11 +872,11 @@ export const GoogleSheetIntegration: React.FC = () => {
                 type="button"
                 onClick={handleSyncFromSheet}
                 disabled={isSyncingFromSheet}
-                title="Tarik seluruh baris dari Google Sheet (mulai baris A2) ke aplikasi web"
+                title="Tarik seluruh baris data dari Google Sheet ke aplikasi web tanpa pembatasan baris"
                 className="flex items-center gap-1.5 px-3.5 py-2 text-xs font-bold text-indigo-900 bg-indigo-50 hover:bg-indigo-100 rounded-xl border border-indigo-300 transition-colors cursor-pointer disabled:opacity-50"
               >
                 <RefreshCw className={`w-3.5 h-3.5 text-indigo-600 ${isSyncingFromSheet ? 'animate-spin' : ''}`} />
-                <span>{isSyncingFromSheet ? 'Menarik Data...' : 'Tarik Data dari Sheet (Baris A2)'}</span>
+                <span>{isSyncingFromSheet ? 'Menarik Data...' : 'Tarik Semua Data dari Sheet'}</span>
               </button>
 
               <button
