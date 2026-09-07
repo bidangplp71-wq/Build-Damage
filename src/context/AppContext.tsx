@@ -152,7 +152,29 @@ const STORAGE_KEYS = {
   FIREBASE: 'sipandu_pupr_firebase_v3',
   ACTIVITY_LOGS: 'sipandu_pupr_activity_logs_v1',
   NOTIFICATIONS: 'sipandu_pupr_notifications_v1',
+  DELETED_USERS: 'sipandu_pupr_deleted_users_v3',
 };
+
+// Safe helper to read persisted deleted User IDs across refreshes & sessions
+function getStoredDeletedUserIds(): Set<string> {
+  try {
+    const raw = localStorage.getItem(STORAGE_KEYS.DELETED_USERS);
+    if (raw) {
+      const parsed = JSON.parse(raw);
+      if (Array.isArray(parsed)) return new Set(parsed);
+    }
+  } catch {}
+  return new Set();
+}
+
+function persistDeletedUserId(id: string) {
+  if (!id) return;
+  try {
+    const current = getStoredDeletedUserIds();
+    current.add(id);
+    localStorage.setItem(STORAGE_KEYS.DELETED_USERS, JSON.stringify(Array.from(current)));
+  } catch {}
+}
 
 // Safe helper to read persisted deleted IDs across refreshes & sessions
 function getStoredDeletedAssessmentIds(): Set<string> {
@@ -185,14 +207,34 @@ function persistDeletedAssessmentIdsBatch(ids: string[]) {
 }
 
 export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children }) => {
-  // Initialize users with guaranteed encrypted passwords
+  // Initialize users with guaranteed encrypted passwords and robust persistence
   const [users, setUsers] = useState<UserAccount[]>(() => {
     try {
+      const deletedUserIds = getStoredDeletedUserIds();
       const saved = localStorage.getItem(STORAGE_KEYS.USERS);
-      if (!saved) return INITIAL_USERS;
-      const parsed: UserAccount[] = JSON.parse(saved);
-      // Ensure all users have valid encrypted passwords, especially Super Admin ('simpkbg2026')
-      return parsed.map((u) => {
+      let list: UserAccount[] = [];
+      if (saved) {
+        const parsed = JSON.parse(saved);
+        if (Array.isArray(parsed)) {
+          list = parsed;
+        }
+      }
+
+      const userMap = new Map<string, UserAccount>();
+      // 1. Initial base accounts
+      INITIAL_USERS.forEach((u) => {
+        if (!deletedUserIds.has(u.id)) {
+          userMap.set(u.id, u);
+        }
+      });
+      // 2. Persisted local accounts (includes all newly registered users)
+      list.forEach((u) => {
+        if (u && u.id && !deletedUserIds.has(u.id)) {
+          userMap.set(u.id, u);
+        }
+      });
+
+      return Array.from(userMap.values()).map((u) => {
         if (u.role === 'super_admin' && (!u.password || u.password === '')) {
           return { ...u, password: encryptPassword('simpkbg2026') };
         }
@@ -325,7 +367,21 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
   });
 
   // Track Firebase Firestore Quota Exhaustion (Spark Free Tier limit protection)
-  const [isFirestoreQuotaExceeded, setIsFirestoreQuotaExceeded] = useState<boolean>(false);
+  const [isFirestoreQuotaExceeded, setIsFirestoreQuotaExceeded] = useState<boolean>(() => {
+    try {
+      return localStorage.getItem('sipandu_pupr_quota_exceeded') === 'true';
+    } catch {
+      return false;
+    }
+  });
+
+  useEffect(() => {
+    try {
+      if (isFirestoreQuotaExceeded) {
+        localStorage.setItem('sipandu_pupr_quota_exceeded', 'true');
+      }
+    } catch {}
+  }, [isFirestoreQuotaExceeded]);
 
   // UI state initialized based on user role
   const [activeTab, setActiveTab] = useState<string>('dashboard');
@@ -430,8 +486,56 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
     
     Promise.allSettled([
       getDocs(collection(db, 'users')).then((snapshot) => {
+        const deletedUserIds = getStoredDeletedUserIds();
         if (!snapshot.empty) {
-          setUsers(snapshot.docs.map((d) => d.data() as UserAccount));
+          const remoteUsers = snapshot.docs
+            .map((d) => d.data() as UserAccount)
+            .filter((u) => u && u.id && !deletedUserIds.has(u.id));
+
+          setUsers((prev) => {
+            const userMap = new Map<string, UserAccount>();
+            // Keep all local users (including newly registered users)
+            prev.forEach((u) => {
+              if (u && u.id && !deletedUserIds.has(u.id)) {
+                userMap.set(u.id, u);
+              }
+            });
+            // Merge remote users (overwriting / updating if exists or adding if new)
+            remoteUsers.forEach((r) => {
+              const existing = userMap.get(r.id);
+              if (!existing) {
+                userMap.set(r.id, r);
+              } else {
+                userMap.set(r.id, { ...existing, ...r });
+              }
+            });
+            const merged = Array.from(userMap.values());
+            try {
+              localStorage.setItem(STORAGE_KEYS.USERS, JSON.stringify(merged));
+            } catch {}
+
+            // Auto-sync: Push any local user not in remote to Firestore
+            const remoteIds = new Set(remoteUsers.map((r) => r.id));
+            merged.forEach((u) => {
+              if (!remoteIds.has(u.id) && !isFirestoreQuotaExceeded) {
+                const cleanU = JSON.parse(JSON.stringify(u));
+                setDoc(doc(db, 'users', u.id), cleanU).catch(() => {});
+              }
+            });
+
+            return merged;
+          });
+        } else {
+          // If Firestore users collection is empty, seed all local users to Firestore
+          setUsers((prev) => {
+            prev.forEach((u) => {
+              if (!isFirestoreQuotaExceeded) {
+                const cleanU = JSON.parse(JSON.stringify(u));
+                setDoc(doc(db, 'users', u.id), cleanU).catch(() => {});
+              }
+            });
+            return prev;
+          });
         }
       }).catch((err) => {
         if (isQuotaError(err)) {
@@ -649,6 +753,62 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
     return () => unsubscribe();
   }, [db]);
 
+  // Real-time listener for users from Firebase Firestore
+  useEffect(() => {
+    if (!db) return;
+
+    const unsubscribe = onSnapshot(
+      collection(db, 'users'),
+      (snapshot) => {
+        const deletedUserIds = getStoredDeletedUserIds();
+        const remoteUsers = snapshot.docs
+          .map((d) => d.data() as UserAccount)
+          .filter((u) => u && u.id && !deletedUserIds.has(u.id));
+
+        // Purge deleted users from remote if any exists
+        snapshot.docs.forEach((d) => {
+          if (deletedUserIds.has(d.id) && !isFirestoreQuotaExceeded) {
+            deleteDoc(doc(db, 'users', d.id)).catch(() => {});
+          }
+        });
+
+        if (remoteUsers.length > 0) {
+          setUsers((prev) => {
+            const userMap = new Map<string, UserAccount>();
+            // Keep local users first
+            prev.forEach((u) => {
+              if (u && u.id && !deletedUserIds.has(u.id)) {
+                userMap.set(u.id, u);
+              }
+            });
+            // Merge remote users
+            remoteUsers.forEach((r) => {
+              const existing = userMap.get(r.id);
+              if (!existing) {
+                userMap.set(r.id, r);
+              } else {
+                userMap.set(r.id, { ...existing, ...r });
+              }
+            });
+            const merged = Array.from(userMap.values());
+            try {
+              localStorage.setItem(STORAGE_KEYS.USERS, JSON.stringify(merged));
+            } catch {}
+            return merged;
+          });
+        }
+      },
+      (error) => {
+        if (isQuotaError(error)) {
+          setIsFirestoreQuotaExceeded(true);
+        }
+        console.warn('Firestore users real-time listener deferred:', error?.message || error);
+      }
+    );
+
+    return () => unsubscribe();
+  }, [db]);
+
   // Real-time listener for shared Google Sheet configuration across all roles & devices
   useEffect(() => {
     if (!db) return;
@@ -686,6 +846,31 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
             setAssessments((prev) => prev.filter((a) => a.id !== payload.id));
           } else if (type === 'UPDATE_GOOGLE_SHEET' && payload?.config) {
             setGoogleSheetConfig(payload.config);
+          } else if (type === 'ADD_USER' && payload?.user) {
+            setUsers((prev) => {
+              if (prev.some((u) => u.id === payload.user.id)) return prev;
+              const next = [...prev, payload.user];
+              try {
+                localStorage.setItem(STORAGE_KEYS.USERS, JSON.stringify(next));
+              } catch {}
+              return next;
+            });
+          } else if (type === 'UPDATE_USER' && payload?.user) {
+            setUsers((prev) => {
+              const next = prev.map((u) => (u.id === payload.user.id ? payload.user : u));
+              try {
+                localStorage.setItem(STORAGE_KEYS.USERS, JSON.stringify(next));
+              } catch {}
+              return next;
+            });
+          } else if (type === 'DELETE_USER' && payload?.id) {
+            setUsers((prev) => {
+              const next = prev.filter((u) => u.id !== payload.id);
+              try {
+                localStorage.setItem(STORAGE_KEYS.USERS, JSON.stringify(next));
+              } catch {}
+              return next;
+            });
           }
         };
       }
@@ -697,6 +882,13 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
           const parsed = JSON.parse(e.newValue);
           if (Array.isArray(parsed)) {
             setAssessments(parsed);
+          }
+        } catch {}
+      } else if (e.key === STORAGE_KEYS.USERS && e.newValue) {
+        try {
+          const parsed = JSON.parse(e.newValue);
+          if (Array.isArray(parsed)) {
+            setUsers(parsed);
           }
         } catch {}
       } else if (e.key === STORAGE_KEYS.GOOGLE_SHEET && e.newValue) {
@@ -877,18 +1069,37 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
       ...restData,
       password: passwordToStore,
       passwordLastChanged: new Date().toISOString(),
-      id: `user_${Date.now()}`,
+      id: `user_${Date.now()}_${Math.random().toString(36).substring(2, 6)}`,
       createdAt: new Date().toISOString(),
     };
 
-    setUsers((prev) => [...prev, newUser]);
-    if (db) {
+    setUsers((prev) => {
+      const next = [...prev, newUser];
+      try {
+        localStorage.setItem(STORAGE_KEYS.USERS, JSON.stringify(next));
+      } catch {}
+      return next;
+    });
+
+    try {
+      if (typeof BroadcastChannel !== 'undefined') {
+        const ch = new BroadcastChannel('sipandu_pupr_sync_channel');
+        ch.postMessage({ type: 'ADD_USER', payload: { user: newUser } });
+        ch.close();
+      }
+    } catch {}
+
+    if (db && !isFirestoreQuotaExceeded) {
       const cleanU = JSON.parse(JSON.stringify(newUser));
-      setDoc(doc(db, 'users', cleanU.id), cleanU).catch(() => {});
+      setDoc(doc(db, 'users', cleanU.id), cleanU).catch((err) => {
+        if (isQuotaError(err)) setIsFirestoreQuotaExceeded(true);
+        console.warn('Firebase setDoc user failed:', err);
+      });
     }
+
     return {
       success: true,
-      message: `Akun pengguna ${newUser.name} (${roleLimit.title}) berhasil ditambahkan dengan kata sandi terenkripsi.`,
+      message: `Akun pengguna ${newUser.name} (${roleLimit.title}) berhasil didaftarkan dan disimpan permanen.`,
     };
   };
 
@@ -936,8 +1147,8 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
       });
     }
 
-    setUsers((prev) =>
-      prev.map((u) => {
+    setUsers((prev) => {
+      const next = prev.map((u) => {
         if (u.id === id) {
           const updated = { ...u, ...restData };
           if (currentUser.id === id) {
@@ -946,8 +1157,20 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
           return updated;
         }
         return u;
-      })
-    );
+      });
+      try {
+        localStorage.setItem(STORAGE_KEYS.USERS, JSON.stringify(next));
+      } catch {}
+      return next;
+    });
+
+    try {
+      if (typeof BroadcastChannel !== 'undefined') {
+        const ch = new BroadcastChannel('sipandu_pupr_sync_channel');
+        ch.postMessage({ type: 'UPDATE_USER', payload: { user: updatedUserObj } });
+        ch.close();
+      }
+    } catch {}
 
     return {
       success: true,
@@ -980,9 +1203,23 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
       });
     }
 
-    setUsers((prev) =>
-      prev.map((u) => (u.id === targetUserId ? { ...u, password: encrypted, passwordLastChanged: now } : u))
-    );
+    const updatedObj = { ...target, password: encrypted, passwordLastChanged: now };
+
+    setUsers((prev) => {
+      const next = prev.map((u) => (u.id === targetUserId ? updatedObj : u));
+      try {
+        localStorage.setItem(STORAGE_KEYS.USERS, JSON.stringify(next));
+      } catch {}
+      return next;
+    });
+
+    try {
+      if (typeof BroadcastChannel !== 'undefined') {
+        const ch = new BroadcastChannel('sipandu_pupr_sync_channel');
+        ch.postMessage({ type: 'UPDATE_USER', payload: { user: updatedObj } });
+        ch.close();
+      }
+    } catch {}
 
     if (currentUser.id === targetUserId) {
       setCurrentUser((prev) => ({ ...prev, password: encrypted, passwordLastChanged: now }));
@@ -1266,11 +1503,33 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
       };
     }
 
-    if (db) { import('firebase/firestore').then(({ deleteDoc, doc }) => deleteDoc(doc(db, 'users', id))).catch(() => {}); }
-    setUsers((prev) => prev.filter((u) => u.id !== id));
+    persistDeletedUserId(id);
+
+    if (db && !isFirestoreQuotaExceeded) {
+      deleteDoc(doc(db, 'users', id)).catch((err) => {
+        if (isQuotaError(err)) setIsFirestoreQuotaExceeded(true);
+      });
+    }
+
+    setUsers((prev) => {
+      const next = prev.filter((u) => u.id !== id);
+      try {
+        localStorage.setItem(STORAGE_KEYS.USERS, JSON.stringify(next));
+      } catch {}
+      return next;
+    });
+
+    try {
+      if (typeof BroadcastChannel !== 'undefined') {
+        const ch = new BroadcastChannel('sipandu_pupr_sync_channel');
+        ch.postMessage({ type: 'DELETE_USER', payload: { id } });
+        ch.close();
+      }
+    } catch {}
+
     return {
       success: true,
-      message: `Pengguna ${target.name} berhasil dihapus.`,
+      message: `Pengguna ${target.name} berhasil dihapus secara permanen.`,
     };
   };
 
