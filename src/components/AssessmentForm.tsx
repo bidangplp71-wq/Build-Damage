@@ -2439,40 +2439,19 @@ export const AssessmentForm: React.FC = () => {
               {/* Quick Regional HSBGN Presets - Only for Admin/Super Admin */}
               {isAdmin ? (
                 <div className="flex flex-wrap gap-1.5 items-center text-[11px]">
-                  <span className="text-slate-500 font-medium">Preset Standar:</span>
+                  <span className="text-slate-500 font-medium">Ubah Standar HSBGN Daerah?</span>
                   <button
                     type="button"
-                    onClick={() => setHsbgnPerM2(3500000)}
-                    className="px-2 py-0.5 rounded bg-slate-100 hover:bg-slate-200 font-semibold text-slate-700 border border-slate-200"
+                    onClick={() => setActiveTab('hsbgn_settings')}
+                    className="px-3 py-1 bg-amber-50 hover:bg-amber-100 text-amber-800 rounded-md transition-colors border border-amber-200/60 shadow-xs font-bold"
                   >
-                    Rp 3,5 Jt (Sederhana)
-                  </button>
-                  <button
-                    type="button"
-                    onClick={() => setHsbgnPerM2(5500000)}
-                    className="px-2 py-0.5 rounded bg-slate-100 hover:bg-slate-200 font-semibold text-slate-700 border border-slate-200"
-                  >
-                    Rp 5,5 Jt (Standar Daerah)
-                  </button>
-                  <button
-                    type="button"
-                    onClick={() => setHsbgnPerM2(7700000)}
-                    className="px-2 py-0.5 rounded bg-slate-100 hover:bg-slate-200 font-semibold text-slate-700 border border-slate-200"
-                  >
-                    Rp 7,7 Jt (Standar PUPR)
-                  </button>
-                  <button
-                    type="button"
-                    onClick={() => setHsbgnPerM2(9500000)}
-                    className="px-2 py-0.5 rounded bg-slate-100 hover:bg-slate-200 font-semibold text-slate-700 border border-slate-200"
-                  >
-                    Rp 9,5 Jt (Gedung Utama)
+                    Buka Menu Standar HSBGN
                   </button>
                 </div>
               ) : null}
               <p className="text-[11px] text-slate-500 mt-1">
                 {isAdmin 
-                  ? "Admin/Super Admin dapat menginput HSBGN sesuai SK Bupati/Wali Kota atau standar harga satuan bangunan gedung negara di wilayah setempat."
+                  ? "*Nilai ini otomatis terisi dari Pengaturan HSBGN Daerah. Anda tetap bisa menyesuaikan khusus untuk data gedung ini."
                   : "Harga satuan HSBGN ditentukan oleh Admin/Super Admin. Anda masuk sebagai Surveyor dan menggunakan standar yang telah ditetapkan."}
               </p>
             </div>

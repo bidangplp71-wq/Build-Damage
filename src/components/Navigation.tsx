@@ -85,6 +85,13 @@ export const Navigation: React.FC<NavigationProps> = ({ mobileOpen, onCloseMobil
             icon: FileSpreadsheet,
             badge: null,
           },
+          {
+            id: 'hsbgn_settings',
+            label: 'Standar HSBGN Daerah',
+            desc: 'Lihat harga satuan bangunan',
+            icon: Award,
+            badge: null,
+          },
         ];
 
       case 'admin_verifikator':
@@ -111,6 +118,13 @@ export const Navigation: React.FC<NavigationProps> = ({ mobileOpen, onCloseMobil
             label: 'Buka & Cek Google Sheet',
             desc: 'Rekapitulasi spreadsheet survei',
             icon: FileSpreadsheet,
+            badge: null,
+          },
+          {
+            id: 'hsbgn_settings',
+            label: 'Standar HSBGN Daerah',
+            desc: 'Lihat harga satuan bangunan',
+            icon: Award,
             badge: null,
           },
         ];
