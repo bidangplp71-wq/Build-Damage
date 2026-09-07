@@ -1,4 +1,4 @@
-import React, { createContext, useContext, useState, useEffect, useRef } from 'react';
+import React, { createContext, useContext, useState, useEffect, useRef, useMemo } from 'react';
 import {
   UserAccount,
   UserRole,
@@ -572,7 +572,14 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
             hydrated.forEach((h) => mergedMap.set(h.id, h));
             const mergedList = Array.from(mergedMap.values());
             try {
-              localStorage.setItem(STORAGE_KEYS.ASSESSMENTS, JSON.stringify(mergedList));
+              const lightweight = mergedList.map((a) => ({
+                ...a,
+                photos: a.photos?.map((p) => ({
+                  ...p,
+                  url: p.url && (p.url.startsWith('http') || p.url.length < 300) ? p.url : '',
+                })) || [],
+              }));
+              localStorage.setItem(STORAGE_KEYS.ASSESSMENTS, JSON.stringify(lightweight));
             } catch {}
             return mergedList;
           });
@@ -844,6 +851,11 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
           if (type === 'DELETE_ASSESSMENT' && payload?.id) {
             deletedAssessmentIds.current.add(payload.id);
             setAssessments((prev) => prev.filter((a) => a.id !== payload.id));
+          } else if (type === 'PURGE_DUPLICATES' && payload?.ids) {
+            const idsToDelete = payload.ids as string[];
+            idsToDelete.forEach((id) => deletedAssessmentIds.current.add(id));
+            const toDeleteSet = new Set(idsToDelete);
+            setAssessments((prev) => prev.filter((a) => !toDeleteSet.has(a.id)));
           } else if (type === 'UPDATE_GOOGLE_SHEET' && payload?.config) {
             setGoogleSheetConfig(payload.config);
           } else if (type === 'ADD_USER' && payload?.user) {
@@ -934,22 +946,18 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
     });
 
     try {
-      localStorage.setItem(STORAGE_KEYS.ASSESSMENTS, JSON.stringify(assessments));
+      // ALWAYS save lightweight assessments to localStorage to prevent filling up the 5MB quota
+      // which would block other critical saves like Users and Activity Logs.
+      const lightweight = assessments.map((a) => ({
+        ...a,
+        photos: a.photos.map((p) => ({
+          ...p,
+          url: p.url && (p.url.startsWith('http') || p.url.length < 300) ? p.url : '',
+        })),
+      }));
+      localStorage.setItem(STORAGE_KEYS.ASSESSMENTS, JSON.stringify(lightweight));
     } catch (e) {
-      console.warn('LocalStorage assessments save exceeded quota, saving lightweight references:', e);
-      try {
-        // Fallback: save metadata to localStorage, full photos remain 100% safe in IndexedDB
-        const lightweight = assessments.map((a) => ({
-          ...a,
-          photos: a.photos.map((p) => ({
-            ...p,
-            url: p.url && (p.url.startsWith('http') || p.url.length < 300) ? p.url : '',
-          })),
-        }));
-        localStorage.setItem(STORAGE_KEYS.ASSESSMENTS, JSON.stringify(lightweight));
-      } catch (err2) {
-        console.warn('LocalStorage secondary fallback notice:', err2);
-      }
+      console.warn('LocalStorage lightweight assessments save notice:', e);
     }
   }, [assessments]);
 
@@ -1723,7 +1731,6 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
     setAssessments(updated);
 
     try {
-      localStorage.setItem(STORAGE_KEYS.ASSESSMENTS, JSON.stringify(updated));
       if (typeof BroadcastChannel !== 'undefined') {
         const ch = new BroadcastChannel('sipandu_pupr_sync_channel');
         ch.postMessage({ type: 'DELETE_ASSESSMENT', payload: { id } });
@@ -1803,7 +1810,6 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
     setAssessments(updated);
 
     try {
-      localStorage.setItem(STORAGE_KEYS.ASSESSMENTS, JSON.stringify(updated));
       if (typeof BroadcastChannel !== 'undefined') {
         const ch = new BroadcastChannel('sipandu_pupr_sync_channel');
         ch.postMessage({ type: 'PURGE_DUPLICATES', payload: { ids: idsToDelete } });
@@ -2178,6 +2184,33 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
     setFirebaseShieldConfig((prev) => ({ ...prev, ...config }));
   };
 
+  const deduplicatedAssessments = useMemo(() => {
+    const duplicateGroups = detectAllDuplicateGroups(assessments);
+    if (duplicateGroups.length === 0) return assessments;
+    
+    // Automatically hide duplicates globally so they never appear to any user role
+    const hiddenIds = new Set<string>();
+    duplicateGroups.forEach((group) => {
+      // Sort to keep the best one as primary (verified first, most photos, newest)
+      const sorted = [...group.items].sort((a, b) => {
+        const aVer = a.verificationStatus === 'Terverifikasi' ? 1 : 0;
+        const bVer = b.verificationStatus === 'Terverifikasi' ? 1 : 0;
+        if (aVer !== bVer) return bVer - aVer;
+        const aPhotos = a.photos?.length || 0;
+        const bPhotos = b.photos?.length || 0;
+        if (aPhotos !== bPhotos) return bPhotos - aPhotos;
+        const aTime = new Date(a.updatedAt || a.createdAt || 0).getTime();
+        const bTime = new Date(b.updatedAt || b.createdAt || 0).getTime();
+        return bTime - aTime;
+      });
+      // Hide all except the primary (index 0)
+      for (let i = 1; i < sorted.length; i++) {
+        hiddenIds.add(sorted[i].id);
+      }
+    });
+    return assessments.filter((a) => !hiddenIds.has(a.id));
+  }, [assessments]);
+
   return (
     <AppContext.Provider
       value={{
@@ -2202,7 +2235,7 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
         lockSession,
         unlockSession,
 
-        assessments,
+        assessments: deduplicatedAssessments,
         addAssessment,
         updateAssessment,
         deleteAssessment,
