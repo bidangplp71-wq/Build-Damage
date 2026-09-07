@@ -1247,7 +1247,7 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
     }
 
     if (googleSheetConfig.webhookUrl && googleSheetConfig.webhookUrl.startsWith('http') && googleSheetConfig.directSaveEnabled) {
-      directSaveActivityLogToGoogleSheet(newLog, googleSheetConfig).catch(console.error);
+      directSaveActivityLogToGoogleSheet(newLog, googleSheetConfig).catch(() => {});
     }
   };
 

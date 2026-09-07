@@ -1273,7 +1273,7 @@ export async function directSaveActivityLogToGoogleSheet(
     });
     return { success: true, message: 'Log akses tercatat di Google Sheet!' };
   } catch (err: any) {
-    console.error('Error saving activity log to Google Sheet:', err);
+    console.warn('Activity log direct save notice:', err?.message || err);
     return { success: false, message: err.message || 'Gagal menyimpan log ke Google Sheet' };
   }
 }
@@ -1612,6 +1612,27 @@ export async function fetchAssessmentsFromGoogleSheet(
       return new Date().toISOString().split('T')[0];
     };
 
+    const parseNumber = (val: any): number => {
+      if (val === null || val === undefined) return 0;
+      if (typeof val === 'number') return isNaN(val) ? 0 : val;
+      const str = String(val).trim().replace(/%/g, '').replace(/\s+/g, '');
+      if (!str || str === '-') return 0;
+      let normalized = str;
+      if (normalized.includes(',') && normalized.includes('.')) {
+        const lastComma = normalized.lastIndexOf(',');
+        const lastDot = normalized.lastIndexOf('.');
+        if (lastComma > lastDot) {
+          normalized = normalized.replace(/\./g, '').replace(',', '.');
+        } else {
+          normalized = normalized.replace(/,/g, '');
+        }
+      } else if (normalized.includes(',')) {
+        normalized = normalized.replace(',', '.');
+      }
+      const parsed = parseFloat(normalized);
+      return isNaN(parsed) ? 0 : parsed;
+    };
+
     const resolveKecamatan = (rawKec: string): { id: string; name: string } => {
       const lower = rawKec.toLowerCase().trim();
       if (lower.includes('selatan') || lower.includes('aesesa selatan')) return { id: 'kec_2', name: 'Aesesa Selatan' };
@@ -1636,21 +1657,21 @@ export async function fetchAssessmentsFromGoogleSheet(
       // Guarantee unique ID per sheet row to prevent any row from overwriting another
       const id = rawCode ? `sheet_reg_${rawCode.replace(/[^a-zA-Z0-9_-]/g, '_')}_r${sheetRowNumber}` : `sheet_row_${sheetRowNumber}_${code}`;
 
-      const totalFloorAreaM2 = Number(getVal(rowObj, ['Luas Lantai (M2)', 'Luas Lantai', 'Luas (M2)', 'Luas', 'Luas Bangunan'])) || 0;
-      const numberOfFloors = Number(getVal(rowObj, ['Jumlah Tingkat', 'Jumlah Lantai', 'Tingkat', 'Lantai'])) || 1;
-      const yearBuilt = Number(getVal(rowObj, ['Tahun Dibangun', 'Tahun Pembangunan', 'Tahun'])) || new Date().getFullYear();
-      const totalDamagePercent = Number(getVal(rowObj, ['Tingkat Kerusakan (%)', 'Tingkat Kerusakan', '% Kerusakan', 'Persentase Kerusakan'])) || 0;
+      const totalFloorAreaM2 = parseNumber(getVal(rowObj, ['Luas Lantai (M2)', 'Luas Lantai', 'Luas (M2)', 'Luas', 'Luas Bangunan'])) || 0;
+      const numberOfFloors = parseNumber(getVal(rowObj, ['Jumlah Tingkat', 'Jumlah Lantai', 'Tingkat', 'Lantai'])) || 1;
+      const yearBuilt = parseNumber(getVal(rowObj, ['Tahun Dibangun', 'Tahun Pembangunan', 'Tahun'])) || new Date().getFullYear();
+      const totalDamagePercent = parseNumber(getVal(rowObj, ['Tingkat Kerusakan (%)', 'Tingkat Kerusakan', '% Kerusakan', 'Persentase Kerusakan'])) || 0;
       
       let damageClassification = getVal(rowObj, ['Klasifikasi Kerusakan', 'Klasifikasi', 'Kategori Kerusakan']) as any;
       if (!damageClassification || typeof damageClassification !== 'string') {
         damageClassification = totalDamagePercent > 45 ? 'Rusak Berat' : totalDamagePercent > 20 ? 'Rusak Sedang' : 'Rusak Ringan';
       }
 
-      const hsbgnPerM2 = Number(getVal(rowObj, ['HSBGN / M2 (Rp)', 'HSBGN / M2', 'HSBGN'])) || 0;
-      const treatmentCostPerM2 = Number(getVal(rowObj, ['Biaya Perawatan / M2 (Rp)', 'Biaya Perawatan'])) || 0;
-      const demolitionCostPerM2 = Number(getVal(rowObj, ['Biaya Bongkaran / M2 (Rp)', 'Biaya Bongkaran'])) || 0;
-      const totalCostPerM2 = Number(getVal(rowObj, ['Total Biaya / M2 (Rp)', 'Total Biaya / M2'])) || 0;
-      const roundedRehabCost = Number(getVal(rowObj, ['Ajuan Biaya Rehab (Rp)', 'Ajuan Biaya', 'Total Biaya', 'Estimasi Biaya', 'RAB'])) || 0;
+      const hsbgnPerM2 = parseNumber(getVal(rowObj, ['HSBGN / M2 (Rp)', 'HSBGN / M2', 'HSBGN'])) || 0;
+      const treatmentCostPerM2 = parseNumber(getVal(rowObj, ['Biaya Perawatan / M2 (Rp)', 'Biaya Perawatan'])) || 0;
+      const demolitionCostPerM2 = parseNumber(getVal(rowObj, ['Biaya Bongkaran / M2 (Rp)', 'Biaya Bongkaran'])) || 0;
+      const totalCostPerM2 = parseNumber(getVal(rowObj, ['Total Biaya / M2 (Rp)', 'Total Biaya / M2'])) || 0;
+      const roundedRehabCost = parseNumber(getVal(rowObj, ['Ajuan Biaya Rehab (Rp)', 'Ajuan Biaya', 'Total Biaya', 'Estimasi Biaya', 'RAB'])) || 0;
       const costTerbilang = String(getVal(rowObj, ['Terbilang']) || '');
 
       const verificationStatus = (getVal(rowObj, ['Status Verifikasi', 'Status']) as any) || 'Menunggu Verifikasi';
