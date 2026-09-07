@@ -1,7 +1,5 @@
 import React, { useState } from 'react';
 import { useApp } from '../context/AppContext';
-import { INITIAL_USERS } from '../data/initialData';
-import { ROLE_LIMITS, UserRole } from '../types';
 import {
   Building2,
   Lock,
@@ -11,9 +9,7 @@ import {
   KeyRound,
   Eye,
   EyeOff,
-  CheckCircle2,
   ArrowRight,
-  Info,
 } from 'lucide-react';
 
 export const LoginScreen: React.FC = () => {
@@ -43,12 +39,6 @@ export const LoginScreen: React.FC = () => {
         setErrorMsg(res.message);
       }
     }, 250);
-  };
-
-  const handleQuickDemo = (name: string, pass: string) => {
-    setNameInput(name);
-    setPasswordInput(pass);
-    setErrorMsg('');
   };
 
   return (
@@ -104,7 +94,7 @@ export const LoginScreen: React.FC = () => {
                     setNameInput(e.target.value);
                     if (errorMsg) setErrorMsg('');
                   }}
-                  placeholder="contoh: Vancy Djogo atau email@contoh.com"
+                  placeholder="contoh: nama pengguna atau email@contoh.com"
                   className="w-full pl-10 pr-4 py-3 bg-slate-950 border border-slate-800 rounded-xl text-sm text-white placeholder-slate-600 focus:outline-none focus:ring-2 focus:ring-amber-500 focus:border-amber-500 transition-all font-medium"
                 />
               </div>
@@ -155,46 +145,6 @@ export const LoginScreen: React.FC = () => {
               <ArrowRight className="w-4 h-4" />
             </button>
           </form>
-
-          {/* Quick Demo Accounts Helper */}
-          <div className="pt-4 border-t border-slate-800 space-y-3">
-            <div className="flex items-center gap-1.5 text-[11px] text-slate-400 font-medium">
-              <Info className="w-3.5 h-3.5 text-amber-400 shrink-0" />
-              <span>Contoh Akun Pengguna Terdaftar (Klik untuk uji cepat):</span>
-            </div>
-
-            <div className="grid grid-cols-1 gap-2 max-h-48 overflow-y-auto pr-1">
-              {INITIAL_USERS.map((u) => {
-                const roleConf = ROLE_LIMITS[u.role];
-                let defaultPass = 'simpkbg2026';
-                if (u.role === 'admin') defaultPass = 'adminpupr2026';
-                if (u.role === 'admin_verifikator') defaultPass = 'tabgpupr2026';
-                if (u.role === 'admin_user') defaultPass = 'surveyor2026';
-                if (u.role === 'admin_publik') defaultPass = 'publik2026';
-
-                return (
-                  <button
-                    key={u.id}
-                    type="button"
-                    onClick={() => handleQuickDemo(u.name, defaultPass)}
-                    className="w-full text-left p-2.5 rounded-xl bg-slate-950 hover:bg-slate-800/80 border border-slate-800 transition-all flex items-center justify-between group cursor-pointer"
-                  >
-                    <div className="min-w-0">
-                      <div className="text-xs font-semibold text-white truncate group-hover:text-amber-400 transition-colors">
-                        {u.name}
-                      </div>
-                      <div className="text-[10px] text-slate-400 font-mono truncate">
-                        {u.email}
-                      </div>
-                    </div>
-                    <span className="text-[10px] px-2 py-0.5 rounded-md bg-slate-900 text-amber-300 border border-slate-800 shrink-0 font-medium">
-                      {roleConf.title}
-                    </span>
-                  </button>
-                );
-              })}
-            </div>
-          </div>
         </div>
 
         {/* Footer info */}
