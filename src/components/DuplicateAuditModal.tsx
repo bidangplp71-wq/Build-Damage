@@ -38,6 +38,7 @@ export const DuplicateAuditModal: React.FC<DuplicateAuditModalProps> = ({
 }) => {
   const {
     deleteAssessment,
+    purgeAllDuplicates,
     setSelectedAssessmentForDetail,
     setSelectedAssessmentForEdit,
     setActiveTab,
@@ -47,6 +48,7 @@ export const DuplicateAuditModal: React.FC<DuplicateAuditModalProps> = ({
 
   const [activeGroupIndex, setActiveGroupIndex] = useState(0);
   const [itemToDelete, setItemToDelete] = useState<BuildingAssessment | null>(null);
+  const [showPurgeAllConfirm, setShowPurgeAllConfirm] = useState(false);
   const [photoViewerAssessment, setPhotoViewerAssessment] = useState<BuildingAssessment | null>(null);
 
   if (!isOpen) return null;
@@ -59,6 +61,15 @@ export const DuplicateAuditModal: React.FC<DuplicateAuditModalProps> = ({
     const res = deleteAssessment(item.id);
     showToast(res.message, res.success ? 'success' : 'error');
     setItemToDelete(null);
+  };
+
+  const handlePurgeAll = () => {
+    const res = purgeAllDuplicates();
+    showToast(res.message, res.success ? 'success' : 'error');
+    setShowPurgeAllConfirm(false);
+    if (res.success) {
+      onClose();
+    }
   };
 
   const handleEdit = (item: BuildingAssessment) => {
@@ -100,12 +111,24 @@ export const DuplicateAuditModal: React.FC<DuplicateAuditModalProps> = ({
               </p>
             </div>
           </div>
-          <button
-            onClick={onClose}
-            className="p-2 text-white/80 hover:text-white hover:bg-white/20 rounded-xl transition-colors"
-          >
-            <X className="w-6 h-6" />
-          </button>
+          
+          <div className="flex items-center gap-2.5">
+            {duplicateGroups.length > 0 && (currentUser.role === 'super_admin' || currentUser.role === 'admin') && (
+              <button
+                onClick={() => setShowPurgeAllConfirm(true)}
+                className="px-3.5 py-1.5 bg-rose-600 hover:bg-rose-700 text-white text-xs font-bold rounded-xl shadow-md transition-transform active:scale-95 flex items-center gap-1.5 cursor-pointer border border-rose-400/40"
+              >
+                <Trash2 className="w-3.5 h-3.5" />
+                <span>Bersihkan Semua Duplikat</span>
+              </button>
+            )}
+            <button
+              onClick={onClose}
+              className="p-2 text-white/80 hover:text-white hover:bg-white/20 rounded-xl transition-colors cursor-pointer"
+            >
+              <X className="w-6 h-6" />
+            </button>
+          </div>
         </div>
 
         {duplicateGroups.length === 0 ? (
@@ -418,6 +441,45 @@ export const DuplicateAuditModal: React.FC<DuplicateAuditModalProps> = ({
           </button>
         </div>
       </div>
+
+      {/* Purge All Duplicates Confirmation Modal */}
+      {showPurgeAllConfirm && (
+        <div className="fixed inset-0 z-60 flex items-center justify-center p-4 bg-black/60 backdrop-blur-xs">
+          <div className="bg-white rounded-2xl p-6 max-w-lg w-full shadow-2xl border border-slate-200 animate-in fade-in">
+            <div className="w-12 h-12 rounded-full bg-rose-100 text-rose-600 flex items-center justify-center mb-4">
+              <Trash2 className="w-6 h-6" />
+            </div>
+            <h3 className="text-lg font-bold text-slate-900 mb-2">
+              Bersihkan Semua ({totalDuplicateRecords - duplicateGroups.length}) Data Survei Duplikat?
+            </h3>
+            <div className="text-sm text-slate-600 space-y-2 mb-5">
+              <p>
+                Sistem akan secara otomatis memeriksa <strong>{duplicateGroups.length} kluster data ganda</strong> dan melakukan:
+              </p>
+              <ul className="list-disc pl-5 space-y-1 text-xs text-slate-700 bg-amber-50 p-3 rounded-xl border border-amber-200">
+                <li><strong>Mempertahankan 1 data utama</strong> per gedung (diprioritaskan data yang sudah diverifikasi, foto paling lengkap, atau input terbaru).</li>
+                <li><strong>Menghapus permanen salinan duplikat</strong> di penyimpanan lokal, Firestore, dan cache foto.</li>
+                <li>Data yang dihapus <strong>tidak akan pernah muncul kembali</strong> saat refresh halaman atau membuka link ulang.</li>
+              </ul>
+            </div>
+            <div className="flex items-center justify-end gap-3">
+              <button
+                onClick={() => setShowPurgeAllConfirm(false)}
+                className="px-4 py-2 bg-slate-100 hover:bg-slate-200 text-slate-700 text-sm font-semibold rounded-xl cursor-pointer"
+              >
+                Batal
+              </button>
+              <button
+                onClick={handlePurgeAll}
+                className="px-5 py-2 bg-rose-600 hover:bg-rose-700 text-white text-sm font-bold rounded-xl shadow-md cursor-pointer flex items-center gap-1.5"
+              >
+                <Trash2 className="w-4 h-4" />
+                <span>Ya, Bersihkan Semua Duplikat</span>
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
 
       {/* Delete Confirmation Modal */}
       {itemToDelete && (

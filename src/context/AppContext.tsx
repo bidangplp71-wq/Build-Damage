@@ -39,8 +39,9 @@ import {
 } from '../utils/security';
 import { db, isQuotaError, FIRESTORE_DATABASE_CONSOLE_URL } from '../services/firebase';
 import { collection, onSnapshot, doc, setDoc, getDocs, getDoc, deleteDoc } from 'firebase/firestore';
-import { savePhotosLocally } from '../utils/photoStorage';
+import { savePhotosLocally, deletePhotosByAssessmentIdLocally } from '../utils/photoStorage';
 import { hydrateAssessmentPhotos } from '../utils/imageCompressor';
+import { detectAllDuplicateGroups } from '../utils/duplicateDetector';
 
 interface AppContextType {
   // Current user & Auth
@@ -71,6 +72,7 @@ interface AppContextType {
   addAssessment: (data: BuildingAssessment) => Promise<{ success: boolean; message: string }>;
   updateAssessment: (id: string, data: Partial<BuildingAssessment>) => Promise<{ success: boolean; message: string }>;
   deleteAssessment: (id: string) => { success: boolean; message: string };
+  purgeAllDuplicates: () => { success: boolean; count: number; message: string };
   verifyAssessment: (id: string, status: VerificationStatus, notes: string) => Promise<{ success: boolean; message: string }>;
   syncAssessmentToSheet: (id: string) => Promise<{ success: boolean; message: string }>;
   syncAllToSheet: () => Promise<{ success: boolean; message: string; count?: number }>;
@@ -142,6 +144,7 @@ const STORAGE_KEYS = {
   AUTH: 'sipandu_pupr_auth_v3',
   USERS: 'sipandu_pupr_users_v3',
   ASSESSMENTS: 'sipandu_pupr_assessments_v3',
+  DELETED_ASSESSMENTS: 'sipandu_pupr_deleted_assessments_v3',
   KECAMATAN: 'sipandu_pupr_kecamatan_v3',
   DESA: 'sipandu_pupr_desa_v3',
   DUKCAPIL: 'sipandu_pupr_dukcapil_v3',
@@ -150,6 +153,36 @@ const STORAGE_KEYS = {
   ACTIVITY_LOGS: 'sipandu_pupr_activity_logs_v1',
   NOTIFICATIONS: 'sipandu_pupr_notifications_v1',
 };
+
+// Safe helper to read persisted deleted IDs across refreshes & sessions
+function getStoredDeletedAssessmentIds(): Set<string> {
+  try {
+    const raw = localStorage.getItem(STORAGE_KEYS.DELETED_ASSESSMENTS);
+    if (raw) {
+      const parsed = JSON.parse(raw);
+      if (Array.isArray(parsed)) return new Set(parsed);
+    }
+  } catch {}
+  return new Set();
+}
+
+function persistDeletedAssessmentId(id: string) {
+  if (!id) return;
+  try {
+    const current = getStoredDeletedAssessmentIds();
+    current.add(id);
+    localStorage.setItem(STORAGE_KEYS.DELETED_ASSESSMENTS, JSON.stringify(Array.from(current)));
+  } catch {}
+}
+
+function persistDeletedAssessmentIdsBatch(ids: string[]) {
+  if (!ids || ids.length === 0) return;
+  try {
+    const current = getStoredDeletedAssessmentIds();
+    ids.forEach((id) => current.add(id));
+    localStorage.setItem(STORAGE_KEYS.DELETED_ASSESSMENTS, JSON.stringify(Array.from(current)));
+  } catch {}
+}
 
 export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children }) => {
   // Initialize users with guaranteed encrypted passwords
@@ -204,11 +237,26 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
     return users[0] || INITIAL_USERS[0];
   });
 
-  // Initialize assessments
+  // Initialize assessments with persistent deleted IDs filtered out and deduplicated
   const [assessments, setAssessments] = useState<BuildingAssessment[]>(() => {
     try {
+      const deletedIds = getStoredDeletedAssessmentIds();
       const saved = localStorage.getItem(STORAGE_KEYS.ASSESSMENTS);
-      return saved ? JSON.parse(saved) : INITIAL_ASSESSMENTS;
+      if (!saved) return INITIAL_ASSESSMENTS.filter((a) => !deletedIds.has(a.id));
+      const parsed = JSON.parse(saved);
+      if (!Array.isArray(parsed)) return INITIAL_ASSESSMENTS.filter((a) => !deletedIds.has(a.id));
+
+      // Filter out deleted IDs and deduplicate by id
+      const map = new Map<string, BuildingAssessment>();
+      parsed.forEach((item: BuildingAssessment) => {
+        if (item && item.id && !deletedIds.has(item.id)) {
+          const existing = map.get(item.id);
+          if (!existing || new Date(item.updatedAt || item.createdAt || 0).getTime() >= new Date(existing.updatedAt || existing.createdAt || 0).getTime()) {
+            map.set(item.id, item);
+          }
+        }
+      });
+      return Array.from(map.values());
     } catch {
       return INITIAL_ASSESSMENTS;
     }
@@ -369,11 +417,11 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
 
   // Sync to local storage
 
-  // Track IDs of assessments deleted in this session to prevent accidental resurrection
-  const deletedAssessmentIds = useRef<Set<string>>(new Set());
+  // Track IDs of assessments deleted across all sessions to prevent accidental resurrection
+  const deletedAssessmentIds = useRef<Set<string>>(getStoredDeletedAssessmentIds());
   const isInitialLoad = useRef(true);
   
-  // Load from Firebase ONCE on mount with Quota Protection
+  // Load from Firebase ONCE on mount with Quota Protection and Deleted IDs Filtering
   useEffect(() => {
     if (!db) {
       isInitialLoad.current = false;
@@ -394,9 +442,36 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
 
       getDocs(collection(db, 'assessments')).then(async (snapshot) => {
         if (!snapshot.empty) {
-          const remoteAssessments = snapshot.docs.map((d) => d.data() as BuildingAssessment);
-          const hydrated = await Promise.all(remoteAssessments.map(hydrateAssessmentPhotos));
-          setAssessments(hydrated);
+          const storedDeleted = getStoredDeletedAssessmentIds();
+          
+          // Filter out deleted IDs and deduplicate by id
+          const map = new Map<string, BuildingAssessment>();
+          snapshot.docs.forEach((docSnap) => {
+            const data = docSnap.data() as BuildingAssessment;
+            if (data && data.id && !storedDeleted.has(data.id) && !storedDeleted.has(docSnap.id)) {
+              const existing = map.get(data.id);
+              if (!existing || new Date(data.updatedAt || data.createdAt || 0).getTime() >= new Date(existing.updatedAt || existing.createdAt || 0).getTime()) {
+                map.set(data.id, data);
+              }
+            } else if ((storedDeleted.has(docSnap.id) || (data && storedDeleted.has(data.id))) && !isFirestoreQuotaExceeded) {
+              // Attempt to delete remote document if previously deleted locally
+              deleteDoc(doc(db, 'assessments', docSnap.id)).catch(() => {});
+            }
+          });
+
+          const uniqueRemote = Array.from(map.values());
+          const hydrated = await Promise.all(uniqueRemote.map(hydrateAssessmentPhotos));
+          setAssessments((prev) => {
+            // Merge with existing local assessments, prioritizing hydrated remote docs but keeping local non-deleted ones
+            const mergedMap = new Map<string, BuildingAssessment>();
+            prev.filter((p) => !storedDeleted.has(p.id)).forEach((p) => mergedMap.set(p.id, p));
+            hydrated.forEach((h) => mergedMap.set(h.id, h));
+            const mergedList = Array.from(mergedMap.values());
+            try {
+              localStorage.setItem(STORAGE_KEYS.ASSESSMENTS, JSON.stringify(mergedList));
+            } catch {}
+            return mergedList;
+          });
         }
       }).catch((err) => {
         if (isQuotaError(err)) {
@@ -451,80 +526,114 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
     const unsubscribe = onSnapshot(
       collection(db, 'assessments'),
       (snapshot) => {
+        const storedDeleted = getStoredDeletedAssessmentIds();
+
         if (!initialSnapshotSettled) {
-          const currentRemoteDocs = snapshot.docs.map((d) => d.data() as BuildingAssessment);
-          const currentRemoteIds = new Set(snapshot.docs.map((d) => d.id));
+          const currentRemoteDocs = snapshot.docs
+            .map((d) => d.data() as BuildingAssessment)
+            .filter((d) => d && d.id && !storedDeleted.has(d.id) && !storedDeleted.has(d.id));
+          const currentRemoteIds = new Set(currentRemoteDocs.map((d) => d.id));
           currentRemoteIds.forEach((id) => knownIds.add(id));
           initialSnapshotSettled = true;
+
+          // Purge deleted documents from remote if present
+          snapshot.docs.forEach((d) => {
+            if (storedDeleted.has(d.id) && !isFirestoreQuotaExceeded) {
+              deleteDoc(doc(db, 'assessments', d.id)).catch(() => {});
+            }
+          });
 
           // If there are remote documents in Firestore, purge any local items deleted remotely
           if (snapshot.docs.length > 0) {
             setAssessments((prev) => {
-              const filtered = prev.filter((a) => currentRemoteIds.has(a.id));
-              const localIds = new Set(filtered.map((a) => a.id));
+              const cleanPrev = prev.filter((a) => !storedDeleted.has(a.id) && currentRemoteIds.has(a.id));
+              const localIds = new Set(cleanPrev.map((a) => a.id));
               const additions = currentRemoteDocs.filter((r) => !localIds.has(r.id));
-              return [...additions, ...filtered];
+              const result = [...additions, ...cleanPrev];
+              try {
+                localStorage.setItem(STORAGE_KEYS.ASSESSMENTS, JSON.stringify(result));
+              } catch {}
+              return result;
             });
           }
           return;
         }
 
         snapshot.docChanges().forEach((change) => {
+          const docId = change.doc.id;
+          const docData = change.doc.data() as BuildingAssessment;
+
           if (change.type === 'removed') {
-            const removedId = change.doc.id;
+            const removedId = docId;
             knownIds.delete(removedId);
             deletedAssessmentIds.current.add(removedId);
-            setAssessments((prev) => prev.filter((a) => a.id !== removedId));
-            try {
-              const saved = localStorage.getItem(STORAGE_KEYS.ASSESSMENTS);
-              if (saved) {
-                const parsed = JSON.parse(saved);
-                if (Array.isArray(parsed)) {
-                  localStorage.setItem(
-                    STORAGE_KEYS.ASSESSMENTS,
-                    JSON.stringify(parsed.filter((x: any) => x.id !== removedId))
-                  );
-                }
-              }
-            } catch {}
+            persistDeletedAssessmentId(removedId);
+            deletePhotosByAssessmentIdLocally(removedId);
+            setAssessments((prev) => {
+              const next = prev.filter((a) => a.id !== removedId);
+              try {
+                localStorage.setItem(STORAGE_KEYS.ASSESSMENTS, JSON.stringify(next));
+              } catch {}
+              return next;
+            });
           } else if (change.type === 'modified') {
-            const updatedDoc = change.doc.data() as BuildingAssessment;
-            if (updatedDoc && updatedDoc.id) {
-              setAssessments((prev) => prev.map((a) => (a.id === updatedDoc.id ? updatedDoc : a)));
+            if (docData && docData.id && !storedDeleted.has(docData.id) && !storedDeleted.has(docId)) {
+              setAssessments((prev) => {
+                const next = prev.map((a) => (a.id === docData.id ? docData : a));
+                try {
+                  localStorage.setItem(STORAGE_KEYS.ASSESSMENTS, JSON.stringify(next));
+                } catch {}
+                return next;
+              });
             }
           } else if (change.type === 'added') {
-            const newDoc = change.doc.data() as BuildingAssessment;
-            if (newDoc && newDoc.id && !knownIds.has(newDoc.id) && !deletedAssessmentIds.current.has(newDoc.id)) {
-              knownIds.add(newDoc.id);
+            if (
+              docData &&
+              docData.id &&
+              !storedDeleted.has(docData.id) &&
+              !storedDeleted.has(docId) &&
+              !knownIds.has(docData.id) &&
+              !deletedAssessmentIds.current.has(docData.id)
+            ) {
+              knownIds.add(docData.id);
 
               const newNotif: DataNotification = {
                 id: `notif_${Date.now()}_${Math.random().toString(36).substring(2, 6)}`,
                 title: 'Data Masuk: Penilaian Gedung Baru',
-                message: `Data survei "${newDoc.buildingName}" (${newDoc.kecamatanName || 'Kecamatan'}) baru saja masuk ke sistem.`,
-                buildingName: newDoc.buildingName,
-                kecamatan: newDoc.kecamatanName,
-                desa: newDoc.desaName,
-                damageClassification: newDoc.damageClassification,
-                totalDamagePercent: newDoc.totalDamagePercent,
-                rehabCost: newDoc.roundedRehabCost,
-                assessmentId: newDoc.id,
+                message: `Data survei "${docData.buildingName}" (${docData.kecamatanName || 'Kecamatan'}) baru saja masuk ke sistem.`,
+                buildingName: docData.buildingName,
+                kecamatan: docData.kecamatanName,
+                desa: docData.desaName,
+                damageClassification: docData.damageClassification,
+                totalDamagePercent: docData.totalDamagePercent,
+                rehabCost: docData.roundedRehabCost,
+                assessmentId: docData.id,
                 timestamp: new Date().toISOString(),
                 isRead: false,
-                surveyorName: newDoc.createdByName || 'Surveyor Lapangan',
+                surveyorName: docData.createdByName || 'Surveyor Lapangan',
               };
 
               setNotifications((prev) => [newNotif, ...prev]);
               setLatestIncomingData(newNotif);
               playNotificationChime();
               showToast(
-                `🔔 Data Masuk: ${newDoc.buildingName} - ${newDoc.damageClassification || 'Tercatat'}`,
+                `🔔 Data Masuk: ${docData.buildingName} - ${docData.damageClassification || 'Tercatat'}`,
                 'info'
               );
 
               setAssessments((prev) => {
-                if (prev.some((a) => a.id === newDoc.id)) return prev;
-                return [newDoc, ...prev];
+                if (prev.some((a) => a.id === docData.id)) return prev;
+                const next = [docData, ...prev];
+                try {
+                  localStorage.setItem(STORAGE_KEYS.ASSESSMENTS, JSON.stringify(next));
+                } catch {}
+                return next;
               });
+            } else if (storedDeleted.has(docId) || (docData && storedDeleted.has(docData.id))) {
+              // Document was previously deleted - clean it from Firestore
+              if (!isFirestoreQuotaExceeded) {
+                deleteDoc(doc(db, 'assessments', docId)).catch(() => {});
+              }
             }
           }
         });
@@ -1339,7 +1448,10 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
       );
     }
 
+    // Persist deleted ID immediately so it can NEVER be resurrected on page refresh / link re-entry
     deletedAssessmentIds.current.add(id);
+    persistDeletedAssessmentId(id);
+    deletePhotosByAssessmentIdLocally(id);
 
     if (db && !isFirestoreQuotaExceeded) {
       deleteDoc(doc(db, 'assessments', id)).catch((err) => {
@@ -1363,6 +1475,95 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
     return {
       success: true,
       message: 'Data penilaian gedung berhasil dihapus permanen di semua akun & perangkat.',
+    };
+  };
+
+  // Mass cleanup of all duplicate entries: retains the most complete/verified survey in each cluster
+  const purgeAllDuplicates = (): { success: boolean; count: number; message: string } => {
+    if (currentUser.role !== 'super_admin' && currentUser.role !== 'admin') {
+      return {
+        success: false,
+        count: 0,
+        message: 'Akses ditolak: Hanya Super Admin dan Admin yang berhak menghapus data survei ganda.',
+      };
+    }
+
+    const duplicateGroups = detectAllDuplicateGroups(assessments);
+    if (duplicateGroups.length === 0) {
+      return {
+        success: true,
+        count: 0,
+        message: 'Tidak ditemukan data ganda / duplikat. Seluruh data survei sudah bersih!',
+      };
+    }
+
+    const idsToDelete: string[] = [];
+
+    duplicateGroups.forEach((group) => {
+      // Rank items in cluster: prefer verified, then highest photo count, then latest timestamp
+      const sorted = [...group.items].sort((a, b) => {
+        const aVer = a.verificationStatus === 'Terverifikasi' ? 1 : 0;
+        const bVer = b.verificationStatus === 'Terverifikasi' ? 1 : 0;
+        if (aVer !== bVer) return bVer - aVer;
+
+        const aPhotos = a.photos?.length || 0;
+        const bPhotos = b.photos?.length || 0;
+        if (aPhotos !== bPhotos) return bPhotos - aPhotos;
+
+        const aTime = new Date(a.updatedAt || a.createdAt || 0).getTime();
+        const bTime = new Date(b.updatedAt || b.createdAt || 0).getTime();
+        return bTime - aTime;
+      });
+
+      // Keep index 0 (primary/master record), mark index 1..n for deletion
+      for (let i = 1; i < sorted.length; i++) {
+        idsToDelete.push(sorted[i].id);
+      }
+    });
+
+    if (idsToDelete.length === 0) {
+      return {
+        success: true,
+        count: 0,
+        message: 'Semua survei sudah unik dan tidak ada duplikat tambahan untuk dibersihkan.',
+      };
+    }
+
+    // Persist deleted IDs batch
+    persistDeletedAssessmentIdsBatch(idsToDelete);
+    idsToDelete.forEach((id) => {
+      deletedAssessmentIds.current.add(id);
+      deletePhotosByAssessmentIdLocally(id);
+      if (db && !isFirestoreQuotaExceeded) {
+        deleteDoc(doc(db, 'assessments', id)).catch(() => {});
+      }
+    });
+
+    const toDeleteSet = new Set(idsToDelete);
+    const updated = assessments.filter((a) => !toDeleteSet.has(a.id));
+    setAssessments(updated);
+
+    try {
+      localStorage.setItem(STORAGE_KEYS.ASSESSMENTS, JSON.stringify(updated));
+      if (typeof BroadcastChannel !== 'undefined') {
+        const ch = new BroadcastChannel('sipandu_pupr_sync_channel');
+        ch.postMessage({ type: 'PURGE_DUPLICATES', payload: { ids: idsToDelete } });
+        ch.close();
+      }
+    } catch {}
+
+    logUserActivity(
+      'DELETE_ASSESSMENT',
+      'Penilaian Kerusakan',
+      `Pembersihan Otomatis Data Ganda: Menghapus ${idsToDelete.length} survei duplikat`,
+      `${duplicateGroups.length} kluster`,
+      `Dibersihkan secara tuntas oleh ${currentUser.name}`
+    );
+
+    return {
+      success: true,
+      count: idsToDelete.length,
+      message: `Berhasil membersihkan ${idsToDelete.length} data survei ganda dari ${duplicateGroups.length} kluster! Data primer paling lengkap tetap aman tersimpan.`,
     };
   };
 
@@ -1746,6 +1947,7 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
         addAssessment,
         updateAssessment,
         deleteAssessment,
+        purgeAllDuplicates,
         verifyAssessment,
         syncAssessmentToSheet,
         syncAllToSheet,

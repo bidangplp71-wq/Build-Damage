@@ -176,3 +176,30 @@ export async function deletePhotoLocally(photoId: string): Promise<void> {
     console.warn('IndexedDB photo delete notice:', err);
   }
 }
+
+/**
+ * Delete all photos belonging to a deleted assessment from IndexedDB
+ */
+export async function deletePhotosByAssessmentIdLocally(assessmentId: string): Promise<void> {
+  if (!assessmentId) return;
+  try {
+    const db = await getDb();
+    const tx = db.transaction(STORE_NAME, 'readwrite');
+    const store = tx.objectStore(STORE_NAME);
+    const index = store.index('assessmentId');
+    const request = index.getAllKeys(assessmentId);
+
+    request.onsuccess = () => {
+      const keys = request.result;
+      if (Array.isArray(keys)) {
+        keys.forEach((k) => {
+          memoryPhotoCache.delete(String(k));
+          store.delete(k);
+        });
+      }
+    };
+  } catch (err) {
+    console.warn('IndexedDB bulk assessment photo delete notice:', err);
+  }
+}
+
