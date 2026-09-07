@@ -179,7 +179,7 @@ export const AssessmentForm: React.FC = () => {
   const [showInputGuide, setShowInputGuide] = useState(false);
 
   // HSBGN and Costing
-  const [hsbgnPerM2, setHsbgnPerM2] = useState<number>(7700000);
+  const [hsbgnPerM2, setHsbgnPerM2] = useState<number>(getCategoryConfig('Hunian Masyarakat').defaultHsbgn);
   const [demolitionPercent, setDemolitionPercent] = useState<number>(8);
 
   // Sub-components assessment
@@ -331,7 +331,7 @@ export const AssessmentForm: React.FC = () => {
       setDetailedAddress(a.detailedAddress || '');
       setLatitude(a.latitude ?? -8.6754);
       setLongitude(a.longitude ?? 121.3021);
-      setHsbgnPerM2(a.hsbgnPerM2 ?? 7700000);
+      setHsbgnPerM2(a.hsbgnPerM2 ?? getCategoryConfig(a.buildingCategory || 'Hunian Masyarakat').defaultHsbgn);
       setDemolitionPercent(a.demolitionPercent ?? 8);
       setComponents(a.components || getInitialSubComponents());
       setPhotos(a.photos || []);
