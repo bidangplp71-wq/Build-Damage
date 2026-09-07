@@ -78,13 +78,18 @@ export function checkDuplicateSingle(
 
   const tCode = normalizeString(target.code);
   const cCode = normalizeString(candidate.code);
-  if (tCode && cCode && tCode === cCode) {
-    return {
-      assessment: candidate,
-      reason: 'SAME_CODE',
-      similarityScore: 100,
-      description: `Kode registrasi bangunan "${candidate.code}" sama persis.`,
-    };
+  if (tCode && cCode) {
+    if (tCode === cCode) {
+      return {
+        assessment: candidate,
+        reason: 'SAME_CODE',
+        similarityScore: 100,
+        description: `Kode registrasi bangunan "${candidate.code}" sama persis.`,
+      };
+    } else {
+      // Different official PUPR registration codes mean distinct registered survey entries!
+      return null;
+    }
   }
 
   const tKec = normalizeString(target.kecamatanName || target.kecamatanId);
@@ -94,18 +99,6 @@ export function checkDuplicateSingle(
   const tDesa = normalizeString(target.desaName || target.desaId);
   const cDesa = normalizeString(candidate.desaName || candidate.desaId);
   const isSameDesa = Boolean(tDesa && cDesa && (tDesa === cDesa || target.desaId === candidate.desaId));
-
-  // Check NIK if available (16 digits)
-  const tNik = (target.nikPemilik || '').replace(/\D/g, '');
-  const cNik = (candidate.nikPemilik || '').replace(/\D/g, '');
-  if (tNik && cNik && tNik.length === 16 && tNik === cNik) {
-    return {
-      assessment: candidate,
-      reason: 'SAME_NIK',
-      similarityScore: 98,
-      description: `NIK Pemilik (${candidate.nikPemilik}) identik dengan data terdaftar atas nama ${candidate.ownerAgency || candidate.namaPemilikRumah || candidate.buildingName}.`,
-    };
-  }
 
   // Location must match or be closely related for name matching
   if (isSameDesa || (isSameKec && (!tDesa || !cDesa))) {
@@ -123,21 +116,14 @@ export function checkDuplicateSingle(
         };
       }
 
-      // Check owner name if Hunian Masyarakat
-      const tOwner = normalizeString(target.namaPemilikRumah || target.ownerAgency);
-      const cOwner = normalizeString(candidate.namaPemilikRumah || candidate.ownerAgency);
-      if (tOwner && cOwner && tOwner === cOwner && tOwner.length > 4) {
-        return {
-          assessment: candidate,
-          reason: 'EXACT_NAME_AND_LOCATION',
-          similarityScore: 95,
-          description: `Nama pemilik "${candidate.ownerAgency || candidate.namaPemilikRumah}" dan lokasi desa sama persis.`,
-        };
-      }
+      // CATATAN: Kepemilikan gedung bisa sama karena Pemda atau Pemerintah Desa
+      // dapat memiliki lebih dari satu gedung (contoh: Kantor Desa, Balai Pertemuan Desa,
+      // Posyandu Dusun Maunura, Posyandu Usu, dan Polindes semuanya dimiliki oleh Pemdes yang sama).
+      // Oleh karena itu, kesamaan kepemilikan/pengelola BUKAN merupakan duplikat jika nama gedung berbeda.
 
-      // High text similarity
+      // High text similarity (>85%)
       const similarity = calculateTextSimilarity(tName, cName);
-      if (similarity >= 0.75) {
+      if (similarity >= 0.85) {
         return {
           assessment: candidate,
           reason: 'HIGH_SIMILARITY_NAME',

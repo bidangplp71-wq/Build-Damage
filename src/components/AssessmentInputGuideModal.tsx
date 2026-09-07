@@ -287,8 +287,8 @@ export const AssessmentInputGuideModal: React.FC<AssessmentInputGuideModalProps>
                   </div>
                   <ul className="space-y-2 text-xs text-slate-700">
                     <li className="flex items-start gap-2">
-                      <AlertTriangle className="w-4 h-4 text-amber-600 shrink-0 mt-0.5" />
-                      <span><strong>Nama Pemilik Gedung / Instansi:</strong> Diisi nama institusi/yayasan/dinas, atau cukup angka <strong>0</strong> jika tidak terikat perseorangan.</span>
+                      <CheckCircle2 className="w-4 h-4 text-amber-600 shrink-0 mt-0.5" />
+                      <span><strong>Nama Pemilik Gedung / Instansi Pemilik:</strong> Diisi nama institusi/dinas/yayasan atau pemerintah desa (contoh: <em>Pemerintah Desa Podenura</em>, <em>Pemerintah Kabupaten Nagekeo</em>, <em>Dinas Kesehatan</em>). <strong>Kepemilikan gedung bisa sama</strong> karena satu Pemda atau satu Desa dapat memiliki lebih dari satu gedung (Kantor Desa, Posyandu Dusun, Polindes, Balai Desa, dsb.).</span>
                     </li>
                     <li className="flex items-start gap-2">
                       <AlertTriangle className="w-4 h-4 text-amber-600 shrink-0 mt-0.5" />

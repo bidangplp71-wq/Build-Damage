@@ -42,12 +42,14 @@ export const GoogleSheetIntegration: React.FC = () => {
     assessments,
     kecamatans,
     syncAllToSheet,
+    syncFromGoogleSheet,
     showToast,
     currentUser,
   } = useApp();
 
   const isAdmin = currentUser.role === 'super_admin' || currentUser.role === 'admin';
   const [activeSubTab, setActiveSubTab] = useState<'view_sheet' | 'settings'>('view_sheet');
+  const [isSyncingFromSheet, setIsSyncingFromSheet] = useState(false);
 
   const [spreadsheetUrlInput, setSpreadsheetUrlInput] = useState(googleSheetConfig.spreadsheetUrl || '');
   const [webhookUrlInput, setWebhookUrlInput] = useState(googleSheetConfig.webhookUrl || '');
@@ -206,6 +208,15 @@ export const GoogleSheetIntegration: React.FC = () => {
     }
   };
 
+  const handleSyncFromSheet = async () => {
+    setIsSyncingFromSheet(true);
+    try {
+      await syncFromGoogleSheet(true);
+    } finally {
+      setIsSyncingFromSheet(false);
+    }
+  };
+
   const handleCopyScript = () => {
     navigator.clipboard.writeText(scriptTemplate);
     setCopiedScript(true);
@@ -284,6 +295,18 @@ export const GoogleSheetIntegration: React.FC = () => {
               <span className="hidden sm:inline">Folder Foto Drive</span>
               <ExternalLink className="w-3.5 h-3.5" />
             </a>
+          )}
+
+          {googleSheetConfig.spreadsheetUrl && (
+            <button
+              onClick={handleSyncFromSheet}
+              disabled={isSyncingFromSheet}
+              title="Tarik dan muat seluruh data survei dari Google Sheet mulai dari baris A2 ke bawah"
+              className="flex items-center gap-1.5 px-3.5 py-2 text-xs font-bold bg-indigo-50 hover:bg-indigo-100 text-indigo-900 rounded-xl border border-indigo-300 transition-colors cursor-pointer disabled:opacity-50"
+            >
+              <RefreshCw className={`w-4 h-4 text-indigo-600 ${isSyncingFromSheet ? 'animate-spin' : ''}`} />
+              <span>{isSyncingFromSheet ? 'Memuat Sheet...' : 'Tarik dari Sheet (A2)'}</span>
+            </button>
           )}
 
           <button
@@ -845,6 +868,17 @@ export const GoogleSheetIntegration: React.FC = () => {
             </button>
 
             <div className="flex flex-wrap items-center gap-2">
+              <button
+                type="button"
+                onClick={handleSyncFromSheet}
+                disabled={isSyncingFromSheet}
+                title="Tarik seluruh baris dari Google Sheet (mulai baris A2) ke aplikasi web"
+                className="flex items-center gap-1.5 px-3.5 py-2 text-xs font-bold text-indigo-900 bg-indigo-50 hover:bg-indigo-100 rounded-xl border border-indigo-300 transition-colors cursor-pointer disabled:opacity-50"
+              >
+                <RefreshCw className={`w-3.5 h-3.5 text-indigo-600 ${isSyncingFromSheet ? 'animate-spin' : ''}`} />
+                <span>{isSyncingFromSheet ? 'Menarik Data...' : 'Tarik Data dari Sheet (Baris A2)'}</span>
+              </button>
+
               <button
                 type="button"
                 onClick={handleSyncAll}

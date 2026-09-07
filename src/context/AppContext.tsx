@@ -30,6 +30,8 @@ import {
   directSaveToGoogleSheet,
   syncActivityLogsToGoogleSheet,
   directSaveActivityLogToGoogleSheet,
+  fetchAssessmentsFromGoogleSheet,
+  isConfiguredSheetUrl,
 } from '../services/googleSheetsService';
 import {
   encryptPassword,
@@ -76,6 +78,7 @@ interface AppContextType {
   verifyAssessment: (id: string, status: VerificationStatus, notes: string) => Promise<{ success: boolean; message: string }>;
   syncAssessmentToSheet: (id: string) => Promise<{ success: boolean; message: string }>;
   syncAllToSheet: () => Promise<{ success: boolean; message: string; count?: number }>;
+  syncFromGoogleSheet: (showToastAlert?: boolean) => Promise<{ success: boolean; message: string; count?: number }>;
 
   // Wilayah (Kecamatan & Desa Pemekaran / Baru)
   kecamatans: Kecamatan[];
@@ -1940,6 +1943,141 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
     };
   };
 
+  /**
+   * Pull and synchronize all assessment rows directly from Google Sheet (starting from row A2 downwards)
+   * Ensures that whatever exists in the Google Sheet is fully displayed in the web app
+   */
+  const syncFromGoogleSheet = async (showToastAlert = false): Promise<{ success: boolean; message: string; count?: number }> => {
+    if (!googleSheetConfig.spreadsheetUrl || !isConfiguredSheetUrl(googleSheetConfig.spreadsheetUrl)) {
+      const msg = 'Tautan Google Sheet belum diatur atau masih menggunakan template contoh.';
+      if (showToastAlert) showToast(msg, 'info');
+      return { success: false, message: msg, count: 0 };
+    }
+
+    try {
+      const result = await fetchAssessmentsFromGoogleSheet(googleSheetConfig);
+      if (!result.success || !result.data) {
+        if (showToastAlert) showToast(result.message, 'info');
+        return { success: false, message: result.message, count: 0 };
+      }
+
+      const sheetItems = result.data;
+      const storedDeleted = getStoredDeletedAssessmentIds();
+
+      // Ensure data currently present in Google Sheet is NOT suppressed by deletedAssessmentIds
+      let unsuppressedCount = 0;
+      sheetItems.forEach((s) => {
+        if (s.id && storedDeleted.has(s.id)) {
+          storedDeleted.delete(s.id);
+          deletedAssessmentIds.current.delete(s.id);
+          unsuppressedCount++;
+        }
+        if (s.code && storedDeleted.has(s.code)) {
+          storedDeleted.delete(s.code);
+          deletedAssessmentIds.current.delete(s.code);
+          unsuppressedCount++;
+        }
+      });
+      if (unsuppressedCount > 0) {
+        try {
+          localStorage.setItem(STORAGE_KEYS.DELETED_ASSESSMENTS, JSON.stringify(Array.from(storedDeleted)));
+        } catch {}
+      }
+
+      setAssessments((prev) => {
+        const map = new Map<string, BuildingAssessment>();
+        // Add existing local assessments
+        prev.forEach((p) => {
+          if (!storedDeleted.has(p.id)) {
+            map.set(p.id, p);
+          }
+        });
+
+        // Overlay Google Sheet records starting from row A2
+        sheetItems.forEach((s) => {
+          let matchedKey: string | undefined = undefined;
+          if (map.has(s.id)) {
+            matchedKey = s.id;
+          } else if (s.code) {
+            for (const [k, v] of map.entries()) {
+              if (v.code && v.code.trim().toUpperCase() === s.code.trim().toUpperCase()) {
+                matchedKey = k;
+                break;
+              }
+            }
+          }
+
+          if (!matchedKey) {
+            const sName = (s.buildingName || '').trim().toLowerCase();
+            const sDesa = (s.desaName || '').trim().toLowerCase();
+            if (sName) {
+              for (const [k, v] of map.entries()) {
+                const vName = (v.buildingName || '').trim().toLowerCase();
+                const vDesa = (v.desaName || '').trim().toLowerCase();
+                if (vName === sName && (!sDesa || !vDesa || sDesa === vDesa)) {
+                  matchedKey = k;
+                  break;
+                }
+              }
+            }
+          }
+
+          if (matchedKey) {
+            const existing = map.get(matchedKey)!;
+            map.set(matchedKey, {
+              ...existing,
+              ...s,
+              id: existing.id,
+              code: s.code || existing.code,
+              photos: existing.photos && existing.photos.length > 0 ? existing.photos : s.photos,
+              components: existing.components && existing.components.length > 0 ? existing.components : s.components,
+              googleSheetSynced: true,
+              googleSheetSyncedAt: new Date().toISOString(),
+            });
+          } else {
+            // New record from Google Sheet
+            map.set(s.id, s);
+          }
+        });
+
+        const mergedList = Array.from(map.values());
+        try {
+          const lightweight = mergedList.map((a) => ({
+            ...a,
+            photos: a.photos?.map((p) => ({
+              ...p,
+              url: p.url && (p.url.startsWith('http') || p.url.length < 300) ? p.url : '',
+            })) || [],
+          }));
+          localStorage.setItem(STORAGE_KEYS.ASSESSMENTS, JSON.stringify(lightweight));
+        } catch {}
+        return mergedList;
+      });
+
+      const msg = `Berhasil memuat ${sheetItems.length} data survei dari Google Sheet (Mulai Baris A2 ke bawah).`;
+      if (showToastAlert) showToast(msg, 'success');
+      logUserActivity(
+        'SYNC_GOOGLE_SHEET',
+        'Integrasi Google Sheet',
+        `Tarik Data dari Google Sheet: ${sheetItems.length} Data Termuat`,
+        'Baris A2 s/d selesai',
+        `Sumber: ${googleSheetConfig.spreadsheetUrl}`
+      );
+      return { success: true, message: msg, count: sheetItems.length };
+    } catch (err: any) {
+      const errMsg = `Gagal memuat data dari Google Sheet: ${err?.message || 'Koneksi terputus'}`;
+      if (showToastAlert) showToast(errMsg, 'error');
+      return { success: false, message: errMsg, count: 0 };
+    }
+  };
+
+  // Automatically synchronize assessments from Google Sheet if URL is configured
+  useEffect(() => {
+    if (googleSheetConfig.spreadsheetUrl && isConfiguredSheetUrl(googleSheetConfig.spreadsheetUrl)) {
+      syncFromGoogleSheet(false);
+    }
+  }, [googleSheetConfig.spreadsheetUrl]);
+
   // Wilayah operations (Kecamatan)
   const addKecamatan = (data: Omit<Kecamatan, 'id' | 'createdAt'>) => {
     if (currentUser.role === 'admin_publik') {
@@ -2243,6 +2381,7 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
         verifyAssessment,
         syncAssessmentToSheet,
         syncAllToSheet,
+        syncFromGoogleSheet,
 
         kecamatans,
         desas,

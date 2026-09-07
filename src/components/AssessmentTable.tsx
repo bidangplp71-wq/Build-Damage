@@ -59,6 +59,7 @@ export const AssessmentTable: React.FC = () => {
     setActiveTab,
     showToast,
     googleSheetConfig,
+    syncFromGoogleSheet,
   } = useApp();
 
   // Filters State
@@ -221,13 +222,18 @@ export const AssessmentTable: React.FC = () => {
     return filteredAssessments.slice(start, start + pageSize);
   }, [filteredAssessments, currentPage, pageSize]);
 
-  // Refresh Action
-  const handleRefresh = () => {
+  // Refresh Action - Pull fresh records from Google Sheet starting from row A2
+  const handleRefresh = async () => {
     setIsRefreshing(true);
-    setTimeout(() => {
+    try {
+      if (googleSheetConfig.spreadsheetUrl) {
+        await syncFromGoogleSheet(true);
+      } else {
+        showToast('Data berhasil diperbarui (Refresh selesai)', 'info');
+      }
+    } finally {
       setIsRefreshing(false);
-      showToast('Data berhasil diperbarui (Refresh selesai)', 'info');
-    }, 400);
+    }
   };
 
   // Reset Filters
@@ -485,17 +491,28 @@ export const AssessmentTable: React.FC = () => {
 
           {/* Direct Google Sheet button */}
           {googleSheetConfig.spreadsheetUrl && (
-            <a
-              href={googleSheetConfig.spreadsheetUrl}
-              target="_blank"
-              rel="noopener noreferrer"
-              title="Buka dokumen Google Spreadsheet langsung di tab baru"
-              className="flex items-center gap-1.5 px-3 py-2 text-xs font-semibold text-emerald-900 bg-emerald-100/70 hover:bg-emerald-200/80 rounded-xl border border-emerald-300 transition-colors"
-            >
-              <FileSpreadsheet className="w-3.5 h-3.5 text-emerald-700" />
-              <span>Buka Google Sheet</span>
-              <ExternalLink className="w-3 h-3 text-emerald-700" />
-            </a>
+            <div className="flex items-center gap-1.5">
+              <button
+                onClick={() => syncFromGoogleSheet(true)}
+                disabled={isRefreshing}
+                title="Tarik seluruh data survei dari Google Sheet mulai dari baris A2 ke bawah"
+                className="flex items-center gap-1.5 px-3 py-2 text-xs font-bold text-indigo-900 bg-indigo-50 hover:bg-indigo-100 rounded-xl border border-indigo-200 transition-colors cursor-pointer"
+              >
+                <RefreshCw className={`w-3.5 h-3.5 text-indigo-600 ${isRefreshing ? 'animate-spin' : ''}`} />
+                <span>Tarik dari Sheet (A2)</span>
+              </button>
+              <a
+                href={googleSheetConfig.spreadsheetUrl}
+                target="_blank"
+                rel="noopener noreferrer"
+                title="Buka dokumen Google Spreadsheet langsung di tab baru"
+                className="flex items-center gap-1.5 px-3 py-2 text-xs font-semibold text-emerald-900 bg-emerald-100/70 hover:bg-emerald-200/80 rounded-xl border border-emerald-300 transition-colors"
+              >
+                <FileSpreadsheet className="w-3.5 h-3.5 text-emerald-700" />
+                <span>Buka Google Sheet</span>
+                <ExternalLink className="w-3 h-3 text-emerald-700" />
+              </a>
+            </div>
           )}
 
           {/* Add New Assessment (Hidden for Public) */}
@@ -788,9 +805,17 @@ export const AssessmentTable: React.FC = () => {
                             'Gedung Pemerintah'}
                         </span>
                         <span>&bull;</span>
-                        <span className="text-slate-600 truncate max-w-[150px]" title={item.buildingCategory === 'Hunian Masyarakat' ? `Pemilik Rumah: ${item.namaPemilikRumah || item.ownerAgency}` : `Pemilik Gedung: ${item.namaPemilikGedung || item.ownerAgency}`}>
-                          {item.buildingCategory === 'Hunian Masyarakat' ? 'Pemilik: ' : 'Pengelola: '}
-                          <strong>{item.buildingCategory === 'Hunian Masyarakat' ? (item.namaPemilikRumah || item.ownerAgency) : (item.namaPemilikGedung || item.ownerAgency)}</strong>
+                        <span className="text-slate-600 truncate max-w-[170px]" title={item.buildingCategory === 'Hunian Masyarakat' ? `Pemilik Rumah: ${item.namaPemilikRumah || item.ownerAgency || '-'}` : `Kepemilikan: ${item.namaPemilikGedung && item.namaPemilikGedung !== '0' ? item.namaPemilikGedung : (item.ownerAgency && item.ownerAgency !== '0') ? item.ownerAgency : 'Pemerintah'}`}>
+                          {item.buildingCategory === 'Hunian Masyarakat' ? 'Pemilik: ' : 'Kepemilikan: '}
+                          <strong>
+                            {item.buildingCategory === 'Hunian Masyarakat'
+                              ? (item.namaPemilikRumah || item.ownerAgency || '-')
+                              : ((item.namaPemilikGedung && item.namaPemilikGedung !== '0')
+                                  ? item.namaPemilikGedung
+                                  : (item.ownerAgency && item.ownerAgency !== '0')
+                                    ? item.ownerAgency
+                                    : 'Pemerintah')}
+                          </strong>
                         </span>
                       </div>
                     </td>

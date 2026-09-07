@@ -232,13 +232,21 @@ export const DuplicateAuditModal: React.FC<DuplicateAuditModalProps> = ({
                     <div className="flex items-center gap-2">
                       <button
                         onClick={handleIgnoreGroup}
-                        className="px-3.5 py-2 bg-slate-100 hover:bg-slate-200 text-slate-700 text-xs font-semibold rounded-xl border border-slate-300 transition-colors flex items-center gap-1.5"
+                        className="px-3.5 py-2 bg-slate-100 hover:bg-slate-200 text-slate-700 text-xs font-semibold rounded-xl border border-slate-300 transition-colors flex items-center gap-1.5 cursor-pointer"
                         title="Tandai data ini bukan duplikat jika memang merupakan bangunan berbeda"
                       >
                         <ShieldCheck className="w-4 h-4 text-emerald-600" />
                         Tandai Sah (Bukan Duplikat)
                       </button>
                     </div>
+                  </div>
+
+                  {/* Informational Callout regarding Municipal/Village multiple building ownership */}
+                  <div className="mb-4 p-3 rounded-xl bg-blue-50/80 border border-blue-200 text-blue-900 text-xs flex items-center gap-2.5">
+                    <Info className="w-4 h-4 text-blue-600 shrink-0" />
+                    <span>
+                      <strong>Pedoman Kepemilikan:</strong> Kepemilikan gedung bisa sama karena Pemda atau Pemerintah Desa dapat memiliki lebih dari satu gedung (seperti Kantor Desa, Balai Desa, Posyandu Dusun, Polindes, dsb.). Jika objek bangunan fisik berbeda, gunakan tombol <strong>"Tandai Sah (Bukan Duplikat)"</strong>.
+                    </span>
                   </div>
 
                   {/* Side-by-side Cards Grid */}

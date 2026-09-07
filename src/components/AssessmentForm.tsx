@@ -1599,40 +1599,110 @@ export const AssessmentForm: React.FC = () => {
               <p className="text-[10px] text-amber-800 mt-1">Nama kepala keluarga atau pemilik sah rumah hunian warga terdampak.</p>
             </div>
           ) : (
-            <div className="sm:col-span-2 bg-slate-50 p-3.5 rounded-xl border border-slate-200 space-y-1.5">
-              <div className="flex items-center justify-between">
+            <div className="sm:col-span-2 bg-slate-50 p-3.5 rounded-xl border border-slate-200 space-y-2">
+              <div className="flex flex-wrap items-center justify-between gap-1.5">
                 <label className="font-bold text-slate-800 text-xs flex items-center gap-1.5">
-                  <span>Nama Pemilik Gedung / Instansi Pengelola</span>
+                  <Building2 className="w-3.5 h-3.5 text-amber-600" />
+                  <span>Kepemilikan Gedung / Instansi Pemilik</span>
                   <span className="text-[10px] text-slate-600 font-semibold px-2 py-0.5 rounded bg-slate-200">
                     {currentCategoryConfig.shortLabel}
                   </span>
                 </label>
-                <button
-                  type="button"
-                  onClick={() => {
-                    setNamaPemilikGedung('0');
-                    setOwnerAgency('0');
-                    showToast('Nama Pemilik Gedung dinolkan ("0") sesuai aturan Non-Hunian', 'info');
-                  }}
-                  className="inline-flex items-center gap-1 px-2.5 py-1 text-[10px] font-bold text-amber-900 bg-amber-100 hover:bg-amber-200 border border-amber-300 rounded-lg transition-colors cursor-pointer"
-                  title="Klik untuk mengisi '0' jika gedung non-hunian bukan atas nama perorangan"
-                >
-                  <span>Nol-kan (0)</span>
-                </button>
+                <div className="flex items-center gap-1.5">
+                  <button
+                    type="button"
+                    onClick={() => {
+                      setNamaPemilikGedung('0');
+                      setOwnerAgency('0');
+                    }}
+                    className="inline-flex items-center gap-1 px-2 py-0.5 text-[10px] font-medium text-slate-600 hover:text-slate-900 bg-white hover:bg-slate-100 border border-slate-200 rounded-lg transition-colors cursor-pointer"
+                    title="Isi 0 jika tidak ada nama instansi/pemilik spesifik"
+                  >
+                    <span>Tanpa Nama (0)</span>
+                  </button>
+                </div>
               </div>
+
               <input
                 type="text"
+                list="ownerAgencySuggestions"
                 value={namaPemilikGedung || ownerAgency}
                 onChange={(e) => {
                   setNamaPemilikGedung(e.target.value);
                   setOwnerAgency(e.target.value);
                 }}
-                placeholder={currentCategoryConfig.occupancyPlaceholder || "Ketik '0' jika bukan hunian, atau nama instansi"}
-                className="w-full px-3 py-2 rounded-lg border border-slate-300 bg-white font-semibold text-slate-900 placeholder:text-slate-400 text-xs"
+                placeholder="Contoh: Pemerintah Desa Podenura / Pemerintah Kabupaten Nagekeo / Dinas Kesehatan"
+                className="w-full px-3 py-2 rounded-lg border border-slate-300 bg-white font-semibold text-slate-900 placeholder:text-slate-400 text-xs shadow-2xs"
               />
-              <p className="text-[10px] text-slate-500">
-                💡 Untuk gedung non-hunian (sekolah, kantor, toko, dll), jika bukan nama warga perorangan, <strong>cukup dinolkan (isi "0")</strong>.
-              </p>
+
+              <datalist id="ownerAgencySuggestions">
+                {desas.find((d) => d.id === desaId)?.name && (
+                  <option value={`Pemerintah Desa ${desas.find((d) => d.id === desaId)?.name}`} />
+                )}
+                <option value="Pemerintah Kabupaten Nagekeo" />
+                <option value="Dinas Kesehatan Kabupaten Nagekeo" />
+                <option value="Dinas Pendidikan dan Kebudayaan" />
+                <option value="Dinas Pekerjaan Umum dan Penataan Ruang" />
+                <option value="Yayasan Persekolahan Umat Katolik" />
+              </datalist>
+
+              {/* Quick Preset Buttons */}
+              <div className="flex flex-wrap items-center gap-1.5 pt-0.5">
+                <span className="text-[10px] text-slate-400 font-medium">Pilihan Cepat:</span>
+                {desas.find((d) => d.id === desaId)?.name && (
+                  <button
+                    type="button"
+                    onClick={() => {
+                      const val = `Pemerintah Desa ${desas.find((d) => d.id === desaId)?.name}`;
+                      setNamaPemilikGedung(val);
+                      setOwnerAgency(val);
+                    }}
+                    className="text-[10px] font-semibold px-2 py-0.5 rounded-md bg-blue-50 hover:bg-blue-100 text-blue-800 border border-blue-200 transition-colors cursor-pointer"
+                  >
+                    + Pemdes {desas.find((d) => d.id === desaId)?.name}
+                  </button>
+                )}
+                <button
+                  type="button"
+                  onClick={() => {
+                    const val = 'Pemerintah Kabupaten Nagekeo';
+                    setNamaPemilikGedung(val);
+                    setOwnerAgency(val);
+                  }}
+                  className="text-[10px] font-semibold px-2 py-0.5 rounded-md bg-emerald-50 hover:bg-emerald-100 text-emerald-800 border border-emerald-200 transition-colors cursor-pointer"
+                >
+                  + Pemkab Nagekeo
+                </button>
+                <button
+                  type="button"
+                  onClick={() => {
+                    const val = 'Dinas Kesehatan';
+                    setNamaPemilikGedung(val);
+                    setOwnerAgency(val);
+                  }}
+                  className="text-[10px] font-semibold px-2 py-0.5 rounded-md bg-purple-50 hover:bg-purple-100 text-purple-800 border border-purple-200 transition-colors cursor-pointer"
+                >
+                  + Dinkes
+                </button>
+                <button
+                  type="button"
+                  onClick={() => {
+                    const val = 'Dinas Pendidikan dan Kebudayaan';
+                    setNamaPemilikGedung(val);
+                    setOwnerAgency(val);
+                  }}
+                  className="text-[10px] font-semibold px-2 py-0.5 rounded-md bg-amber-50 hover:bg-amber-100 text-amber-800 border border-amber-200 transition-colors cursor-pointer"
+                >
+                  + Dinas P&K
+                </button>
+              </div>
+
+              <div className="flex items-start gap-1.5 p-2 rounded-lg bg-blue-50/70 border border-blue-100 text-[11px] text-blue-900 leading-normal">
+                <Info className="w-3.5 h-3.5 text-blue-600 shrink-0 mt-0.5" />
+                <span>
+                  <strong>Kepemilikan gedung bisa sama</strong> karena Pemerintah Daerah (Pemda) atau Pemerintah Desa (Pemdes) dapat memiliki lebih dari satu gedung (contoh: Kantor Desa, Balai Desa, Posyandu, Polindes, dsb.).
+                </span>
+              </div>
             </div>
           )}
 
@@ -3452,8 +3522,13 @@ export const AssessmentForm: React.FC = () => {
                 ))}
               </div>
 
-              <div className="p-3 bg-slate-100 rounded-xl text-[11px] text-slate-600">
-                💡 <em>Jika Anda yakin ini adalah survei bangunan yang berbeda atau penilaian ulang tahap lanjutan, Anda dapat melanjutkan penyimpanan. Jika tidak sengaja terinput ganda, silakan klik Batal.</em>
+              <div className="p-3 bg-slate-100 rounded-xl text-[11px] text-slate-600 space-y-1">
+                <p>
+                  💡 <strong>Informasi Kepemilikan:</strong> Kepemilikan gedung bisa sama karena Pemerintah Daerah (Pemda) atau Pemerintah Desa (Pemdes) dapat memiliki lebih dari satu gedung (contoh: Kantor Desa, Balai Desa, Posyandu, Polindes, dsb.).
+                </p>
+                <p>
+                  Jika Anda yakin ini adalah objek gedung yang berbeda fisik atau penilaian tahap lanjutan, Anda dapat melanjutkan penyimpanan sebagai gedung baru yang sah.
+                </p>
               </div>
 
               <div className="pt-2 flex flex-col sm:flex-row items-center justify-end gap-2.5 border-t border-slate-100">

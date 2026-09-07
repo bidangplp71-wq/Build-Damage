@@ -1364,3 +1364,191 @@ export function exportActivityLogsToCsv(logs: UserActivityLog[]): void {
   document.body.removeChild(link);
 }
 
+/**
+ * Reads all assessment data directly from Google Sheet starting from row A2 (the first data row).
+ * Directly downloads CSV export of the sheet and parses it with XLSX.
+ */
+export async function fetchAssessmentsFromGoogleSheet(
+  config: GoogleSheetConfig
+): Promise<{ success: boolean; data: BuildingAssessment[]; message: string; totalRows?: number }> {
+  if (!config.spreadsheetUrl || !isConfiguredSheetUrl(config.spreadsheetUrl)) {
+    return {
+      success: false,
+      data: [],
+      message: 'Tautan Google Sheet belum diatur atau masih menggunakan template contoh.',
+    };
+  }
+
+  const spreadsheetId = extractSpreadsheetId(config.spreadsheetUrl);
+  if (!spreadsheetId) {
+    return {
+      success: false,
+      data: [],
+      message: 'ID Spreadsheet Google Sheet tidak dapat ditemukan dari tautan.',
+    };
+  }
+
+  // Check if gid is present in URL
+  const gidMatch = config.spreadsheetUrl.match(/[?#&]gid=([0-9]+)/);
+  const gid = gidMatch ? gidMatch[1] : '0';
+
+  const exportUrl = `https://docs.google.com/spreadsheets/d/${spreadsheetId}/export?format=csv&gid=${gid}`;
+
+  try {
+    const res = await fetch(exportUrl);
+    if (!res.ok) {
+      throw new Error(`Gagal mengambil data dari Google Sheet (HTTP ${res.status}). Pastikan izin berbagi spreadsheet telah disetel ke "Siapa saja yang memiliki link" (Viewer/Editor).`);
+    }
+
+    const csvText = await res.text();
+    if (!csvText || csvText.trim().length === 0) {
+      return {
+        success: true,
+        data: [],
+        message: 'Google Sheet kosong (tidak ada baris data).',
+        totalRows: 0,
+      };
+    }
+
+    const workbook = XLSX.read(csvText, { type: 'string' });
+    const firstSheetName = workbook.SheetNames[0];
+    const worksheet = workbook.Sheets[firstSheetName];
+    
+    // Read rows starting from row A2 (row 1 is header)
+    const rawRows: Record<string, any>[] = XLSX.utils.sheet_to_json(worksheet);
+
+    if (!rawRows || rawRows.length === 0) {
+      return {
+        success: true,
+        data: [],
+        message: 'Google Sheet tidak memiliki baris data (hanya header di baris 1).',
+        totalRows: 0,
+      };
+    }
+
+    const parseExcelDate = (val: any): string => {
+      if (!val) return new Date().toISOString().split('T')[0];
+      if (typeof val === 'number') {
+        const date = new Date((val - 25569) * 86400 * 1000);
+        if (!isNaN(date.getTime())) {
+          return date.toISOString().split('T')[0];
+        }
+      }
+      if (typeof val === 'string') {
+        const trimmed = val.trim();
+        if (/^\d{4}-\d{2}-\d{2}$/.test(trimmed)) return trimmed;
+        const dmy = trimmed.match(/^(\d{1,2})[\/\-](\d{1,2})[\/\-](\d{4})$/);
+        if (dmy) {
+          const [, d, m, y] = dmy;
+          return `${y}-${m.padStart(2, '0')}-${d.padStart(2, '0')}`;
+        }
+        const parsed = Date.parse(trimmed);
+        if (!isNaN(parsed)) {
+          return new Date(parsed).toISOString().split('T')[0];
+        }
+      }
+      return new Date().toISOString().split('T')[0];
+    };
+
+    const parsedData: BuildingAssessment[] = rawRows.map((row, index) => {
+      const sheetRowNumber = index + 2;
+      const code = String(row['No Registrasi'] || '').trim();
+      const buildingName = String(row['Nama Bangunan'] || `Bangunan Baris ${sheetRowNumber}`).trim();
+      const id = code || `sheet_row_${sheetRowNumber}_${buildingName.toLowerCase().replace(/[^a-z0-9]/g, '_')}`;
+
+      const totalFloorAreaM2 = Number(row['Luas Lantai (M2)']) || 0;
+      const numberOfFloors = Number(row['Jumlah Tingkat']) || 1;
+      const yearBuilt = Number(row['Tahun Dibangun']) || new Date().getFullYear();
+      const totalDamagePercent = Number(row['Tingkat Kerusakan (%)']) || 0;
+      
+      let damageClassification = row['Klasifikasi Kerusakan'] as any;
+      if (!damageClassification || typeof damageClassification !== 'string') {
+        damageClassification = totalDamagePercent > 45 ? 'Rusak Berat' : totalDamagePercent > 20 ? 'Rusak Sedang' : 'Rusak Ringan';
+      }
+
+      const hsbgnPerM2 = Number(row['HSBGN / M2 (Rp)']) || 0;
+      const treatmentCostPerM2 = Number(row['Biaya Perawatan / M2 (Rp)']) || 0;
+      const demolitionCostPerM2 = Number(row['Biaya Bongkaran / M2 (Rp)']) || 0;
+      const totalCostPerM2 = Number(row['Total Biaya / M2 (Rp)']) || 0;
+      const roundedRehabCost = Number(row['Ajuan Biaya Rehab (Rp)']) || 0;
+      const costTerbilang = String(row['Terbilang'] || '');
+
+      const verificationStatus = (row['Status Verifikasi'] as any) || 'Menunggu Verifikasi';
+      const verifiedBy = row['Diverifikasi Oleh'] && row['Diverifikasi Oleh'] !== '-' ? String(row['Diverifikasi Oleh']) : undefined;
+      const verificationNotes = row['Catatan Verifikator'] && row['Catatan Verifikator'] !== '-' ? String(row['Catatan Verifikator']) : undefined;
+      const googleDriveFolderUrl = row['Link Folder Foto Google Drive'] && row['Link Folder Foto Google Drive'] !== '-' ? String(row['Link Folder Foto Google Drive']) : undefined;
+
+      const disasterDate = parseExcelDate(row['Tanggal Bencana']);
+      const assessmentDate = parseExcelDate(row['Tanggal Penilaian']);
+      const lastUpdated = row['Terakhir Diperbarui'] ? new Date(row['Terakhir Diperbarui']).toISOString() : new Date().toISOString();
+
+      return {
+        id,
+        code: code || undefined,
+        buildingName,
+        buildingCategory: (row['Kategori / Fungsi Bangunan'] as any) || 'Gedung Pemerintah',
+        disasterType: (row['Jenis Bencana'] as any) || 'Gempa Bumi',
+        disasterDate,
+        assessmentDate,
+        ownerAgency: String(row['Pengguna / Pemilik'] || ''),
+        responsibleDepartment: String(row['Dinas Teknis'] || 'Dinas Pekerjaan Umum dan Penataan Ruang'),
+        buildingClass: (row['Kelas Bangunan'] as any) || 'Bangunan Sederhana',
+        kecamatanId: 'kec_nangaroro',
+        kecamatanName: String(row['Kecamatan'] || 'Nangaroro'),
+        desaId: `desa_${String(row['Desa / Kelurahan'] || 'umum').toLowerCase().replace(/\s+/g, '_')}`,
+        desaName: String(row['Desa / Kelurahan'] || ''),
+        detailedAddress: String(row['Alamat Lengkap'] || ''),
+        totalFloorAreaM2,
+        numberOfFloors,
+        yearBuilt,
+        components: [],
+        totalDamagePercent,
+        damageClassification,
+        hsbgnPerM2,
+        treatmentCostPerM2,
+        demolitionPercent: 8,
+        demolitionCostPerM2,
+        totalCostPerM2,
+        totalRehabCost: roundedRehabCost || (totalFloorAreaM2 * totalCostPerM2),
+        roundedRehabCost,
+        costTerbilang,
+        photos: [],
+        cityLocation: String(row['Kota Laporan'] || 'Mbay'),
+        reportDateStr: 'September 2026',
+        headOfDepartment: {
+          title: 'Kepala Dinas Pekerjaan Umum dan Penataan Ruang',
+          subTitle: 'Kabupaten Nagekeo',
+          rank: 'Pembina Utama Muda (IV/c)',
+          name: 'Ir. Bernardinus Fansiena, M.T.',
+          nip: '19710512 199803 1 005',
+        },
+        analysisTeam: [],
+        verificationStatus,
+        verifiedBy,
+        verificationNotes,
+        googleSheetSynced: true,
+        googleSheetSyncedAt: new Date().toISOString(),
+        googleDriveFolderUrl,
+        createdBy: 'surveyor_google_sheet',
+        createdByName: String(row['Surveyor / Petugas'] || 'Surveyor Lapangan'),
+        createdAt: disasterDate ? `${disasterDate}T08:00:00.000Z` : new Date().toISOString(),
+        updatedAt: lastUpdated,
+      };
+    });
+
+    return {
+      success: true,
+      data: parsedData,
+      totalRows: parsedData.length,
+      message: `Berhasil memuat ${parsedData.length} data penilaian gedung dari Google Sheet (Baris A2 s/d A${parsedData.length + 1}).`,
+    };
+  } catch (err: any) {
+    console.error('fetchAssessmentsFromGoogleSheet error:', err);
+    return {
+      success: false,
+      data: [],
+      message: `Gagal membaca Google Sheet: ${err.message || 'Koneksi terputus'}`,
+    };
+  }
+}
+
