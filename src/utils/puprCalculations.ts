@@ -191,18 +191,19 @@ export function getInitialSubComponents(): SubComponentAssessment[] {
 /**
  * Calculates component damage score according to PUPR formula
  * Nilai = Bobot Komponen (%) * (Tingkat Kerusakan Teramati % / 100)
+ * Supports up to 3 decimal digits for high precision
  */
 export function calculateComponentScore(bobot: number, damageInput: number): number {
   const score = (bobot * damageInput) / 100;
-  return Number(score.toFixed(2));
+  return Number(score.toFixed(3));
 }
 
 /**
- * Calculates total damage percent from components array
+ * Calculates total damage percent from components array (3 decimal digits precision)
  */
 export function calculateTotalDamage(components: SubComponentAssessment[]): number {
   const sum = components.reduce((acc, curr) => acc + curr.calculatedScore, 0);
-  return Number(sum.toFixed(2));
+  return Number(sum.toFixed(3));
 }
 
 /**

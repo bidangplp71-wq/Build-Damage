@@ -10,6 +10,11 @@ import {
   ExternalLink,
   PlusCircle,
   LogOut,
+  Bell,
+  BellRing,
+  CheckCheck,
+  Trash2,
+  Clock,
 } from 'lucide-react';
 
 interface HeaderProps {
@@ -26,11 +31,19 @@ export const Header: React.FC<HeaderProps> = ({ onToggleMobileNav }) => {
     syncAllToSheet,
     showToast,
     setSelectedAssessmentForEdit,
+    setSelectedAssessmentForDetail,
+    assessments,
     googleSheetConfig,
     logout,
+    notifications,
+    unreadNotificationCount,
+    markNotificationAsRead,
+    markAllNotificationsAsRead,
+    clearNotifications,
   } = useApp();
 
   const [roleDropdownOpen, setRoleDropdownOpen] = React.useState(false);
+  const [notifDropdownOpen, setNotifDropdownOpen] = React.useState(false);
   const [isSyncing, setIsSyncing] = React.useState(false);
 
   const roleCounts = getUserCountsByRole();
@@ -186,6 +199,178 @@ export const Header: React.FC<HeaderProps> = ({ onToggleMobileNav }) => {
               <span className="hidden sm:inline">Atur Link Sheet</span>
             </button>
           )}
+
+          {/* Incoming Data Notification Bell */}
+          <div className="relative">
+            <button
+              onClick={() => {
+                setNotifDropdownOpen(!notifDropdownOpen);
+                setRoleDropdownOpen(false);
+              }}
+              title="Notifikasi Data Masuk"
+              className={`relative p-2 rounded-lg border transition-all cursor-pointer ${
+                unreadNotificationCount > 0
+                  ? 'bg-amber-50 border-amber-300 text-amber-600 hover:bg-amber-100'
+                  : 'bg-slate-100 border-slate-200 text-slate-600 hover:bg-slate-200'
+              }`}
+            >
+              {unreadNotificationCount > 0 ? (
+                <BellRing className="w-4 h-4 text-amber-600 animate-pulse" />
+              ) : (
+                <Bell className="w-4 h-4 text-slate-600" />
+              )}
+              {unreadNotificationCount > 0 && (
+                <span className="absolute -top-1 -right-1 flex h-4 min-w-[16px] px-1 items-center justify-center rounded-full bg-rose-600 text-[9px] font-black text-white ring-2 ring-white shadow-xs">
+                  {unreadNotificationCount > 99 ? '99+' : unreadNotificationCount}
+                </span>
+              )}
+            </button>
+
+            {notifDropdownOpen && (
+              <div className="absolute right-0 mt-2 w-80 sm:w-96 rounded-2xl bg-white border border-slate-200 shadow-2xl p-0 z-50 animate-in fade-in zoom-in-95 duration-100 overflow-hidden text-slate-900">
+                {/* Header */}
+                <div className="p-3 bg-slate-50 border-b border-slate-200 flex items-center justify-between">
+                  <div className="flex items-center gap-2">
+                    <Bell className="w-4 h-4 text-amber-600" />
+                    <span className="text-xs font-bold text-slate-900">Notifikasi Data Masuk</span>
+                    {unreadNotificationCount > 0 && (
+                      <span className="text-[10px] px-1.5 py-0.5 rounded-full bg-amber-100 text-amber-800 font-bold">
+                        {unreadNotificationCount} Baru
+                      </span>
+                    )}
+                  </div>
+                  <div className="flex items-center gap-1">
+                    {unreadNotificationCount > 0 && (
+                      <button
+                        onClick={markAllNotificationsAsRead}
+                        className="text-[11px] font-medium text-slate-600 hover:text-slate-900 hover:bg-slate-200/80 px-2 py-1 rounded-md transition-colors flex items-center gap-1 cursor-pointer"
+                        title="Tandai semua sudah dibaca"
+                      >
+                        <CheckCheck className="w-3 h-3 text-emerald-600" />
+                        <span className="hidden sm:inline">Dibaca</span>
+                      </button>
+                    )}
+                    {notifications.length > 0 && (
+                      <button
+                        onClick={clearNotifications}
+                        className="text-[11px] font-medium text-rose-600 hover:text-rose-700 hover:bg-rose-50 px-2 py-1 rounded-md transition-colors flex items-center gap-1 cursor-pointer"
+                        title="Bersihkan riwayat notifikasi"
+                      >
+                        <Trash2 className="w-3 h-3" />
+                        <span className="hidden sm:inline">Hapus</span>
+                      </button>
+                    )}
+                  </div>
+                </div>
+
+                {/* List of Notifications */}
+                <div className="max-h-80 overflow-y-auto divide-y divide-slate-100">
+                  {notifications.length === 0 ? (
+                    <div className="py-8 px-4 text-center">
+                      <div className="w-10 h-10 mx-auto mb-2 rounded-full bg-slate-100 flex items-center justify-center text-slate-400">
+                        <Bell className="w-5 h-5" />
+                      </div>
+                      <p className="text-xs font-semibold text-slate-700">Belum Ada Data Masuk</p>
+                      <p className="text-[11px] text-slate-400 mt-1 max-w-xs mx-auto">
+                        Data penilaian baru dari surveyor lapangan atau sinkronisasi cloud akan otomatis muncul di sini secara real-time.
+                      </p>
+                    </div>
+                  ) : (
+                    notifications.slice(0, 15).map((notif) => {
+                      const isDamageBerat = notif.damageClassification?.toLowerCase().includes('berat');
+                      const isDamageSedang = notif.damageClassification?.toLowerCase().includes('sedang');
+
+                      return (
+                        <div
+                          key={notif.id}
+                          onClick={() => {
+                            markNotificationAsRead(notif.id);
+                            const target = assessments.find((a) => a.id === notif.assessmentId);
+                            if (target) {
+                              setSelectedAssessmentForDetail(target);
+                            }
+                            setNotifDropdownOpen(false);
+                          }}
+                          className={`p-3 transition-colors hover:bg-amber-50/50 cursor-pointer flex items-start gap-3 ${
+                            !notif.isRead ? 'bg-amber-50/30' : 'bg-white'
+                          }`}
+                        >
+                          <div
+                            className={`p-2 rounded-xl shrink-0 mt-0.5 ${
+                              isDamageBerat
+                                ? 'bg-rose-100 text-rose-600'
+                                : isDamageSedang
+                                ? 'bg-amber-100 text-amber-600'
+                                : 'bg-emerald-100 text-emerald-600'
+                            }`}
+                          >
+                            <Building2 className="w-4 h-4" />
+                          </div>
+
+                          <div className="min-w-0 flex-1">
+                            <div className="flex items-center justify-between gap-1">
+                              <h5 className="text-xs font-bold text-slate-900 truncate">
+                                {notif.buildingName}
+                              </h5>
+                              {!notif.isRead && (
+                                <span className="w-2 h-2 rounded-full bg-amber-500 shrink-0" title="Belum dibaca" />
+                              )}
+                            </div>
+
+                            <p className="text-[11px] text-slate-500 truncate mt-0.5">
+                              {notif.kecamatan ? `Kec. ${notif.kecamatan}` : ''}
+                              {notif.desa ? `, Desa ${notif.desa}` : ''}
+                            </p>
+
+                            <div className="flex items-center gap-2 mt-1.5 flex-wrap">
+                              {notif.damageClassification && (
+                                <span
+                                  className={`text-[9px] font-bold px-1.5 py-0.5 rounded ${
+                                    isDamageBerat
+                                      ? 'bg-rose-100 text-rose-700'
+                                      : isDamageSedang
+                                      ? 'bg-amber-100 text-amber-700'
+                                      : 'bg-emerald-100 text-emerald-700'
+                                  }`}
+                                >
+                                  {notif.damageClassification}
+                                </span>
+                              )}
+                              {notif.surveyorName && (
+                                <span className="text-[10px] text-slate-400 truncate">
+                                  Surveyor: {notif.surveyorName}
+                                </span>
+                              )}
+                            </div>
+
+                            <div className="flex items-center justify-between mt-1 text-[10px] text-slate-400">
+                              <span className="flex items-center gap-1">
+                                <Clock className="w-3 h-3 text-slate-400" />
+                                {new Date(notif.timestamp).toLocaleTimeString('id-ID', {
+                                  hour: '2-digit',
+                                  minute: '2-digit',
+                                })} WIB
+                              </span>
+                              <span className="text-amber-600 font-semibold text-[10px] hover:underline">
+                                Buka Laporan →
+                              </span>
+                            </div>
+                          </div>
+                        </div>
+                      );
+                    })
+                  )}
+                </div>
+
+                {/* Footer */}
+                <div className="p-2 bg-slate-50 border-t border-slate-200 text-center">
+                  <span className="text-[10px] text-slate-400">
+                    Notifikasi aktif real-time & sinkron otomatis
+                  </span>
+                </div>
+              </div>
+            )}
+          </div>
 
           {/* User Account Menu Dropdown */}
           <div className="relative">

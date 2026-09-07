@@ -683,8 +683,8 @@ export const AssessmentTable: React.FC = () => {
 
                     {/* Damage % and Badge */}
                     <td className="py-3 px-3 text-center">
-                      <div className="font-bold text-sm text-slate-900">
-                        {Number(item.totalDamagePercent ?? 0).toFixed(2)}%
+                      <div className="font-bold text-sm text-slate-900 font-mono">
+                        {Number(item.totalDamagePercent ?? 0).toFixed(3)}%
                       </div>
                       <span
                         className={`inline-block px-2 py-0.5 rounded-full text-[10px] font-bold border mt-0.5 ${getClassificationBadge(

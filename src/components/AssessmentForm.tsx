@@ -27,6 +27,8 @@ import { uploadPhotoToFirebaseStorage } from '../services/firebase';
 import { BuildingPhotoGallery } from './BuildingPhotoGallery';
 import { PhotoViewerModal } from './PhotoViewerModal';
 import { AssessmentDetailModal } from './AssessmentDetailModal';
+import { DecimalDamageInputCell } from './DecimalDamageInputCell';
+import { AssessmentInputGuideModal } from './AssessmentInputGuideModal';
 import {
   Building2,
   Save,
@@ -47,6 +49,7 @@ import {
   Settings,
   Home,
   Printer,
+  BookOpen,
   Users,
   GraduationCap,
   Briefcase,
@@ -154,6 +157,9 @@ export const AssessmentForm: React.FC = () => {
   const [quickDesaType, setQuickDesaType] = useState<'Desa' | 'Kelurahan'>('Desa');
   const [quickDesaIsPemekaran, setQuickDesaIsPemekaran] = useState(false);
   const [quickDesaNotes, setQuickDesaNotes] = useState('');
+
+  // Panduan Penginputan Lengkap Modal state
+  const [showInputGuide, setShowInputGuide] = useState(false);
 
   // HSBGN and Costing
   const [hsbgnPerM2, setHsbgnPerM2] = useState<number>(7700000);
@@ -291,35 +297,35 @@ export const AssessmentForm: React.FC = () => {
       const a = selectedAssessmentForEdit;
       setCode(a.code || '');
       setBuildingCategory(a.buildingCategory || 'Gedung Pemerintah');
-      setBuildingName(a.buildingName);
-      setNamaPemilikRumah(a.namaPemilikRumah || (a.buildingCategory === 'Hunian Masyarakat' ? a.ownerAgency : ''));
-      setNamaPemilikGedung(a.namaPemilikGedung || (a.buildingCategory !== 'Hunian Masyarakat' ? a.ownerAgency : ''));
-      setDisasterType(a.disasterType);
-      setDisasterDate(a.disasterDate);
-      setAssessmentDate(a.assessmentDate);
-      setYearBuilt(a.yearBuilt);
+      setBuildingName(a.buildingName || '');
+      setNamaPemilikRumah(a.namaPemilikRumah || (a.buildingCategory === 'Hunian Masyarakat' ? (a.ownerAgency || '') : ''));
+      setNamaPemilikGedung(a.namaPemilikGedung || (a.buildingCategory !== 'Hunian Masyarakat' ? (a.ownerAgency || '') : ''));
+      setDisasterType(a.disasterType || 'Gempa Bumi');
+      setDisasterDate(a.disasterDate || new Date().toISOString().slice(0, 10));
+      setAssessmentDate(a.assessmentDate || new Date().toISOString().slice(0, 10));
+      setYearBuilt(a.yearBuilt ?? 2018);
       setOwnerAgency(a.ownerAgency || '');
-      setResponsibleDepartment(a.responsibleDepartment);
-      setBuildingClass(a.buildingClass);
-      setTotalFloorAreaM2(a.totalFloorAreaM2);
-      setNumberOfFloors(a.numberOfFloors);
-      setKecamatanId(a.kecamatanId);
-      setDesaId(a.desaId);
-      setDetailedAddress(a.detailedAddress);
-      setLatitude(a.latitude);
-      setLongitude(a.longitude);
-      setHsbgnPerM2(a.hsbgnPerM2);
-      setDemolitionPercent(a.demolitionPercent);
-      setComponents(a.components);
-      setPhotos(a.photos);
+      setResponsibleDepartment(a.responsibleDepartment || 'Dinas Pekerjaan Umum dan Penataan Ruang');
+      setBuildingClass(a.buildingClass || 'Bangunan Tidak Sederhana');
+      setTotalFloorAreaM2(a.totalFloorAreaM2 ?? 150);
+      setNumberOfFloors(a.numberOfFloors ?? 1);
+      setKecamatanId(a.kecamatanId || '');
+      setDesaId(a.desaId || '');
+      setDetailedAddress(a.detailedAddress || '');
+      setLatitude(a.latitude ?? -8.6754);
+      setLongitude(a.longitude ?? 121.3021);
+      setHsbgnPerM2(a.hsbgnPerM2 ?? 7700000);
+      setDemolitionPercent(a.demolitionPercent ?? 8);
+      setComponents(a.components || getInitialSubComponents());
+      setPhotos(a.photos || []);
       setNikPemilik(a.nikPemilik || '');
       setNoKkPemilik(a.noKkPemilik || '');
-      setCityLocation(a.cityLocation);
-      setReportDateStr(a.reportDateStr);
-      setHeadName(a.headOfDepartment.name);
-      setHeadNip(a.headOfDepartment.nip);
-      setHeadRank(a.headOfDepartment.rank);
-      setAnalysisTeam(a.analysisTeam);
+      setCityLocation(a.cityLocation || 'Mbay');
+      setReportDateStr(a.reportDateStr || 'September 2026');
+      setHeadName(a.headOfDepartment?.name || '');
+      setHeadNip(a.headOfDepartment?.nip || '');
+      setHeadRank(a.headOfDepartment?.rank || '');
+      setAnalysisTeam(a.analysisTeam || []);
     }
   }, [selectedAssessmentForEdit]);
 
@@ -539,14 +545,63 @@ export const AssessmentForm: React.FC = () => {
       ) {
         setOwnerAgency('');
       }
+
+      // Guidance: If non-hunian selected and NIK is empty, auto-fill '0' as per standard guideline
+      if (category !== 'Hunian Masyarakat') {
+        if (!nikPemilik) {
+          setNikPemilik('0');
+        }
+        if (!noKkPemilik) {
+          setNoKkPemilik('0');
+        }
+        if (!namaPemilikGedung) {
+          setNamaPemilikGedung('0');
+          setOwnerAgency('0');
+        }
+      } else {
+        // If switched back to Hunian and NIK was '0', reset it so user can fill the citizen's NIK
+        if (nikPemilik === '0') {
+          setNikPemilik('');
+        }
+        if (noKkPemilik === '0') {
+          setNoKkPemilik('');
+        }
+        if (namaPemilikGedung === '0') {
+          setNamaPemilikGedung('');
+          setOwnerAgency('');
+        }
+      }
     }
+  };
+
+  const handleApplySampleData = (sample: {
+    category: BuildingCategory;
+    buildingName: string;
+    namaPemilik: string;
+    nik: string;
+    noKk: string;
+  }) => {
+    handleCategorySelect(sample.category);
+    setBuildingName(sample.buildingName);
+    if (sample.category === 'Hunian Masyarakat') {
+      setNamaPemilikRumah(sample.namaPemilik);
+      setNamaPemilikGedung('');
+    } else {
+      setNamaPemilikGedung(sample.namaPemilik);
+      setNamaPemilikRumah('');
+    }
+    setOwnerAgency(sample.namaPemilik);
+    setNikPemilik(sample.nik);
+    setNoKkPemilik(sample.noKk);
+    showToast(`Contoh data ${sample.category} diterapkan (NIK: ${sample.nik})!`, 'success');
   };
 
   const currentCategoryConfig = BUILDING_CATEGORY_CONFIGS[buildingCategory] || BUILDING_CATEGORY_CONFIGS['Hunian Masyarakat'];
 
-  // Handle component damage input change
+  // Handle component damage input change (supports up to 3 decimal digits)
   const handleComponentChange = (id: string, damageInput: number) => {
-    const clampedInput = Math.max(0, Math.min(100, damageInput));
+    const roundedInput = Math.round(damageInput * 1000) / 1000;
+    const clampedInput = Math.max(0, Math.min(100, roundedInput));
     setComponents((prev) =>
       prev.map((c) => {
         if (c.id === id) {
@@ -894,6 +949,15 @@ export const AssessmentForm: React.FC = () => {
         <div className="flex items-center gap-2">
           <button
             type="button"
+            onClick={() => setShowInputGuide(true)}
+            className="flex items-center gap-1.5 px-3 py-2 text-xs font-bold text-amber-950 bg-amber-400 hover:bg-amber-300 border border-amber-500 rounded-xl transition-colors cursor-pointer shadow-xs"
+            title="Buka Buku Panduan Penginputan Lengkap Standar PUPR"
+          >
+            <BookOpen className="w-3.5 h-3.5 text-amber-950" />
+            <span>Panduan Penginputan Form</span>
+          </button>
+          <button
+            type="button"
             onClick={handleOpenPreviewPdf}
             className="flex items-center gap-1.5 px-3 py-2 text-xs font-bold text-indigo-900 bg-indigo-50 hover:bg-indigo-100 border border-indigo-200 rounded-xl transition-colors cursor-pointer shadow-xs"
           >
@@ -1106,9 +1170,10 @@ export const AssessmentForm: React.FC = () => {
                   setShowSheetModal(false);
                   showToast('Link Google Sheet & Google Drive berhasil disimpan!', 'success');
                 }}
-                className="px-4 py-2 rounded-xl bg-emerald-600 hover:bg-emerald-700 text-white font-bold text-xs shadow-xs transition-colors"
+                className="px-4 py-2 rounded-xl bg-emerald-600 hover:bg-emerald-700 text-white font-bold text-xs shadow-xs transition-colors flex items-center gap-1.5 cursor-pointer"
               >
-                Terapkan Link Sheet
+                <Check className="w-3.5 h-3.5" />
+                <span>Terapkan Link Sheet</span>
               </button>
             </div>
           </div>
@@ -1223,6 +1288,35 @@ export const AssessmentForm: React.FC = () => {
                 <strong>Petunjuk Lapangan Khusus:</strong> {currentCategoryConfig.inspectionTips}
               </span>
             </div>
+          </div>
+
+          {/* Quick Input Guide & NIK Rule Guidance Banner */}
+          <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-3 p-3.5 bg-gradient-to-r from-amber-50 via-orange-50 to-amber-50 border border-amber-300/80 rounded-2xl text-xs shadow-xs">
+            <div className="flex items-start gap-2.5">
+              <div className="w-8 h-8 rounded-xl bg-amber-500 text-slate-950 flex items-center justify-center font-bold shrink-0 mt-0.5 shadow-xs">
+                <BookOpen className="w-4 h-4" />
+              </div>
+              <div>
+                <div className="flex flex-wrap items-center gap-2">
+                  <span className="font-bold text-amber-950">Aturan Resmi NIK & Nama Pemilik:</span>
+                  <span className="px-2 py-0.5 rounded-full bg-amber-200/80 text-amber-900 font-bold text-[10px]">
+                    Khusus Non-Hunian Di-Nol-kan ("0")
+                  </span>
+                </div>
+                <p className="text-[11px] text-amber-900 mt-0.5 leading-relaxed">
+                  Jika kategori <strong>BUKAN Hunian</strong> (Sekolah, Kantor, Toko, Balai, Fasilitas Publik), kepemilikan bukan perorangan sehingga kolom <strong>NIK dan Nama Pemilik dinolkan (isi "0")</strong>. Klik tombol <em>"Nol-kan (0)"</em> yang telah disediakan untuk pengisian instan.
+                </p>
+              </div>
+            </div>
+
+            <button
+              type="button"
+              onClick={() => setShowInputGuide(true)}
+              className="inline-flex items-center gap-1.5 px-3.5 py-2 bg-amber-500 hover:bg-amber-400 text-slate-950 font-bold rounded-xl text-xs shrink-0 cursor-pointer shadow-xs transition-transform active:scale-95 self-start sm:self-auto whitespace-nowrap"
+            >
+              <BookOpen className="w-3.5 h-3.5" />
+              <span>Lihat Panduan NIK/KK</span>
+            </button>
           </div>
         </div>
 
@@ -1388,7 +1482,7 @@ export const AssessmentForm: React.FC = () => {
             </div>
             <input
               type="text"
-              value={code}
+              value={code || ''}
               onChange={(e) => setCode(e.target.value)}
               placeholder="Boleh dikosongkan jika belum ada nomor registrasi"
               className="w-full px-3 py-2 rounded-xl border border-slate-200 bg-slate-50 font-mono text-slate-800 placeholder:text-slate-400 text-xs"
@@ -1402,7 +1496,7 @@ export const AssessmentForm: React.FC = () => {
             </label>
             <input
               type="text"
-              value={buildingName}
+              value={buildingName || ''}
               onChange={(e) => setBuildingName(e.target.value)}
               placeholder={
                 buildingCategory === 'Hunian Masyarakat'
@@ -1446,11 +1540,27 @@ export const AssessmentForm: React.FC = () => {
               <p className="text-[10px] text-amber-800 mt-1">Nama kepala keluarga atau pemilik sah rumah hunian warga terdampak.</p>
             </div>
           ) : (
-            <div className="sm:col-span-2 bg-slate-50 p-3 rounded-xl border border-slate-200">
-              <label className="block font-bold text-slate-800 mb-1 flex items-center justify-between">
-                <span>Nama Pemilik Gedung / Instansi Pengelola</span>
-                <span className="text-[10px] text-slate-600 font-semibold px-2 py-0.5 rounded bg-slate-200">{currentCategoryConfig.shortLabel}</span>
-              </label>
+            <div className="sm:col-span-2 bg-slate-50 p-3.5 rounded-xl border border-slate-200 space-y-1.5">
+              <div className="flex items-center justify-between">
+                <label className="font-bold text-slate-800 text-xs flex items-center gap-1.5">
+                  <span>Nama Pemilik Gedung / Instansi Pengelola</span>
+                  <span className="text-[10px] text-slate-600 font-semibold px-2 py-0.5 rounded bg-slate-200">
+                    {currentCategoryConfig.shortLabel}
+                  </span>
+                </label>
+                <button
+                  type="button"
+                  onClick={() => {
+                    setNamaPemilikGedung('0');
+                    setOwnerAgency('0');
+                    showToast('Nama Pemilik Gedung dinolkan ("0") sesuai aturan Non-Hunian', 'info');
+                  }}
+                  className="inline-flex items-center gap-1 px-2.5 py-1 text-[10px] font-bold text-amber-900 bg-amber-100 hover:bg-amber-200 border border-amber-300 rounded-lg transition-colors cursor-pointer"
+                  title="Klik untuk mengisi '0' jika gedung non-hunian bukan atas nama perorangan"
+                >
+                  <span>Nol-kan (0)</span>
+                </button>
+              </div>
               <input
                 type="text"
                 value={namaPemilikGedung || ownerAgency}
@@ -1458,10 +1568,12 @@ export const AssessmentForm: React.FC = () => {
                   setNamaPemilikGedung(e.target.value);
                   setOwnerAgency(e.target.value);
                 }}
-                placeholder={currentCategoryConfig.occupancyPlaceholder}
-                className="w-full px-3 py-2 rounded-lg border border-slate-300 bg-white font-semibold text-slate-900 placeholder:text-slate-400"
+                placeholder={currentCategoryConfig.occupancyPlaceholder || "Ketik '0' jika bukan hunian, atau nama instansi"}
+                className="w-full px-3 py-2 rounded-lg border border-slate-300 bg-white font-semibold text-slate-900 placeholder:text-slate-400 text-xs"
               />
-              <p className="text-[10px] text-slate-500 mt-1">Instansi pemerintah, yayasan, korporasi swasta, atau perorangan pemilik gedung.</p>
+              <p className="text-[10px] text-slate-500">
+                💡 Untuk gedung non-hunian (sekolah, kantor, toko, dll), jika bukan nama warga perorangan, <strong>cukup dinolkan (isi "0")</strong>.
+              </p>
             </div>
           )}
 
@@ -1490,7 +1602,7 @@ export const AssessmentForm: React.FC = () => {
             <label className="block font-semibold text-slate-700 mb-1">Tanggal Kejadian Bencana</label>
             <input
               type="date"
-              value={disasterDate}
+              value={disasterDate || ''}
               onChange={(e) => setDisasterDate(e.target.value)}
               className="w-full px-3 py-2 rounded-xl border border-slate-200"
             />
@@ -1501,7 +1613,7 @@ export const AssessmentForm: React.FC = () => {
             <label className="block font-semibold text-slate-700 mb-1">Tanggal Penilaian Lapangan</label>
             <input
               type="date"
-              value={assessmentDate}
+              value={assessmentDate || ''}
               onChange={(e) => setAssessmentDate(e.target.value)}
               className="w-full px-3 py-2 rounded-xl border border-slate-200"
             />
@@ -1514,42 +1626,92 @@ export const AssessmentForm: React.FC = () => {
               type="number"
               min={1900}
               max={2030}
-              value={yearBuilt}
+              value={yearBuilt ?? 2018}
               onChange={(e) => setYearBuilt(Number(e.target.value))}
               className="w-full px-3 py-2 rounded-xl border border-slate-200 font-medium"
             />
           </div>
 
           {/* NIK Pemilik */}
-          <div>
-            <label className="block font-semibold text-slate-700 mb-1 flex items-center justify-between">
-              <span>NIK Pemilik / Penghuni</span>
-              <span className="text-[10px] text-slate-400 font-normal">16 Digit Angka</span>
-            </label>
+          <div className={buildingCategory !== 'Hunian Masyarakat' ? 'p-3 rounded-xl bg-amber-50/70 border border-amber-200/90' : ''}>
+            <div className="flex items-center justify-between mb-1">
+              <label className="font-semibold text-slate-700 text-xs">
+                NIK Pemilik / Penghuni
+              </label>
+              <div className="flex items-center gap-1.5">
+                {buildingCategory !== 'Hunian Masyarakat' ? (
+                  <button
+                    type="button"
+                    onClick={() => {
+                      setNikPemilik('0');
+                      setNoKkPemilik('0');
+                      showToast('NIK & No KK dinolkan ("0") untuk Non-Hunian', 'info');
+                    }}
+                    className="inline-flex items-center gap-1 px-2.5 py-0.5 text-[10px] font-bold text-amber-900 bg-amber-200/80 hover:bg-amber-300 border border-amber-400 rounded-md cursor-pointer transition-colors"
+                    title="Khusus non-hunian: NIK dinolkan ('0')"
+                  >
+                    <span>Nol-kan (0)</span>
+                  </button>
+                ) : (
+                  <span className="text-[10px] text-slate-400 font-normal">16 Digit Angka</span>
+                )}
+              </div>
+            </div>
             <input
               type="text"
               maxLength={16}
-              value={nikPemilik}
+              value={nikPemilik || ''}
               onChange={(e) => setNikPemilik(e.target.value.replace(/\D/g, ''))}
-              placeholder="Contoh: 5316011504780001"
-              className="w-full px-3 py-2 rounded-xl border border-slate-200 font-mono text-slate-800"
+              placeholder={buildingCategory !== 'Hunian Masyarakat' ? "Ketik 0 jika bukan hunian, atau 16 digit NIK" : "Contoh: 5316011504780001"}
+              className="w-full px-3 py-2 rounded-xl border border-slate-200 font-mono text-slate-800 text-xs bg-white"
             />
+            {buildingCategory !== 'Hunian Masyarakat' ? (
+              <p className="text-[10px] text-amber-800 mt-1 font-medium">
+                💡 Bangunan non-hunian: NIK dinolkan (cukup isi <strong>"0"</strong>).
+              </p>
+            ) : (
+              <p className="text-[10px] text-slate-400 mt-1">
+                Wajib 16 digit angka sesuai KTP untuk rumah tinggal warga.
+              </p>
+            )}
           </div>
 
           {/* No KK Pemilik */}
-          <div>
-            <label className="block font-semibold text-slate-700 mb-1 flex items-center justify-between">
-              <span>Nomor Kartu Keluarga (KK)</span>
-              <span className="text-[10px] text-slate-400 font-normal">16 Digit Angka</span>
-            </label>
+          <div className={buildingCategory !== 'Hunian Masyarakat' ? 'p-3 rounded-xl bg-amber-50/70 border border-amber-200/90' : ''}>
+            <div className="flex items-center justify-between mb-1">
+              <label className="font-semibold text-slate-700 text-xs">
+                Nomor Kartu Keluarga (KK)
+              </label>
+              <div className="flex items-center gap-1.5">
+                {buildingCategory !== 'Hunian Masyarakat' ? (
+                  <button
+                    type="button"
+                    onClick={() => {
+                      setNoKkPemilik('0');
+                      showToast('No KK dinolkan ("0")', 'info');
+                    }}
+                    className="inline-flex items-center gap-1 px-2.5 py-0.5 text-[10px] font-bold text-amber-900 bg-amber-200/80 hover:bg-amber-300 border border-amber-400 rounded-md cursor-pointer transition-colors"
+                  >
+                    <span>Nol-kan (0)</span>
+                  </button>
+                ) : (
+                  <span className="text-[10px] text-slate-400 font-normal">16 Digit Angka</span>
+                )}
+              </div>
+            </div>
             <input
               type="text"
               maxLength={16}
-              value={noKkPemilik}
+              value={noKkPemilik || ''}
               onChange={(e) => setNoKkPemilik(e.target.value.replace(/\D/g, ''))}
-              placeholder="Contoh: 5316012301050012"
-              className="w-full px-3 py-2 rounded-xl border border-slate-200 font-mono text-slate-800"
+              placeholder={buildingCategory !== 'Hunian Masyarakat' ? "Ketik 0 jika bukan hunian, atau 16 digit KK" : "Contoh: 5316012301050012"}
+              className="w-full px-3 py-2 rounded-xl border border-slate-200 font-mono text-slate-800 text-xs bg-white"
             />
+            {buildingCategory !== 'Hunian Masyarakat' && (
+              <p className="text-[10px] text-amber-800 mt-1 font-medium">
+                💡 Bangunan non-hunian: No KK dinolkan (cukup isi <strong>"0"</strong>).
+              </p>
+            )}
           </div>
 
           {/* Dinas Teknis */}
@@ -1557,7 +1719,7 @@ export const AssessmentForm: React.FC = () => {
             <label className="block font-semibold text-slate-700 mb-1">Dinas Pembina Teknis</label>
             <input
               type="text"
-              value={responsibleDepartment}
+              value={responsibleDepartment || ''}
               onChange={(e) => setResponsibleDepartment(e.target.value)}
               className="w-full px-3 py-2 rounded-xl border border-slate-200"
             />
@@ -1567,7 +1729,7 @@ export const AssessmentForm: React.FC = () => {
           <div>
             <label className="block font-semibold text-slate-700 mb-1">Kelas Bangunan Gedung</label>
             <select
-              value={buildingClass}
+              value={buildingClass || 'Bangunan Tidak Sederhana'}
               onChange={(e) => setBuildingClass(e.target.value as BuildingClass)}
               className="w-full px-3 py-2 rounded-xl border border-slate-200 bg-white"
             >
@@ -1583,7 +1745,7 @@ export const AssessmentForm: React.FC = () => {
             <input
               type="number"
               min={1}
-              value={totalFloorAreaM2}
+              value={totalFloorAreaM2 ?? 150}
               onChange={(e) => setTotalFloorAreaM2(Number(e.target.value))}
               className="w-full px-3 py-2 rounded-xl border border-slate-200 font-bold text-slate-900"
             />
@@ -1595,7 +1757,7 @@ export const AssessmentForm: React.FC = () => {
               type="number"
               min={1}
               max={50}
-              value={numberOfFloors}
+              value={numberOfFloors ?? 1}
               onChange={(e) => setNumberOfFloors(Number(e.target.value))}
               className="w-full px-3 py-2 rounded-xl border border-slate-200 font-bold text-slate-900"
             />
@@ -1607,7 +1769,7 @@ export const AssessmentForm: React.FC = () => {
               type="number"
               min={1950}
               max={2030}
-              value={yearBuilt}
+              value={yearBuilt ?? 2018}
               onChange={(e) => setYearBuilt(Number(e.target.value))}
               className="w-full px-3 py-2 rounded-xl border border-slate-200"
             />
@@ -1649,7 +1811,7 @@ export const AssessmentForm: React.FC = () => {
               </button>
             </div>
             <select
-              value={kecamatanId}
+              value={kecamatanId || ''}
               onChange={(e) => {
                 setKecamatanId(e.target.value);
               }}
@@ -1692,7 +1854,7 @@ export const AssessmentForm: React.FC = () => {
               </div>
             </div>
             <select
-              value={desaId}
+              value={desaId || ''}
               onChange={(e) => setDesaId(e.target.value)}
               required
               className="w-full px-3 py-2 rounded-xl border border-slate-200 bg-white font-semibold text-slate-800"
@@ -1723,7 +1885,7 @@ export const AssessmentForm: React.FC = () => {
             <label className="block font-semibold text-slate-700 mb-1">Alamat Lengkap / Patokan</label>
             <input
               type="text"
-              value={detailedAddress}
+              value={detailedAddress || ''}
               onChange={(e) => setDetailedAddress(e.target.value)}
               placeholder="Contoh: Jl. Trans Flores Km. 4 Kompleks Pasar"
               className="w-full px-3 py-2 rounded-xl border border-slate-200"
@@ -1750,7 +1912,7 @@ export const AssessmentForm: React.FC = () => {
             <div className="flex items-center gap-2 bg-slate-900 text-white px-3 py-1.5 rounded-xl">
               <span className="text-xs text-slate-300">Total:</span>
               <span className="text-sm font-black text-amber-400">
-                {Number(totalDamagePercent ?? 0).toFixed(2)}%
+                {Number(totalDamagePercent ?? 0).toFixed(3)}%
               </span>
               <span
                 className={`text-[10px] font-bold px-2 py-0.5 rounded-full ${
@@ -1779,8 +1941,8 @@ export const AssessmentForm: React.FC = () => {
             </div>
           </div>
 
-          <div className="grid grid-cols-1 md:grid-cols-3 gap-3">
-            <div>
+          <div className="grid grid-cols-1 sm:grid-cols-2 xl:grid-cols-12 gap-3 items-end">
+            <div className="xl:col-span-4 sm:col-span-2">
               <label className="block text-[11px] font-semibold text-slate-600 mb-1">
                 1. Komponen Bangunan Utama
               </label>
@@ -1798,7 +1960,7 @@ export const AssessmentForm: React.FC = () => {
                     }
                   }
                 }}
-                className="w-full px-3 py-2 bg-white border border-slate-300 rounded-xl text-xs font-bold text-slate-900 focus:ring-2 focus:ring-amber-500 cursor-pointer"
+                className="w-full h-10 px-3 bg-white border border-slate-300 rounded-xl text-xs font-bold text-slate-900 focus:ring-2 focus:ring-amber-500 cursor-pointer truncate"
               >
                 {Array.from(new Set(PUPR_MASTER_COMPONENTS.map((c) => c.componentName))).map((compName) => (
                   <option key={compName} value={compName}>
@@ -1808,7 +1970,7 @@ export const AssessmentForm: React.FC = () => {
               </select>
             </div>
 
-            <div>
+            <div className="xl:col-span-4 sm:col-span-2">
               <label className="block text-[11px] font-semibold text-slate-600 mb-1">
                 2. Sub Komponen (Menyesuaikan Otomatis)
               </label>
@@ -1822,56 +1984,74 @@ export const AssessmentForm: React.FC = () => {
                     setCascadeDamageInput(matchedComp.damagePercentInput);
                   }
                 }}
-                className="w-full px-3 py-2 bg-white border border-slate-300 rounded-xl text-xs font-bold text-slate-900 focus:ring-2 focus:ring-amber-500 cursor-pointer"
+                className="w-full h-10 px-3 bg-white border border-slate-300 rounded-xl text-xs font-bold text-slate-900 focus:ring-2 focus:ring-amber-500 cursor-pointer truncate"
               >
                 {PUPR_MASTER_COMPONENTS.filter((c) => c.componentName === cascadeComponent).map((sub) => {
                   const currentCompState = components.find(x => x.id === sub.id);
                   const currentVal = currentCompState ? currentCompState.damagePercentInput : 0;
                   return (
                     <option key={sub.id} value={sub.id}>
-                      {sub.subComponentName} (Bobot: {Number(sub.bobotPercent ?? 0).toFixed(2)}% | Nilai saat ini: {currentVal}%)
+                      {sub.subComponentName} (Bobot: {Number(sub.bobotPercent ?? 0).toFixed(2)}% | Saat ini: {currentVal}%)
                     </option>
                   );
                 })}
               </select>
             </div>
 
-            <div>
+            <div className="xl:col-span-2 sm:col-span-1">
               <label className="block text-[11px] font-semibold text-slate-600 mb-1">
-                3. Tingkat Kerusakan & Terapkan
+                3. Tingkat Kerusakan
               </label>
-              <div className="flex items-center gap-2">
+              <div className="flex items-center gap-1.5">
                 <select
                   value={cascadeDamageInput}
                   onChange={(e) => setCascadeDamageInput(parseFloat(e.target.value) || 0)}
-                  className="flex-1 px-3 py-2 bg-white border border-slate-300 rounded-xl text-xs font-bold text-slate-900 focus:ring-2 focus:ring-amber-500 cursor-pointer"
+                  className="flex-1 min-w-0 h-10 px-2 bg-white border border-slate-300 rounded-xl text-xs font-bold text-slate-900 focus:ring-2 focus:ring-amber-500 cursor-pointer"
                 >
-                  <option value={0}>0% (Baik)</option>
-                  <option value={5}>5% (Sangat Ringan)</option>
-                  <option value={10}>10% (Ringan Sekali)</option>
-                  <option value={15}>15% (Ringan)</option>
-                  <option value={20}>20% (Ringan Sedang)</option>
-                  <option value={25}>25% (Cukup Ringan)</option>
-                  <option value={30}>30% (Sedang)</option>
-                  <option value={40}>40% (Sedang Berat)</option>
-                  <option value={50}>50% (Berat)</option>
-                  <option value={75}>75% (Berat Sekali)</option>
-                  <option value={100}>100% (Total / Runtuh)</option>
+                  <option value={0}>0%</option>
+                  <option value={5}>5%</option>
+                  <option value={10}>10%</option>
+                  <option value={15}>15%</option>
+                  <option value={20}>20%</option>
+                  <option value={25}>25%</option>
+                  <option value={30}>30%</option>
+                  <option value={40}>40%</option>
+                  <option value={50}>50%</option>
+                  <option value={75}>75%</option>
+                  <option value={100}>100%</option>
+                  {![0, 5, 10, 15, 20, 25, 30, 40, 50, 75, 100].includes(cascadeDamageInput) && (
+                    <option value={cascadeDamageInput}>{cascadeDamageInput}%</option>
+                  )}
                 </select>
-                <button
-                  type="button"
-                  onClick={() => {
-                    if (cascadeSubComponentId) {
-                      handleComponentChange(cascadeSubComponentId, cascadeDamageInput);
-                      const targetSub = PUPR_MASTER_COMPONENTS.find(s => s.id === cascadeSubComponentId);
-                      showToast(`Kerusakan pada ${targetSub?.subComponentName || cascadeComponent} berhasil diperbarui!`, 'success');
-                    }
-                  }}
-                  className="px-4 py-2 bg-amber-500 hover:bg-amber-400 text-slate-950 font-bold text-xs rounded-xl shadow-xs transition-all cursor-pointer whitespace-nowrap"
-                >
-                  Terapkan
-                </button>
+                <div className="flex items-center h-10 bg-white border border-slate-300 rounded-xl px-2 focus-within:ring-2 focus-within:ring-amber-500 shrink-0 w-19">
+                  <DecimalDamageInputCell
+                    value={cascadeDamageInput}
+                    onChange={(val) => setCascadeDamageInput(val)}
+                    className="w-full border-0 p-0 shadow-none focus:ring-0 text-xs font-bold text-slate-900 text-center"
+                  />
+                  <span className="text-[11px] text-slate-400 font-bold ml-0.5">%</span>
+                </div>
               </div>
+            </div>
+
+            <div className="xl:col-span-2 sm:col-span-1">
+              <label className="block text-[11px] font-semibold text-slate-600 mb-1">
+                4. Aksi
+              </label>
+              <button
+                type="button"
+                onClick={() => {
+                  if (cascadeSubComponentId) {
+                    handleComponentChange(cascadeSubComponentId, cascadeDamageInput);
+                    const targetSub = PUPR_MASTER_COMPONENTS.find(s => s.id === cascadeSubComponentId);
+                    showToast(`Kerusakan pada ${targetSub?.subComponentName || cascadeComponent} berhasil diperbarui (${cascadeDamageInput}%)!`, 'success');
+                  }
+                }}
+                className="w-full h-10 px-4 bg-amber-500 hover:bg-amber-400 active:bg-amber-600 text-slate-950 font-bold text-xs rounded-xl shadow-xs hover:shadow-md transition-all flex items-center justify-center gap-1.5 cursor-pointer whitespace-nowrap"
+              >
+                <Check className="w-4 h-4 text-slate-950 shrink-0" />
+                <span>Terapkan</span>
+              </button>
             </div>
           </div>
         </div>
@@ -1885,7 +2065,7 @@ export const AssessmentForm: React.FC = () => {
                 <th className="py-2.5 px-3">SUB KOMPONEN BANGUNAN</th>
                 <th className="py-2.5 px-3 text-center w-28">BOBOT (%)</th>
                 <th className="py-2.5 px-3 text-center w-28">MAX (%)</th>
-                <th className="py-2.5 px-3 text-center w-52">INPUT KERUSAKAN (%)</th>
+                <th className="py-2.5 px-3 text-center w-56">INPUT KERUSAKAN (%)</th>
                 <th className="py-2.5 px-3 text-right w-28">NILAI (%)</th>
               </tr>
             </thead>
@@ -1936,24 +2116,21 @@ export const AssessmentForm: React.FC = () => {
                             <option value={50}>50% (Berat)</option>
                             <option value={75}>75% (Berat Sekali)</option>
                             <option value={100}>100% (Total / Runtuh)</option>
+                            {![0, 5, 10, 15, 20, 25, 30, 40, 50, 75, 100].includes(c.damagePercentInput) && (
+                              <option value={c.damagePercentInput}>
+                                {c.damagePercentInput}% (Kustom)
+                              </option>
+                            )}
                           </select>
-                          <input
-                            type="number"
-                            min={0}
-                            max={100}
-                            step={1}
+                          <DecimalDamageInputCell
                             value={c.damagePercentInput}
-                            onChange={(e) =>
-                              handleComponentChange(c.id, parseFloat(e.target.value) || 0)
-                            }
-                            className="w-16 px-1.5 py-1 text-center font-bold rounded-lg border border-slate-300 focus:ring-2 focus:ring-amber-500 focus:border-amber-500 bg-white text-xs"
-                            title="Atau ketik nilai persentase manual"
+                            onChange={(val) => handleComponentChange(c.id, val)}
                           />
                           <span className="text-slate-400 font-semibold">%</span>
                         </div>
                       </td>
                       <td className="py-2.5 px-3 text-right font-bold text-slate-900 font-mono">
-                        {Number(c.calculatedScore ?? 0).toFixed(2)}%
+                        {Number(c.calculatedScore ?? 0).toFixed(3)}%
                       </td>
                     </tr>
                   );
@@ -1968,7 +2145,7 @@ export const AssessmentForm: React.FC = () => {
                 <td></td>
                 <td></td>
                 <td className="py-3 px-3 text-right text-amber-400 font-mono text-sm">
-                  {Number(totalDamagePercent ?? 0).toFixed(2)}%
+                  {Number(totalDamagePercent ?? 0).toFixed(3)}%
                 </td>
               </tr>
             </tfoot>
@@ -2045,7 +2222,7 @@ export const AssessmentForm: React.FC = () => {
             <div className="flex items-center justify-between py-1 border-b border-amber-100">
               <span className="text-slate-600">B. Tingkat (%) Kerusakan:</span>
               <strong className="text-slate-900 font-mono font-bold">
-                {Number(totalDamagePercent ?? 0).toFixed(2)}%
+                {Number(totalDamagePercent ?? 0).toFixed(3)}%
               </strong>
             </div>
 
@@ -2100,7 +2277,7 @@ export const AssessmentForm: React.FC = () => {
             <label className="block font-semibold text-slate-700 mb-1">Kota Tempat Laporan Dibuat</label>
             <input
               type="text"
-              value={cityLocation}
+              value={cityLocation || ''}
               onChange={(e) => setCityLocation(e.target.value)}
               placeholder="Contoh: Mbay, Seba, Kupang"
               className="w-full px-3 py-2 rounded-xl border border-slate-200"
@@ -2111,7 +2288,7 @@ export const AssessmentForm: React.FC = () => {
             <label className="block font-semibold text-slate-700 mb-1">Bulan & Tahun Dokumen</label>
             <input
               type="text"
-              value={reportDateStr}
+              value={reportDateStr || ''}
               onChange={(e) => setReportDateStr(e.target.value)}
               placeholder="Contoh: Agustus 2026"
               className="w-full px-3 py-2 rounded-xl border border-slate-200"
@@ -2122,7 +2299,7 @@ export const AssessmentForm: React.FC = () => {
             <label className="block font-semibold text-slate-700 mb-1">Nama Kepala Dinas PUPR</label>
             <input
               type="text"
-              value={headName}
+              value={headName || ''}
               onChange={(e) => setHeadName(e.target.value)}
               className="w-full px-3 py-2 rounded-xl border border-slate-200 font-semibold"
             />
@@ -2132,7 +2309,7 @@ export const AssessmentForm: React.FC = () => {
             <label className="block font-semibold text-slate-700 mb-1">NIP Kepala Dinas</label>
             <input
               type="text"
-              value={headNip}
+              value={headNip || ''}
               onChange={(e) => setHeadNip(e.target.value)}
               className="w-full px-3 py-2 rounded-xl border border-slate-200 font-mono"
             />
@@ -2384,7 +2561,13 @@ export const AssessmentForm: React.FC = () => {
             buildingTitle={`${buildingName || 'Bangunan Gedung'} (Kec. ${kecamatans.find((k) => k.id === kecamatanId)?.name || 'Kecamatan'})`}
             isEditable={true}
             onDeletePhoto={handleDeletePhoto}
-            onEditPhoto={(p) => setEditingPhoto(p)}
+            onEditPhoto={(p) =>
+              setEditingPhoto({
+                ...p,
+                damageLocation: p.damageLocation || STANDARD_DAMAGE_LOCATIONS[0],
+                caption: p.caption || '',
+              })
+            }
             onSelectPhoto={(idx) => setPreviewPhotoIndex(idx)}
           />
         </div>
@@ -2525,7 +2708,7 @@ export const AssessmentForm: React.FC = () => {
               <label className="block font-semibold text-slate-700 mb-1">Nama Kepala Dinas / Pejabat</label>
               <input
                 type="text"
-                value={headName}
+                value={headName || ''}
                 onChange={(e) => setHeadName(e.target.value)}
                 placeholder="Contoh: Dionisius T. Ndolu, S.T., M.Si."
                 className="w-full px-3 py-2 rounded-xl border border-slate-200 font-medium text-slate-900"
@@ -2535,7 +2718,7 @@ export const AssessmentForm: React.FC = () => {
               <label className="block font-semibold text-slate-700 mb-1">NIP Pejabat</label>
               <input
                 type="text"
-                value={headNip}
+                value={headNip || ''}
                 onChange={(e) => setHeadNip(e.target.value)}
                 placeholder="Contoh: 19740512 200212 1 004"
                 className="w-full px-3 py-2 rounded-xl border border-slate-200 font-mono text-slate-900"
@@ -2545,7 +2728,7 @@ export const AssessmentForm: React.FC = () => {
               <label className="block font-semibold text-slate-700 mb-1">Pangkat / Golongan</label>
               <input
                 type="text"
-                value={headRank}
+                value={headRank || ''}
                 onChange={(e) => setHeadRank(e.target.value)}
                 placeholder="Contoh: Pembina TK I"
                 className="w-full px-3 py-2 rounded-xl border border-slate-200 text-slate-900"
@@ -2555,7 +2738,7 @@ export const AssessmentForm: React.FC = () => {
               <label className="block font-semibold text-slate-700 mb-1">Kota Tempat Pelaporan</label>
               <input
                 type="text"
-                value={cityLocation}
+                value={cityLocation || ''}
                 onChange={(e) => setCityLocation(e.target.value)}
                 placeholder="Contoh: Mbay"
                 className="w-full px-3 py-2 rounded-xl border border-slate-200 text-slate-900"
@@ -2565,7 +2748,7 @@ export const AssessmentForm: React.FC = () => {
               <label className="block font-semibold text-slate-700 mb-1">Bulan & Tahun Dokumen Pelaporan</label>
               <input
                 type="text"
-                value={reportDateStr}
+                value={reportDateStr || ''}
                 onChange={(e) => setReportDateStr(e.target.value)}
                 placeholder="Contoh: September 2026"
                 className="w-full px-3 py-2 rounded-xl border border-slate-200 text-slate-900"
@@ -2995,7 +3178,7 @@ export const AssessmentForm: React.FC = () => {
                   Bagian Kerusakan Bangunan <span className="text-rose-500">*</span>
                 </label>
                 <select
-                  value={editingPhoto.damageLocation}
+                  value={editingPhoto.damageLocation || STANDARD_DAMAGE_LOCATIONS[0]}
                   onChange={(e) =>
                     setEditingPhoto({
                       ...editingPhoto,
@@ -3021,7 +3204,7 @@ export const AssessmentForm: React.FC = () => {
                 </label>
                 <textarea
                   rows={3}
-                  value={editingPhoto.caption}
+                  value={editingPhoto.caption || ''}
                   onChange={(e) =>
                     setEditingPhoto({
                       ...editingPhoto,
@@ -3071,6 +3254,13 @@ export const AssessmentForm: React.FC = () => {
           onClose={() => setPreviewAssessment(null)}
         />
       )}
+
+      {/* PANDUAN PENGINPUTAN LENGKAP STANDAR PUPR */}
+      <AssessmentInputGuideModal
+        isOpen={showInputGuide}
+        onClose={() => setShowInputGuide(false)}
+        onApplySampleData={handleApplySampleData}
+      />
     </>
   );
 };

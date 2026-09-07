@@ -140,19 +140,19 @@ export const DukcapilManagement: React.FC = () => {
   // Open modal for edit
   const handleOpenEdit = (rec: DukcapilRecord) => {
     setEditingId(rec.id);
-    setFormNik(rec.nik);
-    setFormNoKk(rec.noKk);
-    setFormNama(rec.namaLengkap);
-    setFormJk(rec.jenisKelamin);
+    setFormNik(rec.nik || '');
+    setFormNoKk(rec.noKk || '');
+    setFormNama(rec.namaLengkap || '');
+    setFormJk(rec.jenisKelamin || 'L');
     setFormTempatLahir(rec.tempatLahir || '');
     setFormTanggalLahir(rec.tanggalLahir || '');
     setFormPekerjaan(rec.pekerjaan || '');
-    setFormStatusHubungan(rec.statusHubungan);
-    setFormAlamat(rec.alamat);
+    setFormStatusHubungan(rec.statusHubungan || 'Kepala Keluarga');
+    setFormAlamat(rec.alamat || '');
     setFormRt(rec.rt || '01');
     setFormRw(rec.rw || '01');
-    setFormKecamatan(rec.kecamatanName);
-    setFormDesa(rec.desaName);
+    setFormKecamatan(rec.kecamatanName || '');
+    setFormDesa(rec.desaName || '');
     setIsModalOpen(true);
   };
 

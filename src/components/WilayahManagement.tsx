@@ -73,8 +73,8 @@ export const WilayahManagement: React.FC = () => {
   // Open modal for editing Kecamatan
   const handleOpenEditKec = (kec: Kecamatan) => {
     setEditingKec(kec);
-    setKecCode(kec.code);
-    setKecName(kec.name);
+    setKecCode(kec.code || '');
+    setKecName(kec.name || '');
     setKecCapital(kec.capitalCity || '');
     setKecDesc(kec.description || '');
     setIsKecModalOpen(true);
@@ -131,10 +131,10 @@ export const WilayahManagement: React.FC = () => {
   // Open modal for editing Desa
   const handleOpenEditDesa = (desa: Desa) => {
     setEditingDesa(desa);
-    setDesaKecId(desa.kecamatanId);
-    setDesaCode(desa.code);
-    setDesaName(desa.name);
-    setDesaType(desa.type);
+    setDesaKecId(desa.kecamatanId || '');
+    setDesaCode(desa.code || '');
+    setDesaName(desa.name || '');
+    setDesaType(desa.type || 'Desa');
     setDesaIsPemekaran(Boolean(desa.isPemekaran));
     setDesaNotes(desa.notes || '');
     setIsDesaModalOpen(true);

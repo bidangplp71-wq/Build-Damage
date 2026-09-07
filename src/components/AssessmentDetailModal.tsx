@@ -297,7 +297,7 @@ export const AssessmentDetailModal: React.FC<Props> = ({ assessment, onClose }) 
             <div className="space-y-2">
               <div className="flex items-center justify-between text-xs font-bold text-slate-800">
                 <span>Tabel Komponen Bangunan (Standar PUPR)</span>
-                <span>Nilai Tingkat Kerusakan: {safeNumber(assessment.totalDamagePercent).toFixed(2)}%</span>
+                <span>Nilai Tingkat Kerusakan: {safeNumber(assessment.totalDamagePercent).toFixed(3)}%</span>
               </div>
 
               <div className="overflow-x-auto border border-slate-300 rounded-lg">
@@ -344,13 +344,13 @@ export const AssessmentDetailModal: React.FC<Props> = ({ assessment, onClose }) 
                               )}
                             </td>
                             <td className="py-1.5 px-3 border-r border-slate-200 text-center font-mono text-slate-700">
-                              {weight.toFixed(1)}%
+                              {weight.toFixed(2)}%
                             </td>
                             <td className="py-1.5 px-3 border-r border-slate-200 text-center font-mono text-slate-700">
-                              {damagePercent.toFixed(1)}%
+                              {damagePercent % 1 === 0 ? damagePercent.toFixed(0) : damagePercent.toFixed(3)}%
                             </td>
                             <td className="py-1.5 px-3 text-center font-mono font-bold text-slate-950 bg-slate-50/50">
-                              {weightedDamage.toFixed(2)}%
+                              {weightedDamage.toFixed(3)}%
                             </td>
                           </tr>
                         );
@@ -363,7 +363,7 @@ export const AssessmentDetailModal: React.FC<Props> = ({ assessment, onClose }) 
                         Total Tingkat Kerusakan Bangunan:
                       </td>
                       <td className="py-2 px-3 text-center font-mono text-sm bg-amber-100 text-amber-950">
-                        {safeNumber(assessment.totalDamagePercent).toFixed(2)}%
+                        {safeNumber(assessment.totalDamagePercent).toFixed(3)}%
                       </td>
                     </tr>
                   </tfoot>
@@ -390,7 +390,7 @@ export const AssessmentDetailModal: React.FC<Props> = ({ assessment, onClose }) 
                   </div>
                   <div className="flex justify-between">
                     <span className="text-slate-600">Tingkat Kerusakan Total</span>
-                    <span className="font-mono font-semibold">{safeNumber(assessment.totalDamagePercent).toFixed(2)}%</span>
+                    <span className="font-mono font-semibold">{safeNumber(assessment.totalDamagePercent).toFixed(3)}%</span>
                   </div>
                   <div className="flex justify-between">
                     <span className="text-slate-600">Biaya Penanganan / M²</span>

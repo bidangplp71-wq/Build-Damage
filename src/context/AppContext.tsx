@@ -1,4 +1,4 @@
-import React, { createContext, useContext, useState, useEffect } from 'react';
+import React, { createContext, useContext, useState, useEffect, useRef } from 'react';
 import {
   UserAccount,
   UserRole,
@@ -13,7 +13,9 @@ import {
   DukcapilRecord,
   UserActivityLog,
   ActivityActionType,
+  DataNotification,
 } from '../types';
+import { playNotificationChime } from '../utils/sound';
 import {
   INITIAL_KECAMATAN,
   INITIAL_DESA,
@@ -36,7 +38,7 @@ import {
   canViewUserPassword,
 } from '../utils/security';
 import { db } from '../services/firebase';
-import { collection, onSnapshot, doc, setDoc, getDocs } from 'firebase/firestore';
+import { collection, onSnapshot, doc, setDoc, getDocs, getDoc, deleteDoc } from 'firebase/firestore';
 
 interface AppContextType {
   // Current user & Auth
@@ -119,6 +121,15 @@ interface AppContextType {
   toastMessage: { type: 'success' | 'error' | 'info'; text: string } | null;
   showToast: (text: string, type?: 'success' | 'error' | 'info') => void;
   clearToast: () => void;
+
+  // Real-time Incoming Data Notifications
+  notifications: DataNotification[];
+  unreadNotificationCount: number;
+  markNotificationAsRead: (id: string) => void;
+  markAllNotificationsAsRead: () => void;
+  clearNotifications: () => void;
+  latestIncomingData: DataNotification | null;
+  clearLatestIncomingData: () => void;
 }
 
 const AppContext = createContext<AppContextType | undefined>(undefined);
@@ -133,6 +144,7 @@ const STORAGE_KEYS = {
   GOOGLE_SHEET: 'sipandu_pupr_gsheet_v3',
   FIREBASE: 'sipandu_pupr_firebase_v3',
   ACTIVITY_LOGS: 'sipandu_pupr_activity_logs_v1',
+  NOTIFICATIONS: 'sipandu_pupr_notifications_v1',
 };
 
 export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children }) => {
@@ -307,9 +319,52 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
     }
   });
 
+  // Real-time Incoming Data Notifications State
+  const [notifications, setNotifications] = useState<DataNotification[]>(() => {
+    try {
+      const saved = localStorage.getItem(STORAGE_KEYS.NOTIFICATIONS);
+      if (saved) return JSON.parse(saved);
+      return [];
+    } catch {
+      return [];
+    }
+  });
+
+  const [latestIncomingData, setLatestIncomingData] = useState<DataNotification | null>(null);
+
+  const unreadNotificationCount = notifications.filter((n) => !n.isRead).length;
+
+  useEffect(() => {
+    try {
+      localStorage.setItem(STORAGE_KEYS.NOTIFICATIONS, JSON.stringify(notifications.slice(0, 50)));
+    } catch (e) {
+      console.warn('LocalStorage notifications save notice:', e);
+    }
+  }, [notifications]);
+
+  const markNotificationAsRead = (id: string) => {
+    setNotifications((prev) =>
+      prev.map((n) => (n.id === id ? { ...n, isRead: true } : n))
+    );
+  };
+
+  const markAllNotificationsAsRead = () => {
+    setNotifications((prev) => prev.map((n) => ({ ...n, isRead: true })));
+  };
+
+  const clearNotifications = () => {
+    setNotifications([]);
+  };
+
+  const clearLatestIncomingData = () => {
+    setLatestIncomingData(null);
+  };
+
   // Sync to local storage
 
-  const isInitialLoad = React.useRef(true);
+  // Track IDs of assessments deleted in this session to prevent accidental resurrection
+  const deletedAssessmentIds = useRef<Set<string>>(new Set());
+  const isInitialLoad = useRef(true);
   
   // Load from Firebase ONCE on mount
   useEffect(() => {
@@ -335,7 +390,8 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
 
       getDocs(collection(db, 'assessments')).then((snapshot) => {
         if (!snapshot.empty) {
-          setAssessments(snapshot.docs.map((d) => d.data() as BuildingAssessment));
+          const remoteAssessments = snapshot.docs.map((d) => d.data() as BuildingAssessment);
+          setAssessments(remoteAssessments);
         } else {
           INITIAL_ASSESSMENTS.forEach((a) => {
             const cleanA = JSON.parse(JSON.stringify(a));
@@ -344,6 +400,18 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
         }
       }).catch((err) => {
         console.warn('Firebase assessments fetch offline/deferred:', err?.message || err);
+      }),
+
+      getDoc(doc(db, 'system_configs', 'google_sheet')).then((snap) => {
+        if (snap.exists()) {
+          const remoteConfig = snap.data() as GoogleSheetConfig;
+          setGoogleSheetConfig(remoteConfig);
+          try {
+            localStorage.setItem(STORAGE_KEYS.GOOGLE_SHEET, JSON.stringify(remoteConfig));
+          } catch {}
+        }
+      }).catch((err) => {
+        console.warn('Firebase google sheet config fetch deferred:', err?.message || err);
       }),
 
       getDocs(collection(db, 'activity_logs')).then((snapshot) => {
@@ -361,6 +429,168 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
         isInitialLoad.current = false;
       }, 500);
     });
+  }, []);
+
+  // Real-time listener for incoming building assessments and deletions from Firebase Firestore
+  useEffect(() => {
+    if (!db) return;
+
+    const knownIds = new Set<string>();
+    assessments.forEach((a) => knownIds.add(a.id));
+    let initialSnapshotSettled = false;
+
+    const unsubscribe = onSnapshot(
+      collection(db, 'assessments'),
+      (snapshot) => {
+        if (!initialSnapshotSettled) {
+          const currentRemoteDocs = snapshot.docs.map((d) => d.data() as BuildingAssessment);
+          const currentRemoteIds = new Set(snapshot.docs.map((d) => d.id));
+          currentRemoteIds.forEach((id) => knownIds.add(id));
+          initialSnapshotSettled = true;
+
+          // If there are remote documents in Firestore, purge any local items deleted remotely
+          if (snapshot.docs.length > 0) {
+            setAssessments((prev) => {
+              const filtered = prev.filter((a) => currentRemoteIds.has(a.id));
+              const localIds = new Set(filtered.map((a) => a.id));
+              const additions = currentRemoteDocs.filter((r) => !localIds.has(r.id));
+              return [...additions, ...filtered];
+            });
+          }
+          return;
+        }
+
+        snapshot.docChanges().forEach((change) => {
+          if (change.type === 'removed') {
+            const removedId = change.doc.id;
+            knownIds.delete(removedId);
+            deletedAssessmentIds.current.add(removedId);
+            setAssessments((prev) => prev.filter((a) => a.id !== removedId));
+            try {
+              const saved = localStorage.getItem(STORAGE_KEYS.ASSESSMENTS);
+              if (saved) {
+                const parsed = JSON.parse(saved);
+                if (Array.isArray(parsed)) {
+                  localStorage.setItem(
+                    STORAGE_KEYS.ASSESSMENTS,
+                    JSON.stringify(parsed.filter((x: any) => x.id !== removedId))
+                  );
+                }
+              }
+            } catch {}
+          } else if (change.type === 'modified') {
+            const updatedDoc = change.doc.data() as BuildingAssessment;
+            if (updatedDoc && updatedDoc.id) {
+              setAssessments((prev) => prev.map((a) => (a.id === updatedDoc.id ? updatedDoc : a)));
+            }
+          } else if (change.type === 'added') {
+            const newDoc = change.doc.data() as BuildingAssessment;
+            if (newDoc && newDoc.id && !knownIds.has(newDoc.id) && !deletedAssessmentIds.current.has(newDoc.id)) {
+              knownIds.add(newDoc.id);
+
+              const newNotif: DataNotification = {
+                id: `notif_${Date.now()}_${Math.random().toString(36).substring(2, 6)}`,
+                title: 'Data Masuk: Penilaian Gedung Baru',
+                message: `Data survei "${newDoc.buildingName}" (${newDoc.kecamatanName || 'Kecamatan'}) baru saja masuk ke sistem.`,
+                buildingName: newDoc.buildingName,
+                kecamatan: newDoc.kecamatanName,
+                desa: newDoc.desaName,
+                damageClassification: newDoc.damageClassification,
+                totalDamagePercent: newDoc.totalDamagePercent,
+                rehabCost: newDoc.roundedRehabCost,
+                assessmentId: newDoc.id,
+                timestamp: new Date().toISOString(),
+                isRead: false,
+                surveyorName: newDoc.createdByName || 'Surveyor Lapangan',
+              };
+
+              setNotifications((prev) => [newNotif, ...prev]);
+              setLatestIncomingData(newNotif);
+              playNotificationChime();
+              showToast(
+                `🔔 Data Masuk: ${newDoc.buildingName} - ${newDoc.damageClassification || 'Tercatat'}`,
+                'info'
+              );
+
+              setAssessments((prev) => {
+                if (prev.some((a) => a.id === newDoc.id)) return prev;
+                return [newDoc, ...prev];
+              });
+            }
+          }
+        });
+      },
+      (error) => {
+        console.warn('Firestore real-time assessment listener deferred:', error);
+      }
+    );
+
+    return () => unsubscribe();
+  }, [db]);
+
+  // Real-time listener for shared Google Sheet configuration across all roles & devices
+  useEffect(() => {
+    if (!db) return;
+    const unsubscribe = onSnapshot(
+      doc(db, 'system_configs', 'google_sheet'),
+      (snap) => {
+        if (snap.exists()) {
+          const remoteConfig = snap.data() as GoogleSheetConfig;
+          setGoogleSheetConfig(remoteConfig);
+          try {
+            localStorage.setItem(STORAGE_KEYS.GOOGLE_SHEET, JSON.stringify(remoteConfig));
+          } catch {}
+        }
+      },
+      (error) => {
+        console.warn('Firestore google_sheet real-time listener deferred:', error);
+      }
+    );
+    return () => unsubscribe();
+  }, [db]);
+
+  // Instant Cross-Tab Synchronization (same browser across tabs and role switches)
+  useEffect(() => {
+    let channel: BroadcastChannel | null = null;
+    try {
+      if (typeof BroadcastChannel !== 'undefined') {
+        channel = new BroadcastChannel('sipandu_pupr_sync_channel');
+        channel.onmessage = (event) => {
+          const { type, payload } = event.data || {};
+          if (type === 'DELETE_ASSESSMENT' && payload?.id) {
+            deletedAssessmentIds.current.add(payload.id);
+            setAssessments((prev) => prev.filter((a) => a.id !== payload.id));
+          } else if (type === 'UPDATE_GOOGLE_SHEET' && payload?.config) {
+            setGoogleSheetConfig(payload.config);
+          }
+        };
+      }
+    } catch {}
+
+    const handleStorageChange = (e: StorageEvent) => {
+      if (e.key === STORAGE_KEYS.ASSESSMENTS && e.newValue) {
+        try {
+          const parsed = JSON.parse(e.newValue);
+          if (Array.isArray(parsed)) {
+            setAssessments(parsed);
+          }
+        } catch {}
+      } else if (e.key === STORAGE_KEYS.GOOGLE_SHEET && e.newValue) {
+        try {
+          const parsed = JSON.parse(e.newValue);
+          if (parsed) {
+            setGoogleSheetConfig(parsed);
+          }
+        } catch {}
+      }
+    };
+
+    window.addEventListener('storage', handleStorageChange);
+
+    return () => {
+      window.removeEventListener('storage', handleStorageChange);
+      if (channel) channel.close();
+    };
   }, []);
 
   useEffect(() => {
@@ -407,6 +637,7 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
 
     if (db && !isInitialLoad.current) {
       assessments.forEach((a) => {
+        if (deletedAssessmentIds.current.has(a.id)) return;
         // Strip undefined fields for Firebase
         const cleanA = JSON.parse(JSON.stringify(a));
         setDoc(doc(db, 'assessments', cleanA.id), cleanA).catch(() => {});
@@ -939,6 +1170,27 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
 
     setAssessments((prev) => [assessmentToSave, ...prev]);
 
+    // Real-time notification when new building data enters the system
+    const newNotif: DataNotification = {
+      id: `notif_${Date.now()}_${Math.random().toString(36).substring(2, 6)}`,
+      title: 'Data Masuk: Penilaian Gedung Baru',
+      message: `Penilaian gedung "${data.buildingName}" (${data.kecamatanName || 'Kecamatan'}) berhasil dicatat ke sistem.`,
+      buildingName: data.buildingName,
+      kecamatan: data.kecamatanName,
+      desa: data.desaName,
+      damageClassification: data.damageClassification,
+      totalDamagePercent: data.totalDamagePercent,
+      rehabCost: data.roundedRehabCost,
+      assessmentId: data.id,
+      timestamp: new Date().toISOString(),
+      isRead: false,
+      surveyorName: data.createdByName || currentUser.name,
+    };
+
+    setNotifications((prev) => [newNotif, ...prev]);
+    setLatestIncomingData(newNotif);
+    playNotificationChime();
+
     logUserActivity(
       'CREATE_ASSESSMENT',
       'Penilaian Kerusakan',
@@ -1041,11 +1293,29 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
       );
     }
 
-    if (db) { import('firebase/firestore').then(({ deleteDoc, doc }) => deleteDoc(doc(db, 'assessments', id))).catch(() => {}); }
-    setAssessments((prev) => prev.filter((a) => a.id !== id));
+    deletedAssessmentIds.current.add(id);
+
+    if (db) {
+      deleteDoc(doc(db, 'assessments', id)).catch((err) => {
+        console.warn('Firebase assessment deletion error:', err);
+      });
+    }
+
+    const updated = assessments.filter((a) => a.id !== id);
+    setAssessments(updated);
+
+    try {
+      localStorage.setItem(STORAGE_KEYS.ASSESSMENTS, JSON.stringify(updated));
+      if (typeof BroadcastChannel !== 'undefined') {
+        const ch = new BroadcastChannel('sipandu_pupr_sync_channel');
+        ch.postMessage({ type: 'DELETE_ASSESSMENT', payload: { id } });
+        ch.close();
+      }
+    } catch {}
+
     return {
       success: true,
-      message: 'Data penilaian gedung berhasil dihapus.',
+      message: 'Data penilaian gedung berhasil dihapus permanen di semua akun & perangkat.',
     };
   };
 
@@ -1360,7 +1630,23 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
   };
 
   const updateGoogleSheetConfig = (config: Partial<GoogleSheetConfig>) => {
-    setGoogleSheetConfig((prev) => ({ ...prev, ...config }));
+    setGoogleSheetConfig((prev) => {
+      const updated = { ...prev, ...config };
+      if (db) {
+        setDoc(doc(db, 'system_configs', 'google_sheet'), JSON.parse(JSON.stringify(updated)), { merge: true }).catch(
+          (err) => console.warn('Firebase google_sheet config save deferred:', err)
+        );
+      }
+      try {
+        localStorage.setItem(STORAGE_KEYS.GOOGLE_SHEET, JSON.stringify(updated));
+        if (typeof BroadcastChannel !== 'undefined') {
+          const ch = new BroadcastChannel('sipandu_pupr_sync_channel');
+          ch.postMessage({ type: 'UPDATE_GOOGLE_SHEET', payload: { config: updated } });
+          ch.close();
+        }
+      } catch {}
+      return updated;
+    });
   };
 
   const updateFirebaseShieldConfig = (config: Partial<FirebaseShieldConfig>) => {
@@ -1435,6 +1721,14 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
         toastMessage,
         showToast,
         clearToast,
+
+        notifications,
+        unreadNotificationCount,
+        markNotificationAsRead,
+        markAllNotificationsAsRead,
+        clearNotifications,
+        latestIncomingData,
+        clearLatestIncomingData,
       }}
     >
       {children}

@@ -59,7 +59,7 @@ export const Navigation: React.FC<NavigationProps> = ({ mobileOpen, onCloseMobil
   const getTabsForRole = () => {
     switch (currentUser.role) {
       case 'admin_user':
-        // Surveyor: Focused exclusively on Form Input & Own Survey Entries
+        // Surveyor: Focused on Form Input, Own Survey Entries, and Google Sheet sync
         return [
           {
             id: 'input_baru',
@@ -77,10 +77,17 @@ export const Navigation: React.FC<NavigationProps> = ({ mobileOpen, onCloseMobil
             badge: myAssessmentsCount || assessments.length,
             badgeLabel: 'gedung',
           },
+          {
+            id: 'google_sheet',
+            label: 'Buka & Cek Google Sheet',
+            desc: 'Lihat data spreadsheet online',
+            icon: FileSpreadsheet,
+            badge: null,
+          },
         ];
 
       case 'admin_verifikator':
-        // Verifikator: Focused on Technical Verification & Audit
+        // Verifikator: Focused on Technical Verification, Audit, and Google Sheet
         return [
           {
             id: 'penilaian',
@@ -98,10 +105,17 @@ export const Navigation: React.FC<NavigationProps> = ({ mobileOpen, onCloseMobil
             icon: LayoutDashboard,
             badge: null,
           },
+          {
+            id: 'google_sheet',
+            label: 'Buka & Cek Google Sheet',
+            desc: 'Rekapitulasi spreadsheet survei',
+            icon: FileSpreadsheet,
+            badge: null,
+          },
         ];
 
       case 'admin_publik':
-        // Publik: Focused on Public Dashboard and Lookup
+        // Publik: Focused on Public Dashboard, Lookup, and Google Sheet
         return [
           {
             id: 'dashboard',
@@ -117,6 +131,13 @@ export const Navigation: React.FC<NavigationProps> = ({ mobileOpen, onCloseMobil
             icon: Search,
             badge: assessments.length,
             badgeLabel: 'data',
+          },
+          {
+            id: 'google_sheet',
+            label: 'Google Sheet Publik',
+            desc: 'Lihat lembar data online',
+            icon: FileSpreadsheet,
+            badge: null,
           },
         ];
 

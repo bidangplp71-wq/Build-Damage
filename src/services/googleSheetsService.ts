@@ -36,6 +36,17 @@ export function extractSpreadsheetId(url?: string): string | null {
 }
 
 /**
+ * Checks if the Google Spreadsheet URL is configured and not the dummy/example placeholder.
+ */
+export function isConfiguredSheetUrl(url?: string): boolean {
+  if (!url || typeof url !== 'string') return false;
+  const trimmed = url.trim();
+  if (!trimmed.startsWith('http')) return false;
+  if (trimmed.includes('ContohSheetGedungPUPR') || trimmed.includes('example.com')) return false;
+  return trimmed.includes('docs.google.com/spreadsheets');
+}
+
+/**
  * Extracts Google Drive Folder ID from various URL formats or returns the raw ID
  * Supports:
  * - https://drive.google.com/drive/folders/1BxiMVs0XRA5nFM...

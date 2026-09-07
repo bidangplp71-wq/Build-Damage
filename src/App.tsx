@@ -15,7 +15,7 @@ import { GoogleSheetIntegration } from './components/GoogleSheetIntegration';
 import { FirebaseProtection } from './components/FirebaseProtection';
 import { UserActivityLogView } from './components/UserActivityLogView';
 import { SessionLockScreen } from './components/SessionLockScreen';
-import { CheckCircle2, AlertCircle, Info, X, ShieldAlert } from 'lucide-react';
+import { CheckCircle2, AlertCircle, Info, X, ShieldAlert, BellRing, Building2, ArrowRight } from 'lucide-react';
 
 const MainLayout: React.FC = () => {
   const {
@@ -27,9 +27,21 @@ const MainLayout: React.FC = () => {
     setSelectedAssessmentForDetail,
     toastMessage,
     clearToast,
+    latestIncomingData,
+    clearLatestIncomingData,
+    assessments,
   } = useApp();
 
   const [mobileNavOpen, setMobileNavOpen] = useState(false);
+
+  // Auto-dismiss latest incoming data banner after 8 seconds
+  useEffect(() => {
+    if (!latestIncomingData) return;
+    const timer = setTimeout(() => {
+      clearLatestIncomingData();
+    }, 8000);
+    return () => clearTimeout(timer);
+  }, [latestIncomingData, clearLatestIncomingData]);
 
   // Tab guard: Ensure user cannot access tabs outside their role
   const roleConfig = ROLE_NAV_CONFIGS[currentUser.role];
@@ -96,6 +108,73 @@ const MainLayout: React.FC = () => {
           assessment={selectedAssessmentForDetail}
           onClose={() => setSelectedAssessmentForDetail(null)}
         />
+      )}
+
+      {/* Real-time Incoming Data Notification Banner */}
+      {latestIncomingData && (
+        <aside aria-label="Notifikasi Data Masuk Real-Time" className="fixed top-18 right-4 sm:right-6 z-50 max-w-sm sm:max-w-md w-full animate-in slide-in-from-top-4 duration-300 pointer-events-auto">
+          <div className="p-4 rounded-2xl bg-slate-900/95 text-white border border-amber-500/40 shadow-2xl backdrop-blur-md">
+            <div className="flex items-start justify-between gap-3">
+              <div className="flex items-start gap-3 min-w-0">
+                <div className="p-2.5 rounded-xl bg-amber-500/20 text-amber-400 shrink-0 mt-0.5">
+                  <BellRing className="w-5 h-5 animate-pulse" />
+                </div>
+                <div className="min-w-0">
+                  <div className="flex items-center gap-2">
+                    <span className="text-[11px] font-extrabold text-amber-400 uppercase tracking-wider">
+                      Data Masuk Baru
+                    </span>
+                    <span className="text-[10px] text-slate-400">
+                      Baru saja
+                    </span>
+                  </div>
+                  <h4 className="text-sm font-bold text-white mt-0.5 leading-snug truncate">
+                    {latestIncomingData.buildingName}
+                  </h4>
+                  <p className="text-xs text-slate-300 mt-1 truncate">
+                    {latestIncomingData.kecamatan ? `Kec. ${latestIncomingData.kecamatan}` : ''}
+                    {latestIncomingData.desa ? `, Desa ${latestIncomingData.desa}` : ''}
+                  </p>
+                  <div className="flex items-center gap-2 mt-1">
+                    {latestIncomingData.damageClassification && (
+                      <span className="text-[10px] font-semibold px-2 py-0.5 rounded bg-amber-500/20 text-amber-300 border border-amber-500/30">
+                        {latestIncomingData.damageClassification}
+                      </span>
+                    )}
+                    {latestIncomingData.surveyorName && (
+                      <span className="text-[10px] text-slate-400 truncate">
+                        Oleh: {latestIncomingData.surveyorName}
+                      </span>
+                    )}
+                  </div>
+                </div>
+              </div>
+              <button
+                onClick={clearLatestIncomingData}
+                className="p-1 rounded-lg text-slate-400 hover:text-white hover:bg-slate-800 transition-colors shrink-0 cursor-pointer"
+                title="Tutup Notifikasi"
+              >
+                <X className="w-4 h-4" />
+              </button>
+            </div>
+            <div className="mt-3 pt-2.5 border-t border-slate-800/80 flex items-center justify-between">
+              <span className="text-[11px] text-slate-400">Tersinkronisasi otomatis</span>
+              <button
+                onClick={() => {
+                  const targetAss = assessments.find((a) => a.id === latestIncomingData.assessmentId);
+                  if (targetAss) {
+                    setSelectedAssessmentForDetail(targetAss);
+                  }
+                  clearLatestIncomingData();
+                }}
+                className="px-3 py-1 bg-amber-500 hover:bg-amber-400 text-slate-950 text-xs font-bold rounded-lg transition-colors flex items-center gap-1 cursor-pointer"
+              >
+                <span>Buka Detail</span>
+                <ArrowRight className="w-3.5 h-3.5" />
+              </button>
+            </div>
+          </div>
+        </aside>
       )}
 
       {/* Global Toast Notification */}

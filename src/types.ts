@@ -108,21 +108,21 @@ export const ROLE_NAV_CONFIGS: Record<UserRole, RoleNavConfig> = {
   },
   admin_verifikator: {
     defaultTab: 'penilaian',
-    allowedTabs: ['penilaian', 'dashboard'],
+    allowedTabs: ['penilaian', 'dashboard', 'google_sheet', 'googlesheets'],
     roleTitle: 'Tim Ahli Verifikator (TABG PUPR)',
     roleSubtitle: 'Fokus Khusus: Validasi Teknis, Audit Foto & Persetujuan Survei',
     badgeLabel: 'Mode Verifikator TABG',
   },
   admin_user: {
     defaultTab: 'input_baru',
-    allowedTabs: ['input_baru', 'tambah', 'penilaian'],
+    allowedTabs: ['input_baru', 'tambah', 'penilaian', 'google_sheet', 'googlesheets'],
     roleTitle: 'Petugas Surveyor Lapangan PUPR',
     roleSubtitle: 'Fokus Khusus: Pengisian Formulir Penilaian Cepat Kerusakan',
     badgeLabel: 'Mode Surveyor Lapangan',
   },
   admin_publik: {
     defaultTab: 'dashboard',
-    allowedTabs: ['dashboard', 'penilaian'],
+    allowedTabs: ['dashboard', 'penilaian', 'google_sheet', 'googlesheets'],
     roleTitle: 'Portal Informasi Publik',
     roleSubtitle: 'Fokus Khusus: Dashboard Ringkasan & Pencarian Data Publik',
     badgeLabel: 'Mode Publik (Read-Only)',
@@ -466,7 +466,7 @@ export interface GoogleSheetConfig {
   driveFolderId?: string; // ID / URL folder induk Google Drive untuk arsip foto
   driveFolderUrl?: string; // Tautan langsung ke folder induk Google Drive
   lastTestedAt?: string;
-  lastTestStatus?: 'success' | 'error';
+  lastTestStatus?: 'success' | 'error' | 'idle';
   lastTestMessage?: string;
 }
 
@@ -533,6 +533,22 @@ export interface UserActivityLog {
   timestamp: string;
   ipAddress?: string;
   deviceInfo?: string;
+}
+
+export interface DataNotification {
+  id: string;
+  title: string;
+  message: string;
+  buildingName: string;
+  kecamatan?: string;
+  desa?: string;
+  damageClassification?: string;
+  totalDamagePercent?: number;
+  rehabCost?: number;
+  assessmentId: string;
+  timestamp: string;
+  isRead: boolean;
+  surveyorName?: string;
 }
 
 

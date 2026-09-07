@@ -1,4 +1,4 @@
-import React, { useState } from 'react';
+import React, { useState, useEffect } from 'react';
 import { useApp } from '../context/AppContext';
 import {
   getGoogleAppsScriptTemplate,
@@ -48,6 +48,17 @@ export const GoogleSheetIntegration: React.FC = () => {
   const [includeMasterSummary, setIncludeMasterSummary] = useState(googleSheetConfig.includeMasterSummarySheet !== false);
   const [savePhotosToDrive, setSavePhotosToDrive] = useState(googleSheetConfig.savePhotosToDrive !== false);
   const [driveFolderIdInput, setDriveFolderIdInput] = useState(googleSheetConfig.driveFolderId || '');
+
+  // Keep form inputs synchronized when googleSheetConfig updates from realtime database
+  useEffect(() => {
+    setSpreadsheetUrlInput(googleSheetConfig.spreadsheetUrl || '');
+    setWebhookUrlInput(googleSheetConfig.webhookUrl || '');
+    setSheetNameInput(googleSheetConfig.sheetName || 'REKAP_SEMUA_KECAMATAN');
+    setSplitByKecamatan(googleSheetConfig.splitByKecamatan !== false);
+    setIncludeMasterSummary(googleSheetConfig.includeMasterSummarySheet !== false);
+    setSavePhotosToDrive(googleSheetConfig.savePhotosToDrive !== false);
+    setDriveFolderIdInput(googleSheetConfig.driveFolderId || '');
+  }, [googleSheetConfig]);
 
   const [isTesting, setIsTesting] = useState(false);
   const [isTestingDrive, setIsTestingDrive] = useState(false);
@@ -357,7 +368,7 @@ export const GoogleSheetIntegration: React.FC = () => {
             <div className="relative">
               <input
                 type="url"
-                value={spreadsheetUrlInput}
+                value={spreadsheetUrlInput || ''}
                 onChange={(e) => setSpreadsheetUrlInput(e.target.value)}
                 placeholder="https://docs.google.com/spreadsheets/d/1BxiMVs0XRA5nFM.../edit"
                 className="w-full px-3 py-2 rounded-xl border border-slate-200 font-mono text-slate-900 bg-slate-50 focus:bg-white focus:outline-hidden focus:ring-2 focus:ring-emerald-500"
@@ -375,7 +386,7 @@ export const GoogleSheetIntegration: React.FC = () => {
             </label>
             <input
               type="url"
-              value={webhookUrlInput}
+              value={webhookUrlInput || ''}
               onChange={(e) => setWebhookUrlInput(e.target.value)}
               placeholder="https://script.google.com/macros/s/AKfycb.../exec"
               required
@@ -456,7 +467,7 @@ export const GoogleSheetIntegration: React.FC = () => {
               <label className="block font-semibold text-slate-700 mb-1">Nama Tab Sheet Master Gabungan</label>
               <input
                 type="text"
-                value={sheetNameInput}
+                value={sheetNameInput || ''}
                 onChange={(e) => setSheetNameInput(e.target.value)}
                 placeholder="REKAP_SEMUA_KECAMATAN"
                 required
@@ -512,7 +523,7 @@ export const GoogleSheetIntegration: React.FC = () => {
                 </label>
                 <input
                   type="text"
-                  value={driveFolderIdInput}
+                  value={driveFolderIdInput || ''}
                   onChange={(e) => setDriveFolderIdInput(e.target.value)}
                   placeholder="https://drive.google.com/drive/folders/... atau ID Folder"
                   className="w-full px-3 py-2 rounded-xl border border-slate-200 font-mono text-slate-900 bg-white focus:outline-hidden focus:ring-2 focus:ring-indigo-500"
