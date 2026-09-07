@@ -37,7 +37,7 @@ import {
   canManageUserPassword,
   canViewUserPassword,
 } from '../utils/security';
-import { db } from '../services/firebase';
+import { db, isQuotaError, FIRESTORE_DATABASE_CONSOLE_URL } from '../services/firebase';
 import { collection, onSnapshot, doc, setDoc, getDocs, getDoc, deleteDoc } from 'firebase/firestore';
 import { savePhotosLocally } from '../utils/photoStorage';
 import { hydrateAssessmentPhotos } from '../utils/imageCompressor';
@@ -98,6 +98,8 @@ interface AppContextType {
   updateGoogleSheetConfig: (config: Partial<GoogleSheetConfig>) => void;
   firebaseShieldConfig: FirebaseShieldConfig;
   updateFirebaseShieldConfig: (config: Partial<FirebaseShieldConfig>) => void;
+  isFirestoreQuotaExceeded: boolean;
+  firestoreConsoleUrl: string;
 
   // User Access & Activity Audit Trail Analytics
   activityLogs: UserActivityLog[];
@@ -274,6 +276,9 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
     }
   });
 
+  // Track Firebase Firestore Quota Exhaustion (Spark Free Tier limit protection)
+  const [isFirestoreQuotaExceeded, setIsFirestoreQuotaExceeded] = useState<boolean>(false);
+
   // UI state initialized based on user role
   const [activeTab, setActiveTab] = useState<string>('dashboard');
   const [selectedAssessmentForDetail, setSelectedAssessmentForDetail] = useState<BuildingAssessment | null>(null);
@@ -368,7 +373,7 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
   const deletedAssessmentIds = useRef<Set<string>>(new Set());
   const isInitialLoad = useRef(true);
   
-  // Load from Firebase ONCE on mount
+  // Load from Firebase ONCE on mount with Quota Protection
   useEffect(() => {
     if (!db) {
       isInitialLoad.current = false;
@@ -379,14 +384,11 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
       getDocs(collection(db, 'users')).then((snapshot) => {
         if (!snapshot.empty) {
           setUsers(snapshot.docs.map((d) => d.data() as UserAccount));
-        } else {
-          // If empty, seed with INITIAL_USERS
-          INITIAL_USERS.forEach((u) => {
-            const cleanU = JSON.parse(JSON.stringify(u));
-            setDoc(doc(db, 'users', cleanU.id), cleanU).catch(() => {});
-          });
         }
       }).catch((err) => {
+        if (isQuotaError(err)) {
+          setIsFirestoreQuotaExceeded(true);
+        }
         console.warn('Firebase users fetch offline/deferred:', err?.message || err);
       }),
 
@@ -395,13 +397,11 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
           const remoteAssessments = snapshot.docs.map((d) => d.data() as BuildingAssessment);
           const hydrated = await Promise.all(remoteAssessments.map(hydrateAssessmentPhotos));
           setAssessments(hydrated);
-        } else {
-          INITIAL_ASSESSMENTS.forEach((a) => {
-            const cleanA = JSON.parse(JSON.stringify(a));
-            setDoc(doc(db, 'assessments', cleanA.id), cleanA).catch(() => {});
-          });
         }
       }).catch((err) => {
+        if (isQuotaError(err)) {
+          setIsFirestoreQuotaExceeded(true);
+        }
         console.warn('Firebase assessments fetch offline/deferred:', err?.message || err);
       }),
 
@@ -414,6 +414,9 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
           } catch {}
         }
       }).catch((err) => {
+        if (isQuotaError(err)) {
+          setIsFirestoreQuotaExceeded(true);
+        }
         console.warn('Firebase google sheet config fetch deferred:', err?.message || err);
       }),
 
@@ -424,6 +427,9 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
           setActivityLogs(remoteLogs);
         }
       }).catch((err) => {
+        if (isQuotaError(err)) {
+          setIsFirestoreQuotaExceeded(true);
+        }
         console.warn('Firebase activity logs fetch offline/deferred:', err?.message || err);
       }),
     ]).finally(() => {
@@ -524,7 +530,10 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
         });
       },
       (error) => {
-        console.warn('Firestore real-time assessment listener deferred:', error);
+        if (isQuotaError(error)) {
+          setIsFirestoreQuotaExceeded(true);
+        }
+        console.warn('Firestore real-time assessment listener deferred:', error?.message || error);
       }
     );
 
@@ -546,7 +555,10 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
         }
       },
       (error) => {
-        console.warn('Firestore google_sheet real-time listener deferred:', error);
+        if (isQuotaError(error)) {
+          setIsFirestoreQuotaExceeded(true);
+        }
+        console.warn('Firestore google_sheet real-time listener deferred:', error?.message || error);
       }
     );
     return () => unsubscribe();
@@ -808,9 +820,11 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
     const { plainPassword, ...restData } = userData;
 
     const updatedUserObj = { ...target, ...restData };
-    if (db) {
+    if (db && !isFirestoreQuotaExceeded) {
       const cleanU = JSON.parse(JSON.stringify(updatedUserObj));
-      setDoc(doc(db, 'users', id), cleanU, { merge: true }).catch(() => {});
+      setDoc(doc(db, 'users', id), cleanU, { merge: true }).catch((err) => {
+        if (isQuotaError(err)) setIsFirestoreQuotaExceeded(true);
+      });
     }
 
     setUsers((prev) =>
@@ -851,8 +865,10 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
     const encrypted = encryptPassword(newPlainPassword.trim());
     const now = new Date().toISOString();
 
-    if (db) {
-      setDoc(doc(db, 'users', targetUserId), { password: encrypted, passwordLastChanged: now }, { merge: true }).catch(() => {});
+    if (db && !isFirestoreQuotaExceeded) {
+      setDoc(doc(db, 'users', targetUserId), { password: encrypted, passwordLastChanged: now }, { merge: true }).catch((err) => {
+        if (isQuotaError(err)) setIsFirestoreQuotaExceeded(true);
+      });
     }
 
     setUsers((prev) =>
@@ -899,9 +915,11 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
 
     // Only record major audit actions to Firestore to conserve quota
     const isMajorAuditAction = ['LOGIN', 'CREATE_ASSESSMENT', 'DELETE_ASSESSMENT', 'VERIFY_ASSESSMENT'].includes(action);
-    if (db && isMajorAuditAction) {
+    if (db && isMajorAuditAction && !isFirestoreQuotaExceeded) {
       const cleanLog = JSON.parse(JSON.stringify(newLog));
-      setDoc(doc(db, 'activity_logs', cleanLog.id), cleanLog).catch(() => {});
+      setDoc(doc(db, 'activity_logs', cleanLog.id), cleanLog).catch((err) => {
+        if (isQuotaError(err)) setIsFirestoreQuotaExceeded(true);
+      });
     }
 
     if (googleSheetConfig.webhookUrl && googleSheetConfig.webhookUrl.startsWith('http') && googleSheetConfig.directSaveEnabled) {
@@ -1181,9 +1199,10 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
 
     setAssessments((prev) => [assessmentToSave, ...prev]);
 
-    if (db) {
+    if (db && !isFirestoreQuotaExceeded) {
       const cleanA = JSON.parse(JSON.stringify(assessmentToSave));
       setDoc(doc(db, 'assessments', cleanA.id), cleanA).catch((err) => {
+        if (isQuotaError(err)) setIsFirestoreQuotaExceeded(true);
         console.warn('Firebase assessment save notice:', err?.message || err);
       });
     }
@@ -1264,10 +1283,11 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
     );
 
     const target = assessments.find((a) => a.id === id);
-    if (db && target) {
+    if (db && target && !isFirestoreQuotaExceeded) {
       const merged = { ...target, ...data, updatedAt: now };
       const cleanA = JSON.parse(JSON.stringify(merged));
       setDoc(doc(db, 'assessments', id), cleanA, { merge: true }).catch((err) => {
+        if (isQuotaError(err)) setIsFirestoreQuotaExceeded(true);
         console.warn('Firebase assessment update notice:', err?.message || err);
       });
     }
@@ -1321,9 +1341,10 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
 
     deletedAssessmentIds.current.add(id);
 
-    if (db) {
+    if (db && !isFirestoreQuotaExceeded) {
       deleteDoc(doc(db, 'assessments', id)).catch((err) => {
-        console.warn('Firebase assessment deletion error:', err);
+        if (isQuotaError(err)) setIsFirestoreQuotaExceeded(true);
+        console.warn('Firebase assessment deletion error:', err?.message || err);
       });
     }
 
@@ -1356,7 +1377,7 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
     const target = assessments.find((a) => a.id === id);
     const now = new Date().toISOString();
 
-    if (db) {
+    if (db && !isFirestoreQuotaExceeded) {
       setDoc(
         doc(db, 'assessments', id),
         {
@@ -1368,6 +1389,7 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
         },
         { merge: true }
       ).catch((err) => {
+        if (isQuotaError(err)) setIsFirestoreQuotaExceeded(true);
         console.warn('Firebase assessment verification save notice:', err?.message || err);
       });
     }
@@ -1748,6 +1770,8 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
         updateGoogleSheetConfig,
         firebaseShieldConfig,
         updateFirebaseShieldConfig,
+        isFirestoreQuotaExceeded,
+        firestoreConsoleUrl: FIRESTORE_DATABASE_CONSOLE_URL,
 
         activityLogs,
         logUserActivity,

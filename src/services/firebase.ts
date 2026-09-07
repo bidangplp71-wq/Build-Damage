@@ -65,6 +65,25 @@ export interface FirestoreErrorInfo {
   };
 }
 
+export const FIRESTORE_DATABASE_CONSOLE_URL = `https://console.firebase.google.com/project/${firebaseConfig.projectId}/firestore/databases/${firebaseConfig.firestoreDatabaseId || '(default)'}/data?openUpgradeDialog=true`;
+
+/**
+ * Check if an error is a Firebase Firestore Quota / Resource-Exhausted error
+ */
+export function isQuotaError(err: unknown): boolean {
+  if (!err) return false;
+  const msg = err instanceof Error ? err.message : String(err);
+  const code = (err as any)?.code || '';
+  return (
+    code === 'resource-exhausted' ||
+    msg.includes('resource-exhausted') ||
+    msg.includes('Quota limit exceeded') ||
+    msg.includes('Free daily write units') ||
+    msg.includes('Free daily read units') ||
+    msg.includes('Quota exceeded')
+  );
+}
+
 export function handleFirestoreError(error: unknown, operationType: OperationType, path: string | null) {
   const errInfo: FirestoreErrorInfo = {
     error: error instanceof Error ? error.message : String(error),

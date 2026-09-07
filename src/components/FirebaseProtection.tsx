@@ -13,10 +13,12 @@ import {
   FileCode2,
   Server,
   RefreshCw,
+  ExternalLink,
+  Info,
 } from 'lucide-react';
 
 export const FirebaseProtection: React.FC = () => {
-  const { showToast } = useApp();
+  const { showToast, isFirestoreQuotaExceeded, firestoreConsoleUrl } = useApp();
   const [copied, setCopied] = useState(false);
   const [copiedConfig, setCopiedConfig] = useState(false);
   const [testingConnection, setTestingConnection] = useState(false);
@@ -144,6 +146,62 @@ service cloud.firestore {
           <span>Firebase Protection: Enforced</span>
         </div>
       </div>
+
+      {/* Quota Exhaustion & Resilience Alert Banner */}
+      {isFirestoreQuotaExceeded ? (
+        <div className="bg-amber-50 border border-amber-300 rounded-2xl p-5 text-amber-950 space-y-3">
+          <div className="flex items-start gap-3">
+            <div className="p-2 rounded-xl bg-amber-500 text-white shrink-0 mt-0.5">
+              <AlertTriangle className="w-5 h-5" />
+            </div>
+            <div className="space-y-1">
+              <h3 className="text-sm font-bold text-amber-900">
+                Batas Kuota Harian Gratis Firestore Tercapai (Spark Free Tier)
+              </h3>
+              <p className="text-xs text-amber-800 leading-relaxed">
+                Database Firestore di project <code className="font-mono font-bold bg-amber-100 px-1 py-0.5 rounded text-amber-900">{firebaseConfig.projectId}</code> telah mencapai batas unit tulis/baca harian gratis (20.000 writes/50.000 reads per hari).
+              </p>
+            </div>
+          </div>
+
+          <div className="grid grid-cols-1 md:grid-cols-2 gap-3 pt-1 text-xs">
+            <div className="bg-white/80 p-3 rounded-xl border border-amber-200 space-y-1">
+              <span className="font-bold text-slate-800 flex items-center gap-1.5">
+                <CheckCircle2 className="w-4 h-4 text-emerald-600" />
+                <span>Aplikasi Tetap Berfungsi 100%</span>
+              </span>
+              <p className="text-[11px] text-slate-600">
+                Data input, edit, dan verifikasi otomatis disimpan aman di Browser Cache (IndexedDB & Local Storage) serta tersinkronisasi langsung ke Google Sheet Webhook tanpa hambatan.
+              </p>
+            </div>
+
+            <div className="bg-white/80 p-3 rounded-xl border border-amber-200 space-y-1">
+              <span className="font-bold text-slate-800 flex items-center gap-1.5">
+                <RefreshCw className="w-4 h-4 text-indigo-600" />
+                <span>Reset Otomatis Harian</span>
+              </span>
+              <p className="text-[11px] text-slate-600">
+                Kuota gratis Firestore direset secara otomatis oleh Google Cloud setiap tengah malam waktu Pasifik (PST) / pk 14:00-15:00 WIB.
+              </p>
+            </div>
+          </div>
+
+          <div className="flex flex-wrap items-center justify-between gap-2 pt-2 border-t border-amber-200">
+            <span className="text-[11px] text-amber-800">
+              Ingin menaikkan batas kuota tanpa batas atau mengaktifkan paket Blaze (Pay-as-you-go)?
+            </span>
+            <a
+              href={firestoreConsoleUrl}
+              target="_blank"
+              rel="noopener noreferrer"
+              className="inline-flex items-center gap-1.5 px-3 py-1.5 rounded-xl bg-amber-600 hover:bg-amber-700 text-white text-xs font-bold transition-colors cursor-pointer"
+            >
+              <span>Buka Firebase Console Database</span>
+              <ExternalLink className="w-3.5 h-3.5" />
+            </a>
+          </div>
+        </div>
+      ) : null}
 
       {/* Active Firebase Project Configuration Card */}
       <div className="bg-white rounded-2xl border border-slate-200 shadow-xs p-6 space-y-4">
