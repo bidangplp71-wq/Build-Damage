@@ -301,6 +301,39 @@ export const AssessmentInputGuideModal: React.FC<AssessmentInputGuideModalProps>
                   </ul>
                 </div>
               </div>
+
+              {/* SECTION NO. REGISTRASI OTOMATIS BERURUTAN */}
+              <div className="p-4 rounded-2xl border-2 border-blue-200 bg-blue-50/50 space-y-2.5">
+                <div className="flex items-center justify-between">
+                  <div className="flex items-center gap-2">
+                    <FileSpreadsheet className="w-4 h-4 text-blue-700" />
+                    <span className="font-bold text-slate-900 text-xs sm:text-sm">
+                      3. Standardisasi No. Registrasi / Kode Bangunan (Wajib & Otomatis Berurutan)
+                    </span>
+                  </div>
+                  <span className="px-2 py-0.5 rounded-full text-[10px] font-bold bg-blue-100 text-blue-800 border border-blue-200">
+                    Sistem Penomoran PUPR
+                  </span>
+                </div>
+                <p className="text-slate-700 text-xs leading-relaxed">
+                  Agar identitas setiap data survei selalu terbaca dan mudah dilacak di basis data cloud, file Google Sheets, serta laporan teknis, sistem menerapkan penomoran registrasi otomatis berurutan:
+                </p>
+                <div className="grid grid-cols-1 sm:grid-cols-3 gap-2.5 pt-1 text-xs">
+                  <div className="bg-white p-2.5 rounded-xl border border-blue-100 shadow-2xs">
+                    <span className="font-bold text-blue-900 block mb-0.5">Format Standar</span>
+                    <span className="text-slate-600 font-mono text-[11px]">REG-PUPR-YYYY-XXXX</span>
+                    <p className="text-[10px] text-slate-500 mt-1">Misal: REG-PUPR-2026-0001, REG-PUPR-2026-0002, dst.</p>
+                  </div>
+                  <div className="bg-white p-2.5 rounded-xl border border-blue-100 shadow-2xs">
+                    <span className="font-bold text-blue-900 block mb-0.5">Otomatisasi Penuh</span>
+                    <p className="text-[11px] text-slate-600">Terisi otomatis saat membuka form berdasarkan nomor registrasi terakhir yang sudah terdaftar.</p>
+                  </div>
+                  <div className="bg-white p-2.5 rounded-xl border border-blue-100 shadow-2xs">
+                    <span className="font-bold text-blue-900 block mb-0.5">Cek Duplikasi Real-Time</span>
+                    <p className="text-[11px] text-slate-600">Mencegah bentrok kode dan menyediakan tombol <em>"Urutkan Ulang"</em> untuk sinkronisasi instan.</p>
+                  </div>
+                </div>
+              </div>
             </div>
           )}
 

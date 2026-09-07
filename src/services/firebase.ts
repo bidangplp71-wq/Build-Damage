@@ -1,5 +1,5 @@
 import { initializeApp, getApps, getApp, FirebaseApp } from 'firebase/app';
-import { getFirestore, Firestore, collection, getDocs } from 'firebase/firestore';
+import { getFirestore, Firestore, collection, getDocs, disableNetwork, enableNetwork } from 'firebase/firestore';
 import { getAuth, Auth } from 'firebase/auth';
 import { getStorage, FirebaseStorage, ref, uploadString, getDownloadURL, deleteObject } from 'firebase/storage';
 import { savePhotoLocally } from '../utils/photoStorage';
@@ -12,6 +12,7 @@ let app: FirebaseApp | null = null;
 let db: Firestore | null = null;
 let auth: Auth | null = null;
 let storage: FirebaseStorage | null = null;
+let isFirestoreNetworkPaused = false;
 
 try {
   if (typeof window !== 'undefined') {
@@ -32,12 +33,51 @@ try {
     } else {
       storage = getStorage(app);
     }
+
+    // Auto-pause Firestore network if quota was already exceeded to prevent backoff retry loops
+    try {
+      if (localStorage.getItem('sipandu_pupr_quota_exceeded') === 'true' && db) {
+        isFirestoreNetworkPaused = true;
+        disableNetwork(db).catch(() => {});
+      }
+    } catch {}
   }
 } catch (err) {
   console.warn('Firebase initialization notice:', err);
 }
 
 export { app, db, auth, storage };
+
+/**
+ * Pause Firestore network traffic to stop exponential backoff retry loops when quota is exceeded
+ */
+export async function pauseFirestoreNetwork(): Promise<void> {
+  if (!db || isFirestoreNetworkPaused) return;
+  try {
+    isFirestoreNetworkPaused = true;
+    await disableNetwork(db);
+    console.info('[Firestore] Network synchronization paused to preserve local offline cache and prevent quota backoff errors.');
+  } catch (err) {
+    // Ignore if already paused
+  }
+}
+
+/**
+ * Resume Firestore network traffic
+ */
+export async function resumeFirestoreNetwork(): Promise<void> {
+  if (!db || !isFirestoreNetworkPaused) return;
+  try {
+    await enableNetwork(db);
+    isFirestoreNetworkPaused = false;
+    try {
+      localStorage.removeItem('sipandu_pupr_quota_exceeded');
+    } catch {}
+    console.info('[Firestore] Network synchronization resumed.');
+  } catch (err) {
+    console.warn('[Firestore] Could not resume network:', err);
+  }
+}
 
 export enum OperationType {
   CREATE = 'create',
@@ -74,17 +114,28 @@ export function isQuotaError(err: unknown): boolean {
   if (!err) return false;
   const msg = err instanceof Error ? err.message : String(err);
   const code = (err as any)?.code || '';
-  return (
+  const isMatch = (
     code === 'resource-exhausted' ||
     msg.includes('resource-exhausted') ||
     msg.includes('Quota limit exceeded') ||
     msg.includes('Free daily write units') ||
     msg.includes('Free daily read units') ||
-    msg.includes('Quota exceeded')
+    msg.includes('Quota exceeded') ||
+    msg.includes('maximum backoff delay')
   );
+  if (isMatch) {
+    pauseFirestoreNetwork().catch(() => {});
+    try {
+      localStorage.setItem('sipandu_pupr_quota_exceeded', 'true');
+    } catch {}
+  }
+  return isMatch;
 }
 
 export function handleFirestoreError(error: unknown, operationType: OperationType, path: string | null) {
+  if (isQuotaError(error)) {
+    pauseFirestoreNetwork().catch(() => {});
+  }
   const errInfo: FirestoreErrorInfo = {
     error: error instanceof Error ? error.message : String(error),
     authInfo: {

@@ -106,7 +106,7 @@ export function sanitizeSheetName(name: string): string {
  */
 export function formatAssessmentForGoogleSheet(item: BuildingAssessment) {
   return {
-    'No Registrasi': item.code,
+    'No Registrasi': item.code || item.id,
     'Nama Bangunan': item.buildingName,
     'Kategori / Fungsi Bangunan': item.buildingCategory || 'Gedung Pemerintah',
     'Jenis Bencana': item.disasterType,
@@ -1390,17 +1390,49 @@ export async function fetchAssessmentsFromGoogleSheet(
 
   // Check if gid is present in URL
   const gidMatch = config.spreadsheetUrl.match(/[?#&]gid=([0-9]+)/);
-  const gid = gidMatch ? gidMatch[1] : '0';
+  const gid = gidMatch ? gidMatch[1] : '';
 
-  const exportUrl = `https://docs.google.com/spreadsheets/d/${spreadsheetId}/export?format=csv&gid=${gid}`;
+  // Multiple export endpoints for maximum compatibility and avoiding 400 Bad Request
+  const candidateUrls: string[] = [];
+  if (gid) {
+    candidateUrls.push(`https://docs.google.com/spreadsheets/d/${spreadsheetId}/gviz/tq?tqx=out:csv&gid=${gid}`);
+    candidateUrls.push(`https://docs.google.com/spreadsheets/d/${spreadsheetId}/export?format=csv&gid=${gid}`);
+  }
+  candidateUrls.push(`https://docs.google.com/spreadsheets/d/${spreadsheetId}/gviz/tq?tqx=out:csv`);
+  candidateUrls.push(`https://docs.google.com/spreadsheets/d/${spreadsheetId}/export?format=csv`);
 
   try {
-    const res = await fetch(exportUrl);
-    if (!res.ok) {
-      throw new Error(`Gagal mengambil data dari Google Sheet (HTTP ${res.status}). Pastikan izin berbagi spreadsheet telah disetel ke "Siapa saja yang memiliki link" (Viewer/Editor).`);
+    let csvText = '';
+    let lastStatus = 0;
+    let fetchSucceeded = false;
+
+    for (const url of candidateUrls) {
+      try {
+        const res = await fetch(url);
+        lastStatus = res.status;
+        if (res.ok) {
+          const text = await res.text();
+          // Verify response is not an HTML login/error page
+          if (text && !text.trim().startsWith('<!DOCTYPE') && !text.includes('<html')) {
+            csvText = text;
+            fetchSucceeded = true;
+            break;
+          }
+        }
+      } catch {
+        // Continue to fallback endpoint
+      }
     }
 
-    const csvText = await res.text();
+    if (!fetchSucceeded) {
+      console.warn(`[GoogleSheetSync] Notice: Google Sheet tidak dapat diakses (${lastStatus ? `HTTP ${lastStatus}` : 'Koneksi dibatasi'}). Pastikan opsi berbagi spreadsheet telah disetel ke "Siapa saja yang memiliki link" (Viewer/Editor).`);
+      return {
+        success: false,
+        data: [],
+        message: `Spreadsheet belum dapat diakses (${lastStatus ? `HTTP ${lastStatus}` : 'Izin terbatas'}). Pastikan tautan disetel ke "Siapa saja yang memiliki link" (Viewer/Editor).`,
+      };
+    }
+
     if (!csvText || csvText.trim().length === 0) {
       return {
         success: true,
@@ -1452,9 +1484,10 @@ export async function fetchAssessmentsFromGoogleSheet(
 
     const parsedData: BuildingAssessment[] = rawRows.map((row, index) => {
       const sheetRowNumber = index + 2;
-      const code = String(row['No Registrasi'] || '').trim();
+      const rawCode = String(row['No Registrasi'] || '').trim();
+      const code = rawCode || `REG-PUPR-2026-${String(index + 1).padStart(4, '0')}`;
       const buildingName = String(row['Nama Bangunan'] || `Bangunan Baris ${sheetRowNumber}`).trim();
-      const id = code || `sheet_row_${sheetRowNumber}_${buildingName.toLowerCase().replace(/[^a-z0-9]/g, '_')}`;
+      const id = rawCode || `sheet_row_${sheetRowNumber}_${code}`;
 
       const totalFloorAreaM2 = Number(row['Luas Lantai (M2)']) || 0;
       const numberOfFloors = Number(row['Jumlah Tingkat']) || 1;
@@ -1484,7 +1517,7 @@ export async function fetchAssessmentsFromGoogleSheet(
 
       return {
         id,
-        code: code || undefined,
+        code,
         buildingName,
         buildingCategory: (row['Kategori / Fungsi Bangunan'] as any) || 'Gedung Pemerintah',
         disasterType: (row['Jenis Bencana'] as any) || 'Gempa Bumi',
@@ -1543,7 +1576,7 @@ export async function fetchAssessmentsFromGoogleSheet(
       message: `Berhasil memuat ${parsedData.length} data penilaian gedung dari Google Sheet (Baris A2 s/d A${parsedData.length + 1}).`,
     };
   } catch (err: any) {
-    console.error('fetchAssessmentsFromGoogleSheet error:', err);
+    console.warn('fetchAssessmentsFromGoogleSheet notice:', err?.message || err);
     return {
       success: false,
       data: [],

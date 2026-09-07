@@ -1,4 +1,4 @@
-import React, { useState, useEffect } from 'react';
+import React, { useState, useEffect, useMemo } from 'react';
 import { useApp } from '../context/AppContext';
 import {
   BuildingAssessment,
@@ -26,6 +26,7 @@ import { compressImageFile, calculatePhotosPayloadSize } from '../utils/imageCom
 import { savePhotoLocally } from '../utils/photoStorage';
 import { uploadPhotoToFirebaseStorage } from '../services/firebase';
 import { checkDuplicateBeforeSave, DuplicateMatchInfo } from '../utils/duplicateDetector';
+import { generateNextRegistrationCode, isRegistrationCodeUnique } from '../utils/registrationCodeGenerator';
 import { BuildingPhotoGallery } from './BuildingPhotoGallery';
 import { PhotoViewerModal } from './PhotoViewerModal';
 import { AssessmentDetailModal } from './AssessmentDetailModal';
@@ -41,6 +42,7 @@ import {
   Image,
   MapPin,
   FileCheck,
+  FileText,
   AlertTriangle,
   ArrowLeft,
   FileSpreadsheet,
@@ -108,7 +110,17 @@ export const AssessmentForm: React.FC = () => {
   const [tempDriveFolderId, setTempDriveFolderId] = useState(googleSheetConfig.driveFolderId || '');
 
   // Form Fields
-  const [code, setCode] = useState('');
+  const [code, setCode] = useState<string>(() => {
+    if (selectedAssessmentForEdit && selectedAssessmentForEdit.code) {
+      return selectedAssessmentForEdit.code;
+    }
+    return '';
+  });
+
+  const isCodeDuplicate = useMemo(() => {
+    if (!code || !code.trim()) return false;
+    return !isRegistrationCodeUnique(code, assessments, selectedAssessmentForEdit?.id);
+  }, [code, assessments, selectedAssessmentForEdit]);
   const [buildingCategory, setBuildingCategory] = useState<BuildingCategory>('Hunian Masyarakat');
   const [buildingName, setBuildingName] = useState('');
   const [namaPemilikRumah, setNamaPemilikRumah] = useState('');
@@ -294,11 +306,11 @@ export const AssessmentForm: React.FC = () => {
     }
   };
 
-  // Load existing data if edit mode
+  // Load existing data if edit mode, or auto-generate sequential code for new entry
   useEffect(() => {
     if (selectedAssessmentForEdit) {
       const a = selectedAssessmentForEdit;
-      setCode(a.code || '');
+      setCode(a.code || generateNextRegistrationCode(assessments));
       setBuildingCategory(a.buildingCategory || 'Gedung Pemerintah');
       setBuildingName(a.buildingName || '');
       setNamaPemilikRumah(a.namaPemilikRumah || (a.buildingCategory === 'Hunian Masyarakat' ? (a.ownerAgency || '') : ''));
@@ -329,8 +341,11 @@ export const AssessmentForm: React.FC = () => {
       setHeadNip(a.headOfDepartment?.nip || '');
       setHeadRank(a.headOfDepartment?.rank || '');
       setAnalysisTeam(a.analysisTeam || []);
+    } else {
+      // New assessment: ensure code is populated with next sequential code if empty
+      setCode((prev) => (prev && prev.trim() ? prev : generateNextRegistrationCode(assessments)));
     }
-  }, [selectedAssessmentForEdit]);
+  }, [selectedAssessmentForEdit, assessments]);
 
   // Filter available desas based on selected kecamatan
   const availableDesas = desas.filter((d) => d.kecamatanId === kecamatanId);
@@ -862,7 +877,17 @@ export const AssessmentForm: React.FC = () => {
       ? (namaPemilikRumah.trim() || ownerAgency.trim() || 'Pemilik Rumah')
       : (namaPemilikGedung.trim() || ownerAgency.trim() || 'Pengelola Gedung');
 
-    const targetAssId = isEditMode ? selectedAssessmentForEdit!.id : (code.trim() ? code.trim() : `assess_${Date.now()}`);
+    // Ensure valid non-empty registration code (auto-assign if empty)
+    let finalCode = code.trim();
+    if (!finalCode) {
+      finalCode = generateNextRegistrationCode(assessments);
+      setCode(finalCode);
+      showToast(`No. Registrasi otomatis ditetapkan: ${finalCode}`, 'info');
+    }
+
+    const targetAssId = isEditMode
+      ? selectedAssessmentForEdit!.id
+      : (finalCode.startsWith('REG-') ? finalCode : `REG-${finalCode}`);
 
     // Parallel sync to Firebase Cloud Storage for any photo still in base64
     const syncedPhotos: BuildingPhoto[] = await Promise.all(
@@ -883,7 +908,7 @@ export const AssessmentForm: React.FC = () => {
 
     const assessmentPayload: BuildingAssessment = {
       id: targetAssId,
-      code: code.trim() || undefined,
+      code: finalCode,
       disasterType,
       disasterDate,
       assessmentDate,
@@ -1514,38 +1539,57 @@ export const AssessmentForm: React.FC = () => {
         </div>
 
         <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-4 text-xs pt-2">
-          {/* No Registrasi / Kode (Opsional) */}
-          <div>
-            <div className="flex items-center justify-between mb-1">
-              <label className="font-semibold text-slate-700">
-                No. Registrasi / Kode <span className="text-[10px] text-slate-400 font-normal">(Boleh Kosong)</span>
+          {/* No Registrasi / Kode (Wajib & Otomatis Berurutan) */}
+          <div className="bg-slate-50 p-3 rounded-xl border border-slate-200 space-y-1.5">
+            <div className="flex items-center justify-between">
+              <label className="font-bold text-slate-800 text-xs flex items-center gap-1.5">
+                <FileText className="w-3.5 h-3.5 text-blue-600" />
+                <span>No. Registrasi / Kode Bangunan</span>
+                <span className="text-rose-500 font-bold">*</span>
               </label>
               <div className="flex items-center gap-1">
+                <span className="text-[10px] bg-emerald-100 text-emerald-800 font-bold px-1.5 py-0.5 rounded border border-emerald-200">
+                  Otomatis Berurutan
+                </span>
                 <button
                   type="button"
-                  onClick={() => setCode(`REG-PUPR-2026-${String(Math.floor(Math.random() * 900) + 100)}`)}
-                  className="text-[10px] text-amber-600 hover:text-amber-800 font-semibold cursor-pointer underline"
+                  onClick={() => {
+                    const nextCode = generateNextRegistrationCode(assessments);
+                    setCode(nextCode);
+                    showToast(`✓ Nomor registrasi berurutan berikutnya: ${nextCode}`, 'info');
+                  }}
+                  className="text-[10px] text-blue-700 bg-blue-100/70 hover:bg-blue-200 px-2 py-0.5 rounded font-semibold cursor-pointer transition-colors"
+                  title="Klik untuk menghitung ulang nomor urut berikutnya berdasarkan seluruh data terdaftar"
                 >
-                  Buat Otomatis
+                  Urutkan Ulang
                 </button>
-                {code && (
-                  <button
-                    type="button"
-                    onClick={() => setCode('')}
-                    className="text-[10px] text-rose-500 hover:text-rose-700 font-semibold cursor-pointer underline ml-1"
-                  >
-                    Kosongkan
-                  </button>
-                )}
               </div>
             </div>
+
             <input
               type="text"
+              required
               value={code || ''}
-              onChange={(e) => setCode(e.target.value)}
-              placeholder="Boleh dikosongkan jika belum ada nomor registrasi"
-              className="w-full px-3 py-2 rounded-xl border border-slate-200 bg-slate-50 font-mono text-slate-800 placeholder:text-slate-400 text-xs"
+              onChange={(e) => setCode(e.target.value.toUpperCase())}
+              placeholder="Contoh: REG-PUPR-2026-0001"
+              className={`w-full px-3 py-2 rounded-lg border font-mono font-bold text-xs transition-colors ${
+                isCodeDuplicate
+                  ? 'border-rose-400 bg-rose-50 text-rose-900 focus:ring-rose-200'
+                  : 'border-slate-300 bg-white text-slate-900 focus:ring-blue-200'
+              }`}
             />
+
+            {isCodeDuplicate ? (
+              <p className="text-[10px] text-rose-600 font-semibold flex items-center gap-1">
+                <AlertTriangle className="w-3 h-3 text-rose-500 shrink-0" />
+                <span>No. Registrasi ini sudah terdaftar. Klik "Urutkan Ulang" untuk mendapatkan nomor urut unik.</span>
+              </p>
+            ) : (
+              <p className="text-[10px] text-slate-500 flex items-center justify-between">
+                <span>Identitas resmi survei sesuai data registrasi.</span>
+                <span className="text-[9px] font-mono text-slate-400">REG-PUPR-2026-XXXX</span>
+              </p>
+            )}
           </div>
 
           {/* Nama Bangunan */}
