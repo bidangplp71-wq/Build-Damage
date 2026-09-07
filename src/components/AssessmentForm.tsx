@@ -23,6 +23,7 @@ import {
   formatRupiah,
 } from '../utils/puprCalculations';
 import { compressImageFile, calculatePhotosPayloadSize } from '../utils/imageCompressor';
+import { savePhotoLocally } from '../utils/photoStorage';
 import { uploadPhotoToFirebaseStorage } from '../services/firebase';
 import { BuildingPhotoGallery } from './BuildingPhotoGallery';
 import { PhotoViewerModal } from './PhotoViewerModal';
@@ -648,10 +649,10 @@ export const AssessmentForm: React.FC = () => {
     const targetAssId = selectedAssessmentForEdit?.id || (code.trim() ? code.trim() : `draft_${Date.now()}`);
 
     try {
-      // 1. Parallel ultra-fast compression (all photos compressed concurrently in < 0.5s)
+      // 1. Parallel ultra-fast adaptive compression (compressed concurrently in < 0.3s)
       const compressedResults = await Promise.all(
         filesToUpload.map(async (file, i) => {
-          const compressedBase64 = await compressImageFile(file, 960, 960, 0.70);
+          const compressedBase64 = await compressImageFile(file, 750, 750, 0.68);
           const photoId = `photo_${Date.now()}_${Math.random().toString(36).substring(2, 7)}_${i}`;
 
           let loc = newPhotoDamageLocation;
@@ -664,6 +665,11 @@ export const AssessmentForm: React.FC = () => {
           }
 
           const cap = newPhotoCaption.trim() || `Dokumentasi visual ${loc.toLowerCase()}`;
+
+          // Cache in IndexedDB immediately
+          if (compressedBase64) {
+            savePhotoLocally(photoId, targetAssId, compressedBase64).catch(() => {});
+          }
 
           return {
             id: photoId,

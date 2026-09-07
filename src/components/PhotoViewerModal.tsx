@@ -12,6 +12,7 @@ import {
   RotateCcw
 } from 'lucide-react';
 import { BuildingPhoto } from '../types';
+import { getPhotoLocally } from '../utils/photoStorage';
 
 interface PhotoViewerModalProps {
   photos: BuildingPhoto[];
@@ -19,6 +20,51 @@ interface PhotoViewerModalProps {
   buildingTitle?: string;
   onClose: () => void;
 }
+
+const LightboxThumbnail: React.FC<{
+  photo: BuildingPhoto;
+  idx: number;
+  isSelected: boolean;
+  onSelect: () => void;
+}> = ({ photo, idx, isSelected, onSelect }) => {
+  const [url, setUrl] = useState<string>(photo.url || '');
+
+  useEffect(() => {
+    if (photo.url) {
+      setUrl(photo.url);
+    } else if (photo.id) {
+      getPhotoLocally(photo.id).then((cached) => {
+        if (cached) setUrl(cached);
+      });
+    }
+  }, [photo.id, photo.url]);
+
+  return (
+    <button
+      type="button"
+      onClick={onSelect}
+      className={`relative shrink-0 w-14 h-14 sm:w-16 sm:h-16 rounded-lg overflow-hidden border-2 transition-all cursor-pointer group bg-slate-900 flex items-center justify-center ${
+        isSelected
+          ? 'border-amber-400 scale-105 shadow-md shadow-amber-500/20 ring-2 ring-amber-400/50'
+          : 'border-slate-700 opacity-60 hover:opacity-100 hover:border-slate-500'
+      }`}
+    >
+      {url ? (
+        <img
+          src={url}
+          alt={`Thumb ${idx + 1}`}
+          className="w-full h-full object-cover"
+          referrerPolicy="no-referrer"
+        />
+      ) : (
+        <Camera className="w-5 h-5 text-amber-400" />
+      )}
+      <span className="absolute bottom-0 inset-x-0 bg-black/75 text-[9px] text-center font-bold text-white py-0.5">
+        #{idx + 1}
+      </span>
+    </button>
+  );
+};
 
 export const PhotoViewerModal: React.FC<PhotoViewerModalProps> = ({
   photos,
@@ -33,6 +79,25 @@ export const PhotoViewerModal: React.FC<PhotoViewerModalProps> = ({
   const [rotation, setRotation] = useState(0);
 
   const currentPhoto = photos[currentIndex];
+  const [resolvedPhotoUrl, setResolvedPhotoUrl] = useState<string>(currentPhoto?.url || '');
+  const [isImageError, setIsImageError] = useState(false);
+
+  useEffect(() => {
+    if (!currentPhoto) return;
+    setIsImageError(false);
+
+    if (currentPhoto.url && currentPhoto.url.length > 20) {
+      setResolvedPhotoUrl(currentPhoto.url);
+    } else if (currentPhoto.id) {
+      getPhotoLocally(currentPhoto.id).then((cached) => {
+        if (cached) {
+          setResolvedPhotoUrl(cached);
+        } else {
+          setResolvedPhotoUrl(currentPhoto.url || '');
+        }
+      });
+    }
+  }, [currentPhoto]);
 
   const handleNext = useCallback(() => {
     if (currentIndex < photos.length - 1) {
@@ -68,10 +133,10 @@ export const PhotoViewerModal: React.FC<PhotoViewerModalProps> = ({
   };
 
   const handleDownload = () => {
-    if (!currentPhoto) return;
+    if (!resolvedPhotoUrl) return;
     const link = document.createElement('a');
-    link.href = currentPhoto.url;
-    link.download = `foto_kerusakan_${currentIndex + 1}_${(currentPhoto.damageLocation || 'gedung').replace(/\s+/g, '_')}.jpg`;
+    link.href = resolvedPhotoUrl;
+    link.download = `foto_kerusakan_${currentIndex + 1}_${(currentPhoto?.damageLocation || 'gedung').replace(/\s+/g, '_')}.jpg`;
     document.body.appendChild(link);
     link.click();
     document.body.removeChild(link);
@@ -100,7 +165,7 @@ export const PhotoViewerModal: React.FC<PhotoViewerModalProps> = ({
   if (!currentPhoto) return null;
 
   return (
-    <div className="fixed inset-0 z-50 flex flex-col bg-slate-950/95 text-white backdrop-blur-md animate-in fade-in duration-200 select-none">
+    <div id="photo-viewer-modal" className="fixed inset-0 z-50 flex flex-col bg-slate-950/95 text-white backdrop-blur-md animate-in fade-in duration-200 select-none">
       {/* Top Bar Header */}
       <div className="flex items-center justify-between px-4 py-3 bg-slate-900/90 border-b border-slate-800 z-10 shrink-0">
         <div className="flex items-center gap-3 overflow-hidden">
@@ -164,14 +229,16 @@ export const PhotoViewerModal: React.FC<PhotoViewerModalProps> = ({
               <span className="hidden sm:inline">Reset</span>
             </button>
           )}
-          <button
-            type="button"
-            onClick={handleDownload}
-            title="Unduh Foto"
-            className="p-2 text-slate-300 hover:text-white hover:bg-slate-800 rounded-lg transition-colors cursor-pointer"
-          >
-            <Download className="w-4 h-4" />
-          </button>
+          {resolvedPhotoUrl && (
+            <button
+              type="button"
+              onClick={handleDownload}
+              title="Unduh Foto"
+              className="p-2 text-slate-300 hover:text-white hover:bg-slate-800 rounded-lg transition-colors cursor-pointer"
+            >
+              <Download className="w-4 h-4" />
+            </button>
+          )}
           <div className="h-5 w-px bg-slate-700 mx-1" />
           <button
             type="button"
@@ -217,12 +284,28 @@ export const PhotoViewerModal: React.FC<PhotoViewerModalProps> = ({
             transform: `scale(${zoomLevel}) rotate(${rotation}deg)`,
           }}
         >
-          <img
-            src={currentPhoto.url}
-            alt={currentPhoto.caption || `Foto Kerusakan ${currentIndex + 1}`}
-            className="max-h-[68vh] sm:max-h-[72vh] max-w-[90vw] sm:max-w-[85vw] object-contain rounded-lg shadow-2xl border border-slate-800 pointer-events-auto"
-            referrerPolicy="no-referrer"
-          />
+          {resolvedPhotoUrl && !isImageError ? (
+            <img
+              src={resolvedPhotoUrl}
+              alt={currentPhoto.caption || `Foto Kerusakan ${currentIndex + 1}`}
+              onError={() => setIsImageError(true)}
+              className="max-h-[68vh] sm:max-h-[72vh] max-w-[90vw] sm:max-w-[85vw] object-contain rounded-lg shadow-2xl border border-slate-800 pointer-events-auto"
+              referrerPolicy="no-referrer"
+            />
+          ) : (
+            <div className="flex flex-col items-center justify-center p-8 bg-slate-900 border border-slate-800 rounded-2xl text-center max-w-md">
+              <Camera className="w-12 h-12 text-amber-500 mb-3" />
+              <h4 className="text-base font-bold text-white mb-1">
+                Foto #{currentIndex + 1}
+              </h4>
+              <p className="text-sm text-slate-300 mb-2">
+                {currentPhoto.damageLocation || 'Bagian Kerusakan Bangunan'}
+              </p>
+              <p className="text-xs text-slate-400">
+                {currentPhoto.caption || 'Foto tersimpan aman di database sistem.'}
+              </p>
+            </div>
+          )}
         </div>
       </div>
 
@@ -257,38 +340,22 @@ export const PhotoViewerModal: React.FC<PhotoViewerModalProps> = ({
             )}
           </div>
 
-          {/* Miniature Thumbnail Strip (10 Photos) */}
+          {/* Miniature Thumbnail Strip (up to 20 Photos) */}
           {photos.length > 1 && (
             <div className="flex items-center justify-center gap-2 overflow-x-auto py-1 px-2 scrollbar-thin">
-              {photos.map((photo, idx) => {
-                const isSelected = idx === currentIndex;
-                return (
-                  <button
-                    key={photo.id || idx}
-                    type="button"
-                    onClick={() => {
-                      setCurrentIndex(idx);
-                      setZoomLevel(1);
-                      setRotation(0);
-                    }}
-                    className={`relative shrink-0 w-14 h-14 sm:w-16 sm:h-16 rounded-lg overflow-hidden border-2 transition-all cursor-pointer group ${
-                      isSelected
-                        ? 'border-amber-400 scale-105 shadow-md shadow-amber-500/20 ring-2 ring-amber-400/50'
-                        : 'border-slate-700 opacity-60 hover:opacity-100 hover:border-slate-500'
-                    }`}
-                  >
-                    <img
-                      src={photo.url}
-                      alt={`Thumb ${idx + 1}`}
-                      className="w-full h-full object-cover"
-                      referrerPolicy="no-referrer"
-                    />
-                    <span className="absolute bottom-0 inset-x-0 bg-black/75 text-[9px] text-center font-bold text-white py-0.5">
-                      #{idx + 1}
-                    </span>
-                  </button>
-                );
-              })}
+              {photos.map((photo, idx) => (
+                <LightboxThumbnail
+                  key={photo.id || idx}
+                  photo={photo}
+                  idx={idx}
+                  isSelected={idx === currentIndex}
+                  onSelect={() => {
+                    setCurrentIndex(idx);
+                    setZoomLevel(1);
+                    setRotation(0);
+                  }}
+                />
+              ))}
             </div>
           )}
         </div>

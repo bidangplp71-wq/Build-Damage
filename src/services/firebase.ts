@@ -2,6 +2,7 @@ import { initializeApp, getApps, getApp, FirebaseApp } from 'firebase/app';
 import { getFirestore, Firestore, collection, getDocs } from 'firebase/firestore';
 import { getAuth, Auth } from 'firebase/auth';
 import { getStorage, FirebaseStorage, ref, uploadString, getDownloadURL, deleteObject } from 'firebase/storage';
+import { savePhotoLocally } from '../utils/photoStorage';
 import firebaseAppletConfig from '../../firebase-applet-config.json';
 
 // Export the generated config
@@ -134,6 +135,11 @@ export async function uploadPhotoToFirebaseStorage(
   assessmentId: string,
   photoId: string
 ): Promise<{ success: boolean; url: string; isCloudStorage: boolean; error?: string }> {
+  // Always cache locally first so photo is immediately available offline
+  if (photoId && dataUrlOrBase64) {
+    savePhotoLocally(photoId, assessmentId, dataUrlOrBase64).catch(() => {});
+  }
+
   if (!storage || !dataUrlOrBase64) {
     return { success: true, url: dataUrlOrBase64, isCloudStorage: false };
   }
@@ -161,12 +167,18 @@ export async function uploadPhotoToFirebaseStorage(
       return await getDownloadURL(fileRef);
     })();
 
-    // 4 seconds strict timeout so network lag or offline status never freezes the UI
+    // 8 seconds timeout for field network condition tolerance
     const timeoutPromise = new Promise<never>((_, reject) =>
-      setTimeout(() => reject(new Error('Firebase Storage upload timeout (4s)')), 4000)
+      setTimeout(() => reject(new Error('Firebase Storage upload timeout (8s)')), 8000)
     );
 
     const downloadUrl = await Promise.race([uploadTask, timeoutPromise]);
+    
+    // Update local cache with CDN url
+    if (photoId && downloadUrl) {
+      savePhotoLocally(photoId, assessmentId, downloadUrl).catch(() => {});
+    }
+
     return { success: true, url: downloadUrl, isCloudStorage: true };
   } catch (err: any) {
     console.warn('Firebase Storage upload notice (using optimized fallback):', err?.message || err);

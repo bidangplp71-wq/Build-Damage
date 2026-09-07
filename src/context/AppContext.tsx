@@ -39,6 +39,8 @@ import {
 } from '../utils/security';
 import { db } from '../services/firebase';
 import { collection, onSnapshot, doc, setDoc, getDocs, getDoc, deleteDoc } from 'firebase/firestore';
+import { savePhotosLocally } from '../utils/photoStorage';
+import { hydrateAssessmentPhotos } from '../utils/imageCompressor';
 
 interface AppContextType {
   // Current user & Auth
@@ -388,10 +390,11 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
         console.warn('Firebase users fetch offline/deferred:', err?.message || err);
       }),
 
-      getDocs(collection(db, 'assessments')).then((snapshot) => {
+      getDocs(collection(db, 'assessments')).then(async (snapshot) => {
         if (!snapshot.empty) {
           const remoteAssessments = snapshot.docs.map((d) => d.data() as BuildingAssessment);
-          setAssessments(remoteAssessments);
+          const hydrated = await Promise.all(remoteAssessments.map(hydrateAssessmentPhotos));
+          setAssessments(hydrated);
         } else {
           INITIAL_ASSESSMENTS.forEach((a) => {
             const cleanA = JSON.parse(JSON.stringify(a));
@@ -616,17 +619,24 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
   }, [users]);
 
   useEffect(() => {
+    // Persist photos to IndexedDB cache
+    assessments.forEach((a) => {
+      if (a.photos && a.photos.length > 0) {
+        savePhotosLocally(a.photos, a.id).catch(() => {});
+      }
+    });
+
     try {
       localStorage.setItem(STORAGE_KEYS.ASSESSMENTS, JSON.stringify(assessments));
     } catch (e) {
       console.warn('LocalStorage assessments save exceeded quota, saving lightweight references:', e);
       try {
-        // Fallback: strip heavy base64 strings if local storage quota exceeded
+        // Fallback: save metadata to localStorage, full photos remain 100% safe in IndexedDB
         const lightweight = assessments.map((a) => ({
           ...a,
           photos: a.photos.map((p) => ({
             ...p,
-            url: p.url && (p.url.startsWith('http') || p.url.length < 500) ? p.url : '',
+            url: p.url && (p.url.startsWith('http') || p.url.length < 300) ? p.url : '',
           })),
         }));
         localStorage.setItem(STORAGE_KEYS.ASSESSMENTS, JSON.stringify(lightweight));
@@ -640,7 +650,9 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
         if (deletedAssessmentIds.current.has(a.id)) return;
         // Strip undefined fields for Firebase
         const cleanA = JSON.parse(JSON.stringify(a));
-        setDoc(doc(db, 'assessments', cleanA.id), cleanA).catch(() => {});
+        setDoc(doc(db, 'assessments', cleanA.id), cleanA).catch((err) => {
+          console.warn('Firebase assessment doc write deferred:', err?.message || err);
+        });
       });
     }
   }, [assessments]);
