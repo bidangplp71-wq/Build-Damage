@@ -101,6 +101,7 @@ export const AssessmentForm: React.FC = () => {
   } = useApp();
 
   const isEditMode = Boolean(selectedAssessmentForEdit);
+  const isAdmin = currentUser.role === 'super_admin' || currentUser.role === 'admin';
 
   // Quick Google Sheet Link Modal state
   const [showSheetModal, setShowSheetModal] = useState(false);
@@ -2410,28 +2411,68 @@ export const AssessmentForm: React.FC = () => {
             <div>
               <div className="flex items-center justify-between mb-1">
                 <label className="block font-semibold text-slate-700">
-                  Harga Satuan / HSBGN Konstruksi (Rp / M²)
+                  Harga Satuan / HSBGN Konstruksi (Rp / M²) 
+                  {isAdmin ? <span className="text-xs font-normal text-amber-800 ml-1">(Dapat disesuaikan standar daerah)</span> : <span className="text-xs font-normal text-rose-600 ml-1">(Terkunci untuk Surveyor)</span>}
                 </label>
-                <button
-                  type="button"
-                  onClick={() => setHsbgnPerM2(currentCategoryConfig.defaultHsbgn)}
-                  className="text-[11px] font-semibold text-amber-800 hover:text-amber-950 underline"
-                >
-                  Standar {currentCategoryConfig.shortLabel} (Rp {formatRupiah(currentCategoryConfig.defaultHsbgn)})
-                </button>
+                {isAdmin && (
+                  <button
+                    type="button"
+                    onClick={() => setHsbgnPerM2(currentCategoryConfig.defaultHsbgn)}
+                    className="text-[11px] font-semibold text-amber-800 hover:text-amber-950 underline"
+                  >
+                    Kategori {currentCategoryConfig.shortLabel} (Rp {formatRupiah(currentCategoryConfig.defaultHsbgn)})
+                  </button>
+                )}
               </div>
-              <div className="flex items-center gap-2">
+              <div className="flex items-center gap-2 mb-2">
                 <span className="font-bold text-slate-500">Rp</span>
                 <input
                   type="number"
                   step={50000}
+                  disabled={!isAdmin}
                   value={hsbgnPerM2}
                   onChange={(e) => setHsbgnPerM2(Number(e.target.value))}
-                  className="w-full px-3 py-2 rounded-xl border border-slate-200 font-bold text-slate-900 bg-white"
+                  className={`w-full px-3 py-2 rounded-xl border border-slate-200 font-bold ${isAdmin ? 'text-slate-900 bg-white shadow-sm' : 'text-slate-500 bg-slate-100 cursor-not-allowed'}`}
                 />
               </div>
+              {/* Quick Regional HSBGN Presets - Only for Admin/Super Admin */}
+              {isAdmin ? (
+                <div className="flex flex-wrap gap-1.5 items-center text-[11px]">
+                  <span className="text-slate-500 font-medium">Preset Standar:</span>
+                  <button
+                    type="button"
+                    onClick={() => setHsbgnPerM2(3500000)}
+                    className="px-2 py-0.5 rounded bg-slate-100 hover:bg-slate-200 font-semibold text-slate-700 border border-slate-200"
+                  >
+                    Rp 3,5 Jt (Sederhana)
+                  </button>
+                  <button
+                    type="button"
+                    onClick={() => setHsbgnPerM2(5500000)}
+                    className="px-2 py-0.5 rounded bg-slate-100 hover:bg-slate-200 font-semibold text-slate-700 border border-slate-200"
+                  >
+                    Rp 5,5 Jt (Standar Daerah)
+                  </button>
+                  <button
+                    type="button"
+                    onClick={() => setHsbgnPerM2(7700000)}
+                    className="px-2 py-0.5 rounded bg-slate-100 hover:bg-slate-200 font-semibold text-slate-700 border border-slate-200"
+                  >
+                    Rp 7,7 Jt (Standar PUPR)
+                  </button>
+                  <button
+                    type="button"
+                    onClick={() => setHsbgnPerM2(9500000)}
+                    className="px-2 py-0.5 rounded bg-slate-100 hover:bg-slate-200 font-semibold text-slate-700 border border-slate-200"
+                  >
+                    Rp 9,5 Jt (Gedung Utama)
+                  </button>
+                </div>
+              ) : null}
               <p className="text-[11px] text-slate-500 mt-1">
-                Standar acuan biaya rekonstruksi/HSBGN untuk kategori <strong>{currentCategoryConfig.name}</strong>.
+                {isAdmin 
+                  ? "Admin/Super Admin dapat menginput HSBGN sesuai SK Bupati/Wali Kota atau standar harga satuan bangunan gedung negara di wilayah setempat."
+                  : "Harga satuan HSBGN ditentukan oleh Admin/Super Admin. Anda masuk sebagai Surveyor dan menggunakan standar yang telah ditetapkan."}
               </p>
             </div>
 

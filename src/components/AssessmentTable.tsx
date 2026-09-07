@@ -864,8 +864,11 @@ export const AssessmentTable: React.FC = () => {
                       <div className="font-bold text-slate-900">
                         {formatRupiah(item.roundedRehabCost)}
                       </div>
-                      <div className="text-[10px] text-slate-400">
-                        {formatRupiah(item.totalCostPerM2)} / m²
+                      <div className="text-[10px] text-amber-800 font-semibold">
+                        HSBGN: {formatRupiah(item.hsbgnPerM2 || 0)} / m²
+                      </div>
+                      <div className="text-[10px] text-slate-500">
+                        Biaya Total: {formatRupiah(item.totalCostPerM2)} / m²
                       </div>
                     </td>
 
