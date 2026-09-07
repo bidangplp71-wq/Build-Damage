@@ -12,6 +12,7 @@ export interface GoogleSheetRowPayload {
   spreadsheetUrl?: string;
   spreadsheetId?: string;
   registrationCode?: string;
+  previousRegistrationCode?: string;
   data: Record<string, any> | Record<string, any>[];
   dataByKecamatan?: Record<string, Record<string, any>[]>;
   photos?: {
@@ -165,7 +166,8 @@ export function groupAssessmentsByKecamatan(assessments: BuildingAssessment[]): 
 export async function directSaveToGoogleSheet(
   assessment: BuildingAssessment,
   config: GoogleSheetConfig,
-  action: 'insert' | 'update' | 'delete' = 'insert'
+  action: 'insert' | 'update' | 'delete' = 'insert',
+  previousCode?: string
 ): Promise<{ success: boolean; message: string; folderUrl?: string }> {
   if (!config.webhookUrl || !config.webhookUrl.startsWith('http')) {
     return {
@@ -196,6 +198,7 @@ export async function directSaveToGoogleSheet(
     spreadsheetUrl: config.spreadsheetUrl,
     spreadsheetId: spreadsheetId || undefined,
     registrationCode: assessment.code || assessment.id,
+    previousRegistrationCode: previousCode || assessment.id,
     data: rowData,
     photos: assessment.photos ? assessment.photos.map((p, idx) => ({
       id: p.id || `photo_${idx}`,
@@ -550,6 +553,7 @@ function doPost(e) {
     }
     
     var regCode = json.registrationCode || (rowData['No Registrasi'] || "");
+    var prevRegCode = json.previousRegistrationCode || "";
     var kecamatanName = rowData['Kecamatan'] || "Lainnya";
     var kecTabName = json.kecamatanSheetName || ("Kec. " + kecamatanName);
 
@@ -564,12 +568,12 @@ function doPost(e) {
     // A. Tulis ke Sheet Khusus Kecamatan Terkait
     if (splitByKecamatan) {
       var targetKecSheet = getOrCreateSheet(ss, kecTabName);
-      saveOrUpdateRow(targetKecSheet, rowData, regCode, action, "#1e3a8a");
+      saveOrUpdateRow(targetKecSheet, rowData, regCode, prevRegCode, action, "#1e3a8a");
     }
     
     // B. Tulis juga ke Master Sheet Rekap Semua
     var targetMasterSheet = getOrCreateSheet(ss, masterSheetName);
-    saveOrUpdateRow(targetMasterSheet, rowData, regCode, action, "#0f172a");
+    saveOrUpdateRow(targetMasterSheet, rowData, regCode, prevRegCode, action, "#0f172a");
     
     return ContentService.createTextOutput(JSON.stringify({
       status: "success",
@@ -602,7 +606,7 @@ function getOrCreateSheet(ss, name) {
 /**
  * Menyimpan, memperbarui, atau menghapus satu baris data pada sheet tertentu
  */
-function saveOrUpdateRow(sheet, rowData, regCode, action, headerBgColor) {
+function saveOrUpdateRow(sheet, rowData, regCode, prevRegCode, action, headerBgColor) {
   var headers = Object.keys(rowData);
   
   // Jika sheet baru/kosong, buat baris Header
@@ -618,14 +622,40 @@ function saveOrUpdateRow(sheet, rowData, regCode, action, headerBgColor) {
   // Baca header yang sudah ada di sheet untuk menyelaraskan urutan kolom
   var currentHeaders = sheet.getRange(1, 1, 1, sheet.getLastColumn()).getValues()[0];
   
-  // Cek apakah data dengan No Registrasi ini sudah ada (untuk update/delete)
-  if (regCode && sheet.getLastRow() > 1) {
+  // Cek apakah data sudah ada (untuk update/delete) dengan multi-pass search
+  if (sheet.getLastRow() > 1) {
     var allData = sheet.getDataRange().getValues();
     var foundIndex = -1;
-    for (var r = 1; r < allData.length; r++) {
-      if (String(allData[r][0]).trim() === String(regCode).trim()) {
-        foundIndex = r + 1; // 1-indexed
-        break;
+    
+    // Pass 1: Match by new regCode
+    if (regCode) {
+      for (var r = 1; r < allData.length; r++) {
+        if (String(allData[r][0]).trim() === String(regCode).trim()) {
+          foundIndex = r + 1; // 1-indexed
+          break;
+        }
+      }
+    }
+    
+    // Pass 2: Match by prevRegCode / old ID
+    if (foundIndex === -1 && prevRegCode) {
+      for (var r = 1; r < allData.length; r++) {
+        if (String(allData[r][0]).trim() === String(prevRegCode).trim()) {
+          foundIndex = r + 1;
+          break;
+        }
+      }
+    }
+    
+    // Pass 3: Match by building name if previous row had empty or assess_ No Registrasi
+    if (foundIndex === -1 && rowData['Nama Bangunan']) {
+      for (var r = 1; r < allData.length; r++) {
+        var rowNoReg = String(allData[r][0]).trim();
+        var rowName = String(allData[r][1]).trim(); // Column B is Nama Bangunan
+        if ((rowNoReg === "" || rowNoReg.indexOf("assess_") === 0) && rowName.toLowerCase() === String(rowData['Nama Bangunan']).toLowerCase()) {
+          foundIndex = r + 1;
+          break;
+        }
       }
     }
     

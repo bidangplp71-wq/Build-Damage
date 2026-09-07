@@ -1650,7 +1650,7 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
 
     if (target && hasGSheet) {
       const merged = { ...target, ...data, code: updatedCode, updatedAt: now };
-      directSaveToGoogleSheet(merged, googleSheetConfig, 'update').catch((e) =>
+      directSaveToGoogleSheet(merged, googleSheetConfig, 'update', target?.code || target?.id).catch((e) =>
         console.error('Direct Google Sheet update error:', e)
       );
     }
