@@ -195,7 +195,7 @@ export async function directSaveToGoogleSheet(
     includeMasterSummary: config.includeMasterSummarySheet !== false,
     spreadsheetUrl: config.spreadsheetUrl,
     spreadsheetId: spreadsheetId || undefined,
-    registrationCode: assessment.code,
+    registrationCode: assessment.code || assessment.id,
     data: rowData,
     photos: assessment.photos ? assessment.photos.map((p, idx) => ({
       id: p.id || `photo_${idx}`,

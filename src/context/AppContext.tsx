@@ -1613,6 +1613,8 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
   const updateAssessment = async (id: string, data: Partial<BuildingAssessment>) => {
     const hasGSheet = Boolean(googleSheetConfig.webhookUrl && googleSheetConfig.webhookUrl.startsWith('http'));
     const now = new Date().toISOString();
+    const target = assessments.find((a) => a.id === id);
+    const updatedCode = data.code || target?.code || target?.id || id;
 
     setAssessments((prev) =>
       prev.map((a) =>
@@ -1620,6 +1622,7 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
           ? {
               ...a,
               ...data,
+              code: updatedCode,
               googleSheetSynced: hasGSheet ? true : a.googleSheetSynced,
               googleSheetSyncedAt: hasGSheet ? now : a.googleSheetSyncedAt,
               updatedAt: now,
@@ -1628,9 +1631,8 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
       )
     );
 
-    const target = assessments.find((a) => a.id === id);
     if (db && target && !isFirestoreQuotaExceeded) {
-      const merged = { ...target, ...data, updatedAt: now };
+      const merged = { ...target, ...data, code: updatedCode, updatedAt: now };
       const cleanA = JSON.parse(JSON.stringify(merged));
       setDoc(doc(db, 'assessments', id), cleanA, { merge: true }).catch((err) => {
         if (isQuotaError(err)) setIsFirestoreQuotaExceeded(true);
@@ -1642,12 +1644,12 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
       'UPDATE_ASSESSMENT',
       'Penilaian Kerusakan',
       `Memperbarui Data Penilaian: ${target?.buildingName || id}`,
-      target?.code || id,
+      updatedCode,
       'Pembaruan data kerusakan atau pengesahan tim lapangan'
     );
 
     if (target && hasGSheet) {
-      const merged = { ...target, ...data, updatedAt: now };
+      const merged = { ...target, ...data, code: updatedCode, updatedAt: now };
       directSaveToGoogleSheet(merged, googleSheetConfig, 'update').catch((e) =>
         console.error('Direct Google Sheet update error:', e)
       );
@@ -1656,7 +1658,7 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
     return {
       success: true,
       message: hasGSheet
-        ? 'Data penilaian berhasil diperbarui & langsung tersimpan di Google Sheet.'
+        ? 'Data penilaian berhasil diperbarui & langsung memperbarui baris di Google Sheet.'
         : 'Data penilaian berhasil diperbarui.',
     };
   };
