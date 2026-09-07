@@ -14,6 +14,7 @@ import { UserManagement } from './components/UserManagement';
 import { GoogleSheetIntegration } from './components/GoogleSheetIntegration';
 import { FirebaseProtection } from './components/FirebaseProtection';
 import { UserActivityLogView } from './components/UserActivityLogView';
+import { HsbgnSettings } from './components/HsbgnSettings';
 import { SessionLockScreen } from './components/SessionLockScreen';
 import { CheckCircle2, AlertCircle, Info, X, ShieldAlert, BellRing, Building2, ArrowRight } from 'lucide-react';
 
@@ -82,6 +83,7 @@ const MainLayout: React.FC = () => {
             {(activeTab === 'google_sheet' || activeTab === 'googlesheets') && <GoogleSheetIntegration />}
             {activeTab === 'log_aktivitas' && <UserActivityLogView />}
             {(activeTab === 'firebase_shield' || activeTab === 'firebase') && <FirebaseProtection />}
+            {(activeTab === 'hsbgn_settings' || activeTab === 'hsbgn') && <HsbgnSettings />}
           </ErrorBoundary>
         </main>
 

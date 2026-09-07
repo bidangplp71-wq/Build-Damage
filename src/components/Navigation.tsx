@@ -20,6 +20,7 @@ import {
   Lock,
   LogOut,
   Activity,
+  Award,
 } from 'lucide-react';
 
 interface NavigationProps {
@@ -199,6 +200,13 @@ export const Navigation: React.FC<NavigationProps> = ({ mobileOpen, onCloseMobil
             badgeLabel: 'tersimpan',
           },
           {
+            id: 'hsbgn_settings',
+            label: 'Standar HSBGN Daerah',
+            desc: 'Atur harga satuan bangunan',
+            icon: Award,
+            badge: null,
+          },
+          {
             id: 'log_aktivitas',
             label: 'Log Akses & Analitik',
             desc: 'Audit trail user, role & sheet',
@@ -332,7 +340,8 @@ export const Navigation: React.FC<NavigationProps> = ({ mobileOpen, onCloseMobil
             (tab.id === 'input_baru' && activeTab === 'tambah') ||
             (tab.id === 'manajemen_user' && activeTab === 'users') ||
             (tab.id === 'google_sheet' && activeTab === 'googlesheets') ||
-            (tab.id === 'firebase_shield' && activeTab === 'firebase');
+            (tab.id === 'firebase_shield' && activeTab === 'firebase') ||
+            (tab.id === 'hsbgn_settings' && activeTab === 'hsbgn');
 
           return (
             <button

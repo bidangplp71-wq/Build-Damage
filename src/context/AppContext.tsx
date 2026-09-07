@@ -5,6 +5,9 @@ import {
   ROLE_LIMITS,
   ROLE_NAV_CONFIGS,
   BuildingAssessment,
+  BuildingCategory,
+  BuildingCategoryConfig,
+  BUILDING_CATEGORY_CONFIGS,
   Kecamatan,
   Desa,
   GoogleSheetConfig,
@@ -107,6 +110,12 @@ interface AppContextType {
   isFirestoreQuotaExceeded: boolean;
   firestoreConsoleUrl: string;
 
+  // HSBGN Regional Standards Configuration
+  hsbgnConfigs: Record<BuildingCategory, number>;
+  updateHsbgnConfig: (category: BuildingCategory, newHsbgn: number) => void;
+  resetHsbgnConfigs: () => void;
+  getCategoryConfig: (category: BuildingCategory) => BuildingCategoryConfig;
+
   // User Access & Activity Audit Trail Analytics
   activityLogs: UserActivityLog[];
   logUserActivity: (
@@ -157,6 +166,7 @@ const STORAGE_KEYS = {
   ACTIVITY_LOGS: 'sipandu_pupr_activity_logs_v1',
   NOTIFICATIONS: 'sipandu_pupr_notifications_v1',
   DELETED_USERS: 'sipandu_pupr_deleted_users_v3',
+  HSBGN_CONFIGS: 'sipandu_pupr_hsbgn_v1',
 };
 
 // Safe helper to read persisted deleted User IDs across refreshes & sessions
@@ -347,6 +357,56 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
       return DEFAULT_GOOGLE_SHEET_CONFIG;
     }
   });
+
+  // Initialize HSBGN Regional Standards Config
+  const [hsbgnConfigs, setHsbgnConfigs] = useState<Record<BuildingCategory, number>>(() => {
+    try {
+      const saved = localStorage.getItem(STORAGE_KEYS.HSBGN_CONFIGS);
+      if (saved) {
+        return JSON.parse(saved);
+      }
+    } catch {}
+    const defaults: Record<string, number> = {};
+    Object.keys(BUILDING_CATEGORY_CONFIGS).forEach((cat) => {
+      defaults[cat] = BUILDING_CATEGORY_CONFIGS[cat as BuildingCategory].defaultHsbgn;
+    });
+    return defaults as Record<BuildingCategory, number>;
+  });
+
+  useEffect(() => {
+    try {
+      localStorage.setItem(STORAGE_KEYS.HSBGN_CONFIGS, JSON.stringify(hsbgnConfigs));
+    } catch (e) {
+      console.error('Error saving hsbgnConfigs:', e);
+    }
+  }, [hsbgnConfigs]);
+
+  const updateHsbgnConfig = (category: BuildingCategory, newHsbgn: number) => {
+    setHsbgnConfigs((prev) => ({
+      ...prev,
+      [category]: Math.max(0, newHsbgn),
+    }));
+  };
+
+  const resetHsbgnConfigs = () => {
+    const defaults: Record<string, number> = {};
+    Object.keys(BUILDING_CATEGORY_CONFIGS).forEach((cat) => {
+      defaults[cat] = BUILDING_CATEGORY_CONFIGS[cat as BuildingCategory].defaultHsbgn;
+    });
+    setHsbgnConfigs(defaults as Record<BuildingCategory, number>);
+  };
+
+  const getCategoryConfig = (category: BuildingCategory): BuildingCategoryConfig => {
+    const base = BUILDING_CATEGORY_CONFIGS[category] || BUILDING_CATEGORY_CONFIGS['Hunian Masyarakat'];
+    const customHsbgn = hsbgnConfigs[category];
+    if (customHsbgn !== undefined) {
+      return {
+        ...base,
+        defaultHsbgn: customHsbgn,
+      };
+    }
+    return base;
+  };
 
   // Initialize Firebase Shield Config
   const [firebaseShieldConfig, setFirebaseShieldConfig] = useState<FirebaseShieldConfig>(() => {
@@ -2379,6 +2439,11 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
         updateFirebaseShieldConfig,
         isFirestoreQuotaExceeded,
         firestoreConsoleUrl: FIRESTORE_DATABASE_CONSOLE_URL,
+
+        hsbgnConfigs,
+        updateHsbgnConfig,
+        resetHsbgnConfigs,
+        getCategoryConfig,
 
         activityLogs,
         logUserActivity,

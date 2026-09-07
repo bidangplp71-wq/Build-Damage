@@ -98,6 +98,7 @@ export const AssessmentForm: React.FC = () => {
     showToast,
     googleSheetConfig,
     updateGoogleSheetConfig,
+    getCategoryConfig,
   } = useApp();
 
   const isEditMode = Boolean(selectedAssessmentForEdit);
@@ -551,7 +552,7 @@ export const AssessmentForm: React.FC = () => {
   // Handler when user selects building category
   const handleCategorySelect = (category: BuildingCategory) => {
     setBuildingCategory(category);
-    const config = BUILDING_CATEGORY_CONFIGS[category];
+    const config = getCategoryConfig(category);
     if (config) {
       setHsbgnPerM2(config.defaultHsbgn);
       setBuildingClass(config.typicalClass);
@@ -615,7 +616,7 @@ export const AssessmentForm: React.FC = () => {
     showToast(`Contoh data ${sample.category} diterapkan (NIK: ${sample.nik})!`, 'success');
   };
 
-  const currentCategoryConfig = BUILDING_CATEGORY_CONFIGS[buildingCategory] || BUILDING_CATEGORY_CONFIGS['Hunian Masyarakat'];
+  const currentCategoryConfig = getCategoryConfig(buildingCategory);
 
   // Handle component damage input change (supports up to 3 decimal digits)
   const handleComponentChange = (id: string, damageInput: number) => {
@@ -1290,7 +1291,7 @@ export const AssessmentForm: React.FC = () => {
 
           <div className="grid grid-cols-2 sm:grid-cols-4 gap-2.5">
             {(Object.keys(BUILDING_CATEGORY_CONFIGS) as BuildingCategory[]).map((catKey) => {
-              const catConfig = BUILDING_CATEGORY_CONFIGS[catKey];
+              const catConfig = getCategoryConfig(catKey);
               const isSelected = buildingCategory === catKey;
 
               const renderIcon = () => {
