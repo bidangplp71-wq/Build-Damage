@@ -1703,18 +1703,6 @@ export function parseExtractedRowsToAssessments(
       }
     }
 
-    if (parsedComponents.length === 0) {
-      if (totalDamagePercent > 0) {
-        parsedComponents = getInitialSubComponents().map((comp) => ({
-          ...comp,
-          damagePercentInput: totalDamagePercent,
-          calculatedScore: Number(((comp.bobotPercent * totalDamagePercent) / 100).toFixed(3)),
-        }));
-      } else {
-        parsedComponents = getInitialSubComponents();
-      }
-    }
-
     return {
       id,
       code,

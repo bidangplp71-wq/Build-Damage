@@ -39,27 +39,9 @@ export const AssessmentDetailModal: React.FC<Props> = ({ assessment, onClose }) 
   const [showPhotos, setShowPhotos] = useState(true);
 
   const displayComponents = React.useMemo(() => {
-    const rawComps = assessment?.components || [];
-    if (rawComps.length > 0) {
-      const hasNonZero = rawComps.some((c: any) => safeNumber(c?.damagePercentInput ?? c?.damagePercent ?? c?.calculatedScore ?? 0) > 0);
-      if (hasNonZero || !assessment.totalDamagePercent) {
-        return rawComps;
-      }
-    }
-    
-    const totalDmg = safeNumber(assessment.totalDamagePercent);
-    if (totalDmg > 0) {
-      return getInitialSubComponents().map((comp) => {
-        const calc = Number(((comp.bobotPercent * totalDmg) / 100).toFixed(3));
-        return {
-          ...comp,
-          damagePercentInput: totalDmg,
-          calculatedScore: calc,
-        };
-      });
-    }
-
-    return rawComps.length > 0 ? rawComps : getInitialSubComponents();
+    return assessment?.components && assessment.components.length > 0
+      ? assessment.components
+      : getInitialSubComponents();
   }, [assessment]);
 
   const handleSyncPhotosToDrive = async () => {
@@ -399,6 +381,11 @@ export const AssessmentDetailModal: React.FC<Props> = ({ assessment, onClose }) 
                   </tfoot>
                 </table>
               </div>
+              {!assessment.components || assessment.components.length === 0 ? (
+                <p className="text-[10px] text-amber-700 italic mt-2 bg-amber-50 border border-amber-100 rounded px-2.5 py-1 print:hidden">
+                  *Catatan: Formulir rincian tiap komponen belum terisi. Hanya total persentase kerusakan ({safeNumber(assessment.totalDamagePercent).toFixed(3)}%) yang tersimpan. Silakan tekan tombol Edit di daftar data jika ingin melengkapi rincian komponen secara detail.
+                </p>
+              ) : null}
             </div>
 
             {/* Analysis Conclusions & Cost Estimates Box */}
