@@ -594,6 +594,56 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
   const deletedAssessmentIds = useRef<Set<string>>(getStoredDeletedAssessmentIds());
   const isInitialLoad = useRef(true);
   
+  // Load Google Sheet Config dynamically from the Express full-stack server on startup
+  useEffect(() => {
+    fetch('/api/config')
+      .then((res) => res.json())
+      .then((data) => {
+        if (data.success && data.config) {
+          const { spreadsheetUrl, webhookUrl } = data.config;
+          if (spreadsheetUrl || webhookUrl) {
+            setGoogleSheetConfig((prev) => {
+              const updated = {
+                ...prev,
+                spreadsheetUrl: spreadsheetUrl || prev.spreadsheetUrl,
+                webhookUrl: webhookUrl || prev.webhookUrl,
+              };
+              try {
+                localStorage.setItem(STORAGE_KEYS.GOOGLE_SHEET, JSON.stringify(updated));
+              } catch {}
+              return updated;
+            });
+
+            // If we fetched a new config, trigger user list sync to make sure login credentials work instantly!
+            fetchUsersFromGoogleSheet({
+              spreadsheetUrl: spreadsheetUrl || '',
+              webhookUrl: webhookUrl || '',
+              sheetName: 'Daftar_Pengguna',
+              logSheetName: 'Log_Akses_Pengguna',
+              autoSync: true,
+              directSaveEnabled: true,
+            }).then((res) => {
+              if (res.success && res.users && res.users.length > 0) {
+                setUsers((prev) => {
+                  const deletedUserIds = getStoredDeletedUserIds();
+                  const userMap = new Map<string, UserAccount>();
+                  INITIAL_USERS.forEach((u) => { if (!deletedUserIds.has(u.id)) userMap.set(u.id, u); });
+                  prev.forEach((u) => { if (u && u.id && !deletedUserIds.has(u.id)) userMap.set(u.id, u); });
+                  res.users.forEach((u) => { if (u && u.id && !deletedUserIds.has(u.id)) userMap.set(u.id, u); });
+                  const merged = Array.from(userMap.values());
+                  try {
+                    localStorage.setItem(STORAGE_KEYS.USERS, JSON.stringify(merged));
+                  } catch {}
+                  return merged;
+                });
+              }
+            }).catch((err) => console.warn('Background user fetch from Sheet failed:', err));
+          }
+        }
+      })
+      .catch((err) => console.warn('Failed to load server-side google sheet config:', err));
+  }, []);
+
   // Load from Firebase ONCE on mount with Deleted IDs Filtering
   useEffect(() => {
     if (!db) {
@@ -2535,6 +2585,19 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
   const updateGoogleSheetConfig = (config: Partial<GoogleSheetConfig>) => {
     setGoogleSheetConfig((prev) => {
       const updated = { ...prev, ...config };
+      
+      // Save to server-side JSON config endpoint for robust fallback across all devices
+      if (updated.spreadsheetUrl || updated.webhookUrl) {
+        fetch('/api/config', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({
+            spreadsheetUrl: updated.spreadsheetUrl,
+            webhookUrl: updated.webhookUrl,
+          }),
+        }).catch((err) => console.warn('Server config save failed:', err));
+      }
+
       if (db && !isFirestoreQuotaExceeded) {
         setDoc(doc(db, 'system_configs', 'google_sheet'), JSON.parse(JSON.stringify(updated)), { merge: true }).catch(
           (err) => {
