@@ -1521,7 +1521,8 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
 
     let user = usersToSearch.find((u) => 
       (u.name && u.name.toLowerCase() === query) || 
-      (u.email && u.email.toLowerCase() === query)
+      (u.email && u.email.toLowerCase() === query) ||
+      (u.email && u.email.toLowerCase().split('@')[0] === query)
     );
     
     if (!user) {
@@ -1548,6 +1549,7 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
             user = merged.find((u) => 
               (u.name && u.name.toLowerCase() === query) || 
               (u.email && u.email.toLowerCase() === query) ||
+              (u.email && u.email.toLowerCase().split('@')[0] === query) ||
               (u.name && u.name.toLowerCase().includes(query))
             );
           }
@@ -1578,6 +1580,7 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
             user = merged.find((u) => 
               (u.name && u.name.toLowerCase() === query) || 
               (u.email && u.email.toLowerCase() === query) ||
+              (u.email && u.email.toLowerCase().split('@')[0] === query) ||
               (u.name && u.name.toLowerCase().includes(query))
             );
           }

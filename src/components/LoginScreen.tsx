@@ -1,5 +1,6 @@
 import React, { useState } from 'react';
 import { useApp } from '../context/AppContext';
+import { isConfiguredSheetUrl } from '../services/googleSheetsService';
 import {
   Building2,
   Lock,
@@ -10,15 +11,36 @@ import {
   Eye,
   EyeOff,
   ArrowRight,
+  Database,
+  Link2,
+  CheckCircle2,
+  AlertCircle,
+  Loader2,
+  Settings,
 } from 'lucide-react';
 
 export const LoginScreen: React.FC = () => {
-  const { loginByNamePassword, showToast } = useApp();
+  const {
+    loginByNamePassword,
+    showToast,
+    googleSheetConfig,
+    updateGoogleSheetConfig,
+    fetchUsersFromSheet,
+  } = useApp();
+
   const [nameInput, setNameInput] = useState('');
   const [passwordInput, setPasswordInput] = useState('');
   const [showPassword, setShowPassword] = useState(false);
   const [errorMsg, setErrorMsg] = useState('');
   const [loading, setLoading] = useState(false);
+
+  // Emergency Google Sheet Config States
+  const [showEmergencyConfig, setShowEmergencyConfig] = useState(false);
+  const [spreadsheetUrlInput, setSpreadsheetUrlInput] = useState(googleSheetConfig.spreadsheetUrl || '');
+  const [webhookUrlInput, setWebhookUrlInput] = useState(googleSheetConfig.webhookUrl || '');
+  const [syncLoading, setSyncLoading] = useState(false);
+  const [syncStatus, setSyncStatus] = useState<'idle' | 'success' | 'error'>('idle');
+  const [syncMessage, setSyncMessage] = useState('');
 
   const handleLogin = async (e: React.FormEvent) => {
     e.preventDefault();
@@ -41,6 +63,61 @@ export const LoginScreen: React.FC = () => {
     } catch (err) {
       setLoading(false);
       setErrorMsg('Terjadi kesalahan saat memproses login.');
+    }
+  };
+
+  const handleApplySheetConfig = async () => {
+    if (!spreadsheetUrlInput.trim()) {
+      setSyncStatus('error');
+      setSyncMessage('Tautan Google Sheet tidak boleh kosong.');
+      return;
+    }
+
+    if (!isConfiguredSheetUrl(spreadsheetUrlInput)) {
+      setSyncStatus('error');
+      setSyncMessage('Format Tautan Google Sheet tidak valid.');
+      return;
+    }
+
+    setSyncLoading(true);
+    setSyncStatus('idle');
+    setSyncMessage('');
+
+    try {
+      // 1. Save config locally
+      await updateGoogleSheetConfig({
+        spreadsheetUrl: spreadsheetUrlInput.trim(),
+        webhookUrl: webhookUrlInput.trim(),
+      });
+
+      // 2. Fetch users directly
+      // Since updateGoogleSheetConfig updates state asynchronously, we temporarily pass the new values inside local storage 
+      // or directly rely on context if it handles it.
+      // fetchUsersFromSheet uses googleSheetConfig from context. Let's make sure it's synced.
+      // To guarantee instant fetch with entered credentials, let's call it after updating.
+      // Since fetchUsersFromSheet is an async action in context, we wait a tiny moment or fetch directly
+      setTimeout(async () => {
+        try {
+          const res = await fetchUsersFromSheet();
+          setSyncLoading(false);
+          if (res.success) {
+            setSyncStatus('success');
+            setSyncMessage(res.message || 'Berhasil menghubungkan Google Sheet & menyinkronkan akun pengguna!');
+            showToast('Google Sheet berhasil dihubungkan!', 'success');
+          } else {
+            setSyncStatus('error');
+            setSyncMessage(res.message || 'Gagal membaca data dari Google Sheet. Silakan periksa izin akses sheet (Share as Anyone with link can view).');
+          }
+        } catch (err: any) {
+          setSyncLoading(false);
+          setSyncStatus('error');
+          setSyncMessage(err?.message || 'Gagal menyinkronkan Google Sheet.');
+        }
+      }, 300);
+    } catch (err: any) {
+      setSyncLoading(false);
+      setSyncStatus('error');
+      setSyncMessage(err?.message || 'Gagal menyimpan konfigurasi.');
     }
   };
 
@@ -76,7 +153,7 @@ export const LoginScreen: React.FC = () => {
               <span>Autentikasi Akun Pengguna</span>
             </h2>
             <p className="text-xs text-slate-400 mt-0.5">
-              Masukkan nama pengguna, email, dan kata sandi sesuai peran fungsional Anda.
+              Masukkan nama pengguna, email, atau email-prefix (username) dan kata sandi Anda.
             </p>
           </div>
 
@@ -97,7 +174,7 @@ export const LoginScreen: React.FC = () => {
                     setNameInput(e.target.value);
                     if (errorMsg) setErrorMsg('');
                   }}
-                  placeholder="contoh: nama pengguna atau email@contoh.com"
+                  placeholder="contoh: bidangplp71 atau email@contoh.com"
                   className="w-full pl-10 pr-4 py-3 bg-slate-950 border border-slate-800 rounded-xl text-sm text-white placeholder-slate-600 focus:outline-none focus:ring-2 focus:ring-amber-500 focus:border-amber-500 transition-all font-medium"
                 />
               </div>
@@ -148,6 +225,88 @@ export const LoginScreen: React.FC = () => {
               <ArrowRight className="w-4 h-4" />
             </button>
           </form>
+
+          {/* Emergency Bypass / Config Options */}
+          <div className="border-t border-slate-800 pt-4 mt-2">
+            <button
+              type="button"
+              onClick={() => setShowEmergencyConfig(!showEmergencyConfig)}
+              className="w-full py-2 px-3 rounded-lg bg-slate-950 border border-slate-800 hover:border-slate-700 text-[11px] text-slate-400 hover:text-slate-200 flex items-center justify-between transition-colors font-medium cursor-pointer"
+            >
+              <div className="flex items-center gap-2">
+                <Database className="w-3.5 h-3.5 text-amber-500 animate-pulse" />
+                <span>Integrasi Google Sheet (Mode Penyelamatan)</span>
+              </div>
+              <Settings className={`w-3.5 h-3.5 transition-transform ${showEmergencyConfig ? 'rotate-90 text-amber-500' : ''}`} />
+            </button>
+
+            {showEmergencyConfig && (
+              <div className="mt-3 p-3 bg-slate-950/60 rounded-xl border border-slate-800/80 space-y-3 animate-in slide-in-from-top-2 duration-200">
+                <p className="text-[10px] text-slate-400 leading-relaxed">
+                  ⚠️ <strong>Info Limit Firestore:</strong> Jika akun baru Anda belum terbaca di perangkat ini, harap tempel Tautan Google Sheet Anda di bawah ini untuk mengaktifkan sinkronisasi tim langsung ke browser ini.
+                </p>
+
+                <div className="space-y-2">
+                  <div>
+                    <label className="block text-[10px] font-semibold text-slate-400 mb-1">
+                      Tautan Google Sheet (Spreadsheet URL)
+                    </label>
+                    <input
+                      type="text"
+                      value={spreadsheetUrlInput}
+                      onChange={(e) => setSpreadsheetUrlInput(e.target.value)}
+                      placeholder="https://docs.google.com/spreadsheets/d/..."
+                      className="w-full px-2.5 py-1.5 bg-slate-900 border border-slate-800 rounded-lg text-[11px] text-white focus:outline-none focus:ring-1 focus:ring-amber-500 placeholder-slate-700"
+                    />
+                  </div>
+
+                  <div>
+                    <label className="block text-[10px] font-semibold text-slate-400 mb-1 flex items-center justify-between">
+                      <span>Tautan Webhook Apps Script (Opsional)</span>
+                      <span className="text-[9px] text-slate-600 font-normal">Untuk simpan langsung</span>
+                    </label>
+                    <input
+                      type="text"
+                      value={webhookUrlInput}
+                      onChange={(e) => setWebhookUrlInput(e.target.value)}
+                      placeholder="https://script.google.com/macros/s/.../exec"
+                      className="w-full px-2.5 py-1.5 bg-slate-900 border border-slate-800 rounded-lg text-[11px] text-white focus:outline-none focus:ring-1 focus:ring-amber-500 placeholder-slate-700"
+                    />
+                  </div>
+
+                  {syncMessage && (
+                    <div className={`p-2 rounded-lg text-[10px] flex items-start gap-1.5 leading-relaxed ${
+                      syncStatus === 'success' ? 'bg-emerald-500/10 border border-emerald-500/20 text-emerald-400' :
+                      syncStatus === 'error' ? 'bg-rose-500/10 border border-rose-500/20 text-rose-400' :
+                      'bg-slate-900 border border-slate-800 text-slate-400'
+                    }`}>
+                      {syncStatus === 'success' ? <CheckCircle2 className="w-3.5 h-3.5 shrink-0 text-emerald-400 mt-0.5" /> : <AlertCircle className="w-3.5 h-3.5 shrink-0 text-rose-400 mt-0.5" />}
+                      <span>{syncMessage}</span>
+                    </div>
+                  )}
+
+                  <button
+                    type="button"
+                    disabled={syncLoading}
+                    onClick={handleApplySheetConfig}
+                    className="w-full py-2 px-3 rounded-lg bg-amber-500 hover:bg-amber-400 disabled:bg-slate-800 text-slate-950 disabled:text-slate-600 text-[11px] font-bold flex items-center justify-center gap-1.5 transition-all cursor-pointer"
+                  >
+                    {syncLoading ? (
+                      <>
+                        <Loader2 className="w-3.5 h-3.5 animate-spin" />
+                        <span>Menyinkronkan Akun...</span>
+                      </>
+                    ) : (
+                      <>
+                        <Link2 className="w-3.5 h-3.5" />
+                        <span>Hubungkan & Sinkronkan Akun</span>
+                      </>
+                    )}
+                  </button>
+                </div>
+              </div>
+            )}
+          </div>
         </div>
 
         {/* Footer info */}

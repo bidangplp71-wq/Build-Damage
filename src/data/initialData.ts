@@ -169,8 +169,8 @@ export const INITIAL_USERS: UserAccount[] = [
 export const INITIAL_ASSESSMENTS: BuildingAssessment[] = [];
 
 export const DEFAULT_GOOGLE_SHEET_CONFIG: GoogleSheetConfig = {
-  spreadsheetUrl: '',
-  webhookUrl: '',
+  spreadsheetUrl: (typeof import.meta !== 'undefined' && (import.meta as any).env && (import.meta as any).env.VITE_SPREADSHEET_URL) || '',
+  webhookUrl: (typeof import.meta !== 'undefined' && (import.meta as any).env && (import.meta as any).env.VITE_WEBHOOK_URL) || '',
   sheetName: 'Data_Penilaian_Kerusakan_PUPR',
   logSheetName: 'Log_Akses_Pengguna',
   autoSync: true,
