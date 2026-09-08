@@ -1,9 +1,10 @@
 import React, { useState, useMemo } from 'react';
 import { useApp } from '../context/AppContext';
-import { HardDrive, Loader2, Save, Building2, MapPin, Pencil, Search, PlusCircle } from 'lucide-react';
+import { HardDrive, Loader2, Save, Building2, MapPin, Pencil, PlusCircle, Link as LinkIcon } from 'lucide-react';
+import { BuildingAssessment } from '../types';
 
 export const DriveDirectory: React.FC = () => {
-  const { currentUser, assessments, updateAssessment, showToast } = useApp();
+  const { currentUser, assessments, updateAssessment, addAssessment, showToast } = useApp();
   
   const [editingId, setEditingId] = useState<string | null>(null);
   const [tempUrl, setTempUrl] = useState('');
@@ -11,6 +12,8 @@ export const DriveDirectory: React.FC = () => {
   
   // Dropdown states for surveyors
   const [selectedBuildingId, setSelectedBuildingId] = useState('');
+  const [isManualMode, setIsManualMode] = useState(false);
+  const [manualBuildingName, setManualBuildingName] = useState('');
   const [newDriveUrl, setNewDriveUrl] = useState('');
   const [isAddingNew, setIsAddingNew] = useState(false);
 
@@ -29,35 +32,100 @@ export const DriveDirectory: React.FC = () => {
     return list.sort((a, b) => new Date(b.assessmentDate).getTime() - new Date(a.assessmentDate).getTime());
   }, [assessments, currentUser]);
 
-  const handleSaveLink = async (buildingId: string, url: string, isFromForm = false) => {
-    if (!url.includes('drive.google.com') && url.trim() !== '') {
+  const handleSaveLinkNew = async () => {
+    if (!newDriveUrl.includes('drive.google.com') && newDriveUrl.trim() !== '') {
       showToast('Harap masukkan tautan Google Drive yang valid', 'error');
       return;
     }
-    
-    if (isFromForm) {
-      setIsAddingNew(true);
-    } else {
-      setIsSaving(true);
+
+    if (isManualMode && !manualBuildingName.trim()) {
+      showToast('Nama gedung wajib diisi jika menggunakan mode manual', 'error');
+      return;
     }
-    
-    // Update local assessment data
-    const res = await updateAssessment(buildingId, { backupDriveUrl: url.trim() });
-    
-    if (res.success) {
-      showToast('Tautan Google Drive untuk gedung berhasil disimpan!', 'success');
-      if (isFromForm) {
-        setSelectedBuildingId('');
-        setNewDriveUrl('');
+
+    setIsAddingNew(true);
+
+    if (isManualMode) {
+      // Create a stub assessment
+      const stubAssessment: BuildingAssessment = {
+        id: `reg_${Date.now()}_${Math.random().toString(36).substring(2, 6)}`,
+        buildingName: manualBuildingName.trim(),
+        backupDriveUrl: newDriveUrl.trim(),
+        disasterType: 'Lainnya',
+        disasterDate: new Date().toISOString().split('T')[0],
+        assessmentDate: new Date().toISOString().split('T')[0],
+        buildingCategory: 'Fasilitas Umum Lainnya',
+        yearBuilt: new Date().getFullYear(),
+        ownerAgency: 'Belum Diatur (Input via Drive)',
+        responsibleDepartment: 'Dinas Pekerjaan Umum dan Penataan Ruang',
+        buildingClass: 'Bangunan Sederhana',
+        totalFloorAreaM2: 0,
+        numberOfFloors: 1,
+        kecamatanId: '',
+        kecamatanName: '-',
+        desaId: '',
+        desaName: '-',
+        detailedAddress: '-',
+        components: [],
+        totalDamagePercent: 0,
+        damageClassification: 'Rusak Ringan',
+        hsbgnPerM2: 0,
+        treatmentCostPerM2: 0,
+        demolitionPercent: 8,
+        demolitionCostPerM2: 0,
+        totalCostPerM2: 0,
+        totalRehabCost: 0,
+        roundedRehabCost: 0,
+        costTerbilang: 'Nol Rupiah',
+        verificationStatus: 'Menunggu Verifikasi',
+        photos: [],
+        createdAt: new Date().toISOString(),
+        createdBy: currentUser.id,
+        createdByName: currentUser.name,
+      };
+
+      const res = await addAssessment(stubAssessment);
+      if (res.success) {
+        showToast('Data gedung baru beserta tautan Drive berhasil ditambahkan!', 'success');
+        resetForm();
       } else {
-        setEditingId(null);
+        showToast(res.message, 'error');
       }
+    } else {
+      // Update existing
+      const res = await updateAssessment(selectedBuildingId, { backupDriveUrl: newDriveUrl.trim() });
+      if (res.success) {
+        showToast('Tautan Google Drive untuk gedung berhasil disimpan!', 'success');
+        resetForm();
+      } else {
+        showToast(res.message, 'error');
+      }
+    }
+
+    setIsAddingNew(false);
+  };
+
+  const handleUpdateInline = async (buildingId: string) => {
+    if (!tempUrl.includes('drive.google.com') && tempUrl.trim() !== '') {
+      showToast('Harap masukkan tautan Google Drive yang valid', 'error');
+      return;
+    }
+    setIsSaving(true);
+    const res = await updateAssessment(buildingId, { backupDriveUrl: tempUrl.trim() });
+    if (res.success) {
+      showToast('Tautan Google Drive berhasil diperbarui!', 'success');
+      setEditingId(null);
     } else {
       showToast(res.message, 'error');
     }
-    
-    if (isFromForm) setIsAddingNew(false);
-    else setIsSaving(false);
+    setIsSaving(false);
+  };
+
+  const resetForm = () => {
+    setSelectedBuildingId('');
+    setIsManualMode(false);
+    setManualBuildingName('');
+    setNewDriveUrl('');
   };
 
   const startEdit = (id: string, currentUrl: string) => {
@@ -65,7 +133,6 @@ export const DriveDirectory: React.FC = () => {
     setTempUrl(currentUrl || '');
   };
 
-  // Only allow setting link for surveyor/admin (not read-only roles)
   const canSetLink = !['admin_publik', 'admin_verifikator'].includes(currentUser.role);
 
   return (
@@ -77,7 +144,7 @@ export const DriveDirectory: React.FC = () => {
             Direktori Drive Backup Gedung
           </h2>
           <p className="text-sm text-slate-500 mt-1">
-            Manajemen tautan folder Google Drive untuk foto-foto lapangan per gedung yang disurvei.
+            Manajemen tautan folder Google Drive untuk backup foto-foto lapangan.
           </p>
         </div>
       </div>
@@ -92,7 +159,7 @@ export const DriveDirectory: React.FC = () => {
             <div className="flex-1 space-y-2">
               <h3 className="text-lg font-bold text-slate-800">Petunjuk Penggunaan Tautan Drive per Gedung</h3>
               <p className="text-sm text-slate-500 leading-relaxed">
-                Setiap data gedung kini memiliki kolom <strong>Tautan Google Drive</strong> masing-masing. Surveyor dapat memasukkan link folder Drive yang berisi foto-foto asli dari gedung yang bersangkutan. Hal ini sangat berguna jika sistem gagal mengunggah foto karena ukuran file terlalu besar. Pastikan hak akses folder Drive diatur menjadi <strong>"Siapa saja yang memiliki link (Pelihat)"</strong>.
+                Tautkan folder Google Drive yang berisi foto-foto asli dari gedung yang disurvei. Jika nama gedung belum terdaftar di aplikasi (misalnya karena belum sempat mengisi form), Anda dapat memilih opsi <strong>"+ Input Nama Gedung Manual"</strong> pada pilihan nama gedung di bawah. Pastikan akses folder Drive diatur menjadi <strong>"Siapa saja yang memiliki link (Pelihat)"</strong>.
               </p>
             </div>
           </div>
@@ -108,19 +175,41 @@ export const DriveDirectory: React.FC = () => {
           
           <div className="grid grid-cols-1 md:grid-cols-12 gap-4">
             <div className="md:col-span-5">
-              <label className="block text-sm font-bold text-slate-700 mb-1.5">Pilih Nama Gedung / Fasilitas</label>
+              <label className="block text-sm font-bold text-slate-700 mb-1.5">Pilih / Input Nama Gedung</label>
               <select
-                value={selectedBuildingId}
-                onChange={(e) => setSelectedBuildingId(e.target.value)}
+                value={isManualMode ? 'MANUAL' : selectedBuildingId}
+                onChange={(e) => {
+                  if (e.target.value === 'MANUAL') {
+                    setIsManualMode(true);
+                    setSelectedBuildingId('');
+                  } else {
+                    setIsManualMode(false);
+                    setSelectedBuildingId(e.target.value);
+                  }
+                }}
                 className="w-full px-4 py-2.5 rounded-xl border border-slate-200 focus:outline-none focus:ring-2 focus:ring-indigo-500 focus:border-indigo-500 bg-slate-50 font-medium text-slate-700"
               >
-                <option value="">-- Pilih Gedung --</option>
+                <option value="">-- Pilih Gedung Terdaftar --</option>
                 {assessments.map(a => (
                   <option key={a.id} value={a.id}>
-                    {a.buildingName} {a.desaName ? `(${a.desaName})` : ''}
+                    {a.buildingName} {a.desaName && a.desaName !== '-' ? `(${a.desaName})` : ''}
                   </option>
                 ))}
+                <option value="MANUAL" className="font-bold text-indigo-600">+ Input Nama Gedung Manual (Belum Terdaftar)</option>
               </select>
+
+              {isManualMode && (
+                <div className="mt-3 animate-in fade-in slide-in-from-top-2">
+                  <input
+                    type="text"
+                    value={manualBuildingName}
+                    onChange={(e) => setManualBuildingName(e.target.value)}
+                    placeholder="Ketik nama gedung baru..."
+                    className="w-full px-4 py-2.5 rounded-xl border border-indigo-200 focus:outline-none focus:ring-2 focus:ring-indigo-500 focus:border-indigo-500 bg-white font-medium text-slate-700 shadow-sm"
+                  />
+                  <p className="text-[10px] text-slate-500 mt-1.5">Data gedung sementara akan dibuat. Anda bisa melengkapi form detailnya nanti di menu Data Gedung.</p>
+                </div>
+              )}
             </div>
             
             <div className="md:col-span-5">
@@ -134,10 +223,10 @@ export const DriveDirectory: React.FC = () => {
               />
             </div>
             
-            <div className="md:col-span-2 flex items-end">
+            <div className="md:col-span-2 flex items-start mt-7">
               <button
-                onClick={() => handleSaveLink(selectedBuildingId, newDriveUrl, true)}
-                disabled={!selectedBuildingId || isAddingNew}
+                onClick={handleSaveLinkNew}
+                disabled={(isManualMode ? !manualBuildingName : !selectedBuildingId) || isAddingNew}
                 className="w-full px-4 py-2.5 bg-indigo-600 hover:bg-indigo-700 disabled:opacity-50 disabled:cursor-not-allowed text-white rounded-xl text-sm font-bold flex justify-center items-center gap-2 transition-colors"
               >
                 {isAddingNew ? <Loader2 className="w-4 h-4 animate-spin" /> : <Save className="w-4 h-4" />}
@@ -178,7 +267,8 @@ export const DriveDirectory: React.FC = () => {
                     <div className="font-bold text-slate-800">{building.buildingName}</div>
                     <div className="text-xs text-slate-500 mt-1 flex items-center gap-1.5">
                       <MapPin className="w-3.5 h-3.5 text-slate-400" />
-                      {building.desaName}, Kec. {building.kecamatanName}
+                      {building.desaName !== '-' ? `${building.desaName}, ` : ''} 
+                      {building.kecamatanName !== '-' ? `Kec. ${building.kecamatanName}` : 'Lokasi Belum Diatur'}
                     </div>
                   </td>
                   <td className="px-5 py-4">
@@ -218,7 +308,7 @@ export const DriveDirectory: React.FC = () => {
                           Batal
                         </button>
                         <button 
-                          onClick={() => handleSaveLink(building.id, tempUrl, false)}
+                          onClick={() => handleUpdateInline(building.id)}
                           disabled={isSaving}
                           className="px-3 py-1.5 bg-indigo-600 hover:bg-indigo-700 text-white rounded-lg text-xs font-bold flex items-center gap-1.5 transition-colors disabled:opacity-50"
                         >
