@@ -1,6 +1,6 @@
 import React, { useState, useMemo } from 'react';
 import { useApp } from '../context/AppContext';
-import { HardDrive, ExternalLink, Link as LinkIcon, ShieldCheck, User as UserIcon, Loader2, Save, ArrowUpRight, Building2, MapPin, Pencil } from 'lucide-react';
+import { HardDrive, Loader2, Save, Building2, MapPin, Pencil, Search, PlusCircle } from 'lucide-react';
 
 export const DriveDirectory: React.FC = () => {
   const { currentUser, assessments, updateAssessment, showToast } = useApp();
@@ -8,46 +8,65 @@ export const DriveDirectory: React.FC = () => {
   const [editingId, setEditingId] = useState<string | null>(null);
   const [tempUrl, setTempUrl] = useState('');
   const [isSaving, setIsSaving] = useState(false);
+  
+  // Dropdown states for surveyors
+  const [selectedBuildingId, setSelectedBuildingId] = useState('');
+  const [newDriveUrl, setNewDriveUrl] = useState('');
+  const [isAddingNew, setIsAddingNew] = useState(false);
 
-  // Filter out buildings
+  // Filter out buildings for the table
   const displayBuildings = useMemo(() => {
     let list = assessments;
-    // If not admin/verifikator/publik, show only my buildings
+    // If not admin/verifikator/publik, show only my buildings OR buildings that have a link
     if (!['super_admin', 'admin', 'admin_verifikator', 'admin_publik'].includes(currentUser.role)) {
       list = assessments.filter(a => 
         (a as any).createdBy === currentUser.id || 
         (a as any).author === currentUser.name ||
-        (a as any).createdByName === currentUser.name
+        (a as any).createdByName === currentUser.name ||
+        a.backupDriveUrl
       );
     }
     return list.sort((a, b) => new Date(b.assessmentDate).getTime() - new Date(a.assessmentDate).getTime());
   }, [assessments, currentUser]);
 
-  const handleSaveLink = async (buildingId: string) => {
-    if (!tempUrl.includes('drive.google.com') && tempUrl.trim() !== '') {
+  const handleSaveLink = async (buildingId: string, url: string, isFromForm = false) => {
+    if (!url.includes('drive.google.com') && url.trim() !== '') {
       showToast('Harap masukkan tautan Google Drive yang valid', 'error');
       return;
     }
     
-    setIsSaving(true);
+    if (isFromForm) {
+      setIsAddingNew(true);
+    } else {
+      setIsSaving(true);
+    }
     
     // Update local assessment data
-    const res = await updateAssessment(buildingId, { backupDriveUrl: tempUrl.trim() });
+    const res = await updateAssessment(buildingId, { backupDriveUrl: url.trim() });
     
     if (res.success) {
       showToast('Tautan Google Drive untuk gedung berhasil disimpan!', 'success');
-      setEditingId(null);
+      if (isFromForm) {
+        setSelectedBuildingId('');
+        setNewDriveUrl('');
+      } else {
+        setEditingId(null);
+      }
     } else {
       showToast(res.message, 'error');
     }
     
-    setIsSaving(false);
+    if (isFromForm) setIsAddingNew(false);
+    else setIsSaving(false);
   };
 
   const startEdit = (id: string, currentUrl: string) => {
     setEditingId(id);
     setTempUrl(currentUrl || '');
   };
+
+  // Only allow setting link for surveyor/admin (not read-only roles)
+  const canSetLink = !['admin_publik', 'admin_verifikator'].includes(currentUser.role);
 
   return (
     <div className="space-y-6 animate-in fade-in slide-in-from-bottom-4 duration-500">
@@ -73,12 +92,61 @@ export const DriveDirectory: React.FC = () => {
             <div className="flex-1 space-y-2">
               <h3 className="text-lg font-bold text-slate-800">Petunjuk Penggunaan Tautan Drive per Gedung</h3>
               <p className="text-sm text-slate-500 leading-relaxed">
-                Setiap data gedung kini memiliki kolom <strong>Tautan Google Drive</strong> masing-masing. Surveyor dapat memasukkan link folder Drive yang berisi foto-foto asli dari gedung yang bersangkutan. Hal ini sangat berguna jika sistem gagal mengunggah foto karena ukuran file terlalu besar, sehingga tim verifikator bisa mendownload foto langsung dari folder Drive tersebut. Pastikan hak akses folder Drive diatur menjadi <strong>"Siapa saja yang memiliki link (Pelihat)"</strong>.
+                Setiap data gedung kini memiliki kolom <strong>Tautan Google Drive</strong> masing-masing. Surveyor dapat memasukkan link folder Drive yang berisi foto-foto asli dari gedung yang bersangkutan. Hal ini sangat berguna jika sistem gagal mengunggah foto karena ukuran file terlalu besar. Pastikan hak akses folder Drive diatur menjadi <strong>"Siapa saja yang memiliki link (Pelihat)"</strong>.
               </p>
             </div>
           </div>
         </div>
       </div>
+
+      {canSetLink && (
+        <div className="bg-white rounded-2xl shadow-sm border border-slate-200 overflow-hidden p-5 sm:p-6">
+          <div className="flex items-center gap-2 mb-5">
+            <PlusCircle className="w-5 h-5 text-indigo-600" />
+            <h3 className="font-bold text-slate-800">Tambahkan Link G-Drive ke Gedung</h3>
+          </div>
+          
+          <div className="grid grid-cols-1 md:grid-cols-12 gap-4">
+            <div className="md:col-span-5">
+              <label className="block text-sm font-bold text-slate-700 mb-1.5">Pilih Nama Gedung / Fasilitas</label>
+              <select
+                value={selectedBuildingId}
+                onChange={(e) => setSelectedBuildingId(e.target.value)}
+                className="w-full px-4 py-2.5 rounded-xl border border-slate-200 focus:outline-none focus:ring-2 focus:ring-indigo-500 focus:border-indigo-500 bg-slate-50 font-medium text-slate-700"
+              >
+                <option value="">-- Pilih Gedung --</option>
+                {assessments.map(a => (
+                  <option key={a.id} value={a.id}>
+                    {a.buildingName} {a.desaName ? `(${a.desaName})` : ''}
+                  </option>
+                ))}
+              </select>
+            </div>
+            
+            <div className="md:col-span-5">
+              <label className="block text-sm font-bold text-slate-700 mb-1.5">Tautan / Link Google Drive</label>
+              <input
+                type="url"
+                value={newDriveUrl}
+                onChange={(e) => setNewDriveUrl(e.target.value)}
+                placeholder="https://drive.google.com/drive/folders/..."
+                className="w-full px-4 py-2.5 rounded-xl border border-slate-200 focus:outline-none focus:ring-2 focus:ring-indigo-500 focus:border-indigo-500 bg-white font-medium text-slate-700"
+              />
+            </div>
+            
+            <div className="md:col-span-2 flex items-end">
+              <button
+                onClick={() => handleSaveLink(selectedBuildingId, newDriveUrl, true)}
+                disabled={!selectedBuildingId || isAddingNew}
+                className="w-full px-4 py-2.5 bg-indigo-600 hover:bg-indigo-700 disabled:opacity-50 disabled:cursor-not-allowed text-white rounded-xl text-sm font-bold flex justify-center items-center gap-2 transition-colors"
+              >
+                {isAddingNew ? <Loader2 className="w-4 h-4 animate-spin" /> : <Save className="w-4 h-4" />}
+                Simpan
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
 
       <div className="bg-white rounded-2xl shadow-sm border border-slate-200 overflow-hidden">
         <div className="p-4 sm:p-5 border-b border-slate-200 bg-slate-50 flex flex-col sm:flex-row sm:items-center justify-between gap-4">
@@ -87,16 +155,11 @@ export const DriveDirectory: React.FC = () => {
               <Building2 className="w-5 h-5 text-slate-500" />
               {['super_admin', 'admin', 'admin_verifikator', 'admin_publik'].includes(currentUser.role) 
                 ? 'Daftar Seluruh Data Gedung & Backup Drive'
-                : 'Daftar Gedung Saya & Backup Drive'}
+                : 'Daftar Gedung Saya & Gedung Lain (Ber-Link)'}
             </h3>
-            <p className="text-xs text-slate-500 mt-1">
-              {['super_admin', 'admin', 'admin_verifikator', 'admin_publik'].includes(currentUser.role) 
-                ? 'Klik Buka Folder untuk melihat foto backup yang disediakan surveyor.'
-                : 'Klik Edit (ikon pensil) untuk menempelkan link Google Drive Anda.'}
-            </p>
           </div>
           <div className="px-3 py-1 bg-white border border-slate-200 rounded-lg text-xs font-bold text-slate-600 shadow-sm">
-            Total Data: {displayBuildings.length}
+            Total Data Tampil: {displayBuildings.length}
           </div>
         </div>
         <div className="overflow-x-auto max-h-[600px] overflow-y-auto">
@@ -155,7 +218,7 @@ export const DriveDirectory: React.FC = () => {
                           Batal
                         </button>
                         <button 
-                          onClick={() => handleSaveLink(building.id)}
+                          onClick={() => handleSaveLink(building.id, tempUrl, false)}
                           disabled={isSaving}
                           className="px-3 py-1.5 bg-indigo-600 hover:bg-indigo-700 text-white rounded-lg text-xs font-bold flex items-center gap-1.5 transition-colors disabled:opacity-50"
                         >
@@ -165,7 +228,7 @@ export const DriveDirectory: React.FC = () => {
                       </div>
                     ) : (
                       <div className="flex items-center justify-end gap-2">
-                        {(!['admin_publik', 'admin_verifikator'].includes(currentUser.role)) && (
+                        {canSetLink && (
                           <button 
                             onClick={() => startEdit(building.id, building.backupDriveUrl || '')}
                             className="inline-flex items-center justify-center gap-1.5 px-3 py-1.5 bg-white text-slate-600 hover:bg-slate-100 rounded-lg text-xs font-bold transition-colors border border-slate-200"
