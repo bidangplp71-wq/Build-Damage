@@ -20,7 +20,7 @@ export const LoginScreen: React.FC = () => {
   const [errorMsg, setErrorMsg] = useState('');
   const [loading, setLoading] = useState(false);
 
-  const handleLogin = (e: React.FormEvent) => {
+  const handleLogin = async (e: React.FormEvent) => {
     e.preventDefault();
     if (!nameInput.trim() || !passwordInput.trim()) {
       setErrorMsg('Nama pengguna/email dan kata sandi wajib diisi.');
@@ -30,15 +30,18 @@ export const LoginScreen: React.FC = () => {
     setLoading(true);
     setErrorMsg('');
 
-    setTimeout(() => {
-      const res = loginByNamePassword(nameInput.trim(), passwordInput);
+    try {
+      const res = await loginByNamePassword(nameInput.trim(), passwordInput);
       setLoading(false);
       if (res.success) {
         showToast(res.message, 'success');
       } else {
         setErrorMsg(res.message);
       }
-    }, 250);
+    } catch (err) {
+      setLoading(false);
+      setErrorMsg('Terjadi kesalahan saat memproses login.');
+    }
   };
 
   return (

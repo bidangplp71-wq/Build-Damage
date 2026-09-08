@@ -115,7 +115,7 @@ export function isQuotaError(err: unknown): boolean {
   if (!err) return false;
   const msg = err instanceof Error ? err.message : String(err);
   const code = (err as any)?.code || '';
-  const isMatch = (
+  return (
     code === 'resource-exhausted' ||
     msg.includes('resource-exhausted') ||
     msg.includes('Quota limit exceeded') ||
@@ -124,19 +124,9 @@ export function isQuotaError(err: unknown): boolean {
     msg.includes('Quota exceeded') ||
     msg.includes('maximum backoff delay')
   );
-  if (isMatch) {
-    pauseFirestoreNetwork().catch(() => {});
-    try {
-      localStorage.setItem('sipandu_pupr_quota_exceeded', 'true');
-    } catch {}
-  }
-  return isMatch;
 }
 
 export function handleFirestoreError(error: unknown, operationType: OperationType, path: string | null) {
-  if (isQuotaError(error)) {
-    pauseFirestoreNetwork().catch(() => {});
-  }
   const errInfo: FirestoreErrorInfo = {
     error: error instanceof Error ? error.message : String(error),
     authInfo: {

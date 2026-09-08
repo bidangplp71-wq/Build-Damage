@@ -60,8 +60,8 @@ interface AppContextType {
   updateUser: (id: string, userData: Partial<UserAccount> & { plainPassword?: string }) => { success: boolean; message: string };
   updateUserPassword: (targetUserId: string, newPlainPassword: string) => { success: boolean; message: string };
   loginWithPassword: (user: UserAccount, passwordInput: string) => { success: boolean; message: string };
-  loginByEmailPassword: (emailInput: string, passwordInput: string) => { success: boolean; message: string };
-  loginByNamePassword: (nameInput: string, passwordInput: string) => { success: boolean; message: string };
+  loginByEmailPassword: (emailInput: string, passwordInput: string) => Promise<{ success: boolean; message: string }>;
+  loginByNamePassword: (nameInput: string, passwordInput: string) => Promise<{ success: boolean; message: string }>;
   logout: () => void;
   canCurrentUserManagePassword: (targetRole: UserRole) => boolean;
   canCurrentUserViewPassword: (targetRole: UserRole) => boolean;
@@ -554,9 +554,9 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
   const deletedAssessmentIds = useRef<Set<string>>(getStoredDeletedAssessmentIds());
   const isInitialLoad = useRef(true);
   
-  // Load from Firebase ONCE on mount with Quota Protection and Deleted IDs Filtering
+  // Load from Firebase ONCE on mount with Deleted IDs Filtering
   useEffect(() => {
-    if (!db || isFirestoreQuotaExceeded) {
+    if (!db) {
       isInitialLoad.current = false;
       return;
     }
@@ -591,17 +591,6 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
           });
           const merged = Array.from(userMap.values());
 
-          // Auto-sync any local/initial users to Cloud Firestore if missing remotely
-          if (db) {
-            merged.forEach((u) => {
-              const existsRemote = remoteUsers.some((r) => r.id === u.id);
-              if (!existsRemote) {
-                const cleanU = JSON.parse(JSON.stringify(u));
-                setDoc(doc(db, 'users', cleanU.id), cleanU, { merge: true }).catch(() => {});
-              }
-            });
-          }
-
           try {
             localStorage.setItem(STORAGE_KEYS.USERS, JSON.stringify(merged));
           } catch {}
@@ -611,7 +600,6 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
       }).catch((err) => {
         if (isQuotaError(err)) {
           setIsFirestoreQuotaExceeded(true);
-          pauseFirestoreNetwork().catch(() => {});
         }
         console.warn('Firebase users fetch offline/deferred:', err?.message || err);
       }),
@@ -639,17 +627,6 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
           hydrated.forEach((h) => mergedMap.set(h.id, h));
           const mergedList = Array.from(mergedMap.values());
 
-          // Auto-sync local assessments to Cloud Firestore if missing remotely
-          if (db) {
-            mergedList.forEach((ass) => {
-              const existsRemote = map.has(ass.id);
-              if (!existsRemote) {
-                const cleanA = prepareAssessmentForFirestore(ass);
-                setDoc(doc(db, 'assessments', cleanA.id), cleanA, { merge: true }).catch(() => {});
-              }
-            });
-          }
-
           try {
             const lightweight = mergedList.map((a) => ({
               ...a,
@@ -665,7 +642,6 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
       }).catch((err) => {
         if (isQuotaError(err)) {
           setIsFirestoreQuotaExceeded(true);
-          pauseFirestoreNetwork().catch(() => {});
         }
         console.warn('Firebase assessments fetch offline/deferred:', err?.message || err);
       }),
@@ -825,18 +801,17 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
       (error) => {
         if (isQuotaError(error)) {
           setIsFirestoreQuotaExceeded(true);
-          pauseFirestoreNetwork().catch(() => {});
         }
         console.warn('Firestore real-time assessment listener deferred:', error?.message || error);
       }
     );
 
     return () => unsubscribe();
-  }, [db, isFirestoreQuotaExceeded]);
+  }, [db]);
 
   // Real-time listener for users from Firebase Firestore
   useEffect(() => {
-    if (!db || isFirestoreQuotaExceeded) return;
+    if (!db) return;
 
     const unsubscribe = onSnapshot(
       collection(db, 'users'),
@@ -875,14 +850,13 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
       (error) => {
         if (isQuotaError(error)) {
           setIsFirestoreQuotaExceeded(true);
-          pauseFirestoreNetwork().catch(() => {});
         }
         console.warn('Firestore users real-time listener deferred:', error?.message || error);
       }
     );
 
     return () => unsubscribe();
-  }, [db, isFirestoreQuotaExceeded]);
+  }, [db]);
 
   // Real-time listener for shared Google Sheet configuration across all roles & devices
   useEffect(() => {
@@ -1404,10 +1378,36 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
     };
   };
 
-  const loginByEmailPassword = (emailInput: string, passwordInput: string) => {
+  const loginByEmailPassword = async (emailInput: string, passwordInput: string) => {
     const email = emailInput.trim().toLowerCase();
-    const usersToSearch = users.length > 0 ? users : INITIAL_USERS;
-    const user = usersToSearch.find((u) => u.email && u.email.toLowerCase() === email);
+    let usersToSearch = users.length > 0 ? users : INITIAL_USERS;
+    let user = usersToSearch.find((u) => u.email && u.email.toLowerCase() === email);
+
+    if (!user && db) {
+      try {
+        const snapshot = await getDocs(collection(db, 'users'));
+        if (!snapshot.empty) {
+          const deletedUserIds = getStoredDeletedUserIds();
+          const remoteUsers = snapshot.docs
+            .map((d) => d.data() as UserAccount)
+            .filter((u) => u && u.id && !deletedUserIds.has(u.id));
+
+          if (remoteUsers.length > 0) {
+            const userMap = new Map<string, UserAccount>();
+            INITIAL_USERS.forEach((u) => { if (!deletedUserIds.has(u.id)) userMap.set(u.id, u); });
+            usersToSearch.forEach((u) => { if (!deletedUserIds.has(u.id)) userMap.set(u.id, u); });
+            remoteUsers.forEach((r) => { userMap.set(r.id, { ...(userMap.get(r.id) || {}), ...r }); });
+            const merged = Array.from(userMap.values());
+            setUsers(merged);
+            try { localStorage.setItem(STORAGE_KEYS.USERS, JSON.stringify(merged)); } catch {}
+
+            user = merged.find((u) => u.email && u.email.toLowerCase() === email);
+          }
+        }
+      } catch (err) {
+        console.warn('Live user lookup from Firestore notice:', err);
+      }
+    }
 
     if (!user) {
       return {
@@ -1445,21 +1445,48 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
     };
   };
 
-  const loginByNamePassword = (nameInput: string, passwordInput: string) => {
+  const loginByNamePassword = async (nameInput: string, passwordInput: string) => {
     const query = nameInput.trim().toLowerCase();
     
-    // Ensure we have users to search, fallback to INITIAL_USERS if state is empty
-    const usersToSearch = users.length > 0 ? users : INITIAL_USERS;
+    let usersToSearch = users.length > 0 ? users : INITIAL_USERS;
 
-    // First try exact match on email or name
     let user = usersToSearch.find((u) => 
       (u.name && u.name.toLowerCase() === query) || 
       (u.email && u.email.toLowerCase() === query)
     );
     
-    // If not found, try partial match on name
     if (!user) {
       user = usersToSearch.find((u) => u.name && u.name.toLowerCase().includes(query));
+    }
+
+    if (!user && db) {
+      try {
+        const snapshot = await getDocs(collection(db, 'users'));
+        if (!snapshot.empty) {
+          const deletedUserIds = getStoredDeletedUserIds();
+          const remoteUsers = snapshot.docs
+            .map((d) => d.data() as UserAccount)
+            .filter((u) => u && u.id && !deletedUserIds.has(u.id));
+
+          if (remoteUsers.length > 0) {
+            const userMap = new Map<string, UserAccount>();
+            INITIAL_USERS.forEach((u) => { if (!deletedUserIds.has(u.id)) userMap.set(u.id, u); });
+            usersToSearch.forEach((u) => { if (!deletedUserIds.has(u.id)) userMap.set(u.id, u); });
+            remoteUsers.forEach((r) => { userMap.set(r.id, { ...(userMap.get(r.id) || {}), ...r }); });
+            const merged = Array.from(userMap.values());
+            setUsers(merged);
+            try { localStorage.setItem(STORAGE_KEYS.USERS, JSON.stringify(merged)); } catch {}
+
+            user = merged.find((u) => 
+              (u.name && u.name.toLowerCase() === query) || 
+              (u.email && u.email.toLowerCase() === query) ||
+              (u.name && u.name.toLowerCase().includes(query))
+            );
+          }
+        }
+      } catch (err) {
+        console.warn('Live user lookup from Firestore notice:', err);
+      }
     }
 
     if (!user) {
