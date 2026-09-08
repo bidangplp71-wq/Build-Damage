@@ -16,6 +16,9 @@ import {
   KeyRound,
   Eye,
   EyeOff,
+  RefreshCw,
+  UploadCloud,
+  FileSpreadsheet,
 } from 'lucide-react';
 
 export const UserManagement: React.FC = () => {
@@ -31,6 +34,9 @@ export const UserManagement: React.FC = () => {
     canCurrentUserViewPassword,
     deleteUser,
     showToast,
+    syncUsersToGoogleSheet,
+    fetchUsersFromSheet,
+    googleSheetConfig,
   } = useApp();
 
   const roleCounts = getUserCountsByRole();
@@ -130,34 +136,86 @@ export const UserManagement: React.FC = () => {
   // Super Admin and Admin can manage users
   const canManageUsers = currentUser.role === 'super_admin' || currentUser.role === 'admin';
 
+  const [isSyncingUsers, setIsSyncingUsers] = useState(false);
+
+  const handleSyncUsersToSheet = async () => {
+    if (!googleSheetConfig.webhookUrl || !googleSheetConfig.webhookUrl.startsWith('http')) {
+      showToast('Integrasi Google Sheet (Webhook URL) belum dikonfigurasi di menu Google Sheet.', 'error');
+      return;
+    }
+    setIsSyncingUsers(true);
+    try {
+      const res = await syncUsersToGoogleSheet();
+      showToast(res.message, res.success ? 'success' : 'error');
+    } finally {
+      setIsSyncingUsers(false);
+    }
+  };
+
+  const handleFetchUsersFromSheet = async () => {
+    setIsSyncingUsers(true);
+    try {
+      const res = await fetchUsersFromSheet();
+      showToast(res.message, res.success ? 'success' : 'info');
+    } finally {
+      setIsSyncingUsers(false);
+    }
+  };
+
   return (
     <div className="space-y-6">
       {/* Header Banner */}
-      <div className="bg-white p-6 rounded-2xl border border-slate-200 shadow-xs flex flex-col md:flex-row items-start md:items-center justify-between gap-4">
+      <div className="bg-white p-6 rounded-2xl border border-slate-200 shadow-xs flex flex-col lg:flex-row items-start lg:items-center justify-between gap-4">
         <div>
           <h2 className="text-lg font-bold text-slate-900 flex items-center gap-2">
             <Users className="w-5 h-5 text-indigo-600" />
             <span>Manajemen Pengguna & Pembatasan Kuota Peran (RBAC)</span>
           </h2>
           <p className="text-xs text-slate-500 mt-1">
-            Sistem menerapkan batas kuota ketat: Super Admin (1), Admin (3), Verifikator (15), Surveyor/User (100), Publik (10).
+            Daftar pengguna tersimpan di memori lokal & tersinkronisasi otomatis ke Google Sheet tab <strong className="text-slate-700">Daftar_Pengguna</strong> agar dapat diakses dari device mana saja tanpa hambatan kuota.
           </p>
         </div>
 
-        {canManageUsers ? (
+        <div className="flex flex-wrap items-center gap-2">
           <button
-            onClick={() => handleOpenAdd()}
-            className="flex items-center gap-1.5 px-4 py-2 text-xs font-bold bg-amber-500 hover:bg-amber-400 text-slate-950 rounded-xl shadow-xs transition-colors cursor-pointer"
+            type="button"
+            onClick={handleFetchUsersFromSheet}
+            disabled={isSyncingUsers}
+            className="flex items-center gap-1.5 px-3 py-2 text-xs font-semibold bg-slate-100 hover:bg-slate-200 text-slate-700 rounded-xl transition-colors cursor-pointer disabled:opacity-50"
+            title="Tarik daftar pengguna dari Google Sheet tab Daftar_Pengguna"
           >
-            <UserPlus className="w-4 h-4" />
-            <span>Tambah Pengguna Baru</span>
+            <RefreshCw className={`w-3.5 h-3.5 text-slate-600 ${isSyncingUsers ? 'animate-spin' : ''}`} />
+            <span>Tarik dari Google Sheet</span>
           </button>
-        ) : (
-          <div className="px-3 py-1.5 rounded-xl bg-amber-50 border border-amber-200 text-amber-800 text-xs font-medium flex items-center gap-1.5">
-            <Lock className="w-4 h-4" />
-            <span>Hanya Super Admin yang berhak menambah / mengubah akun pengguna.</span>
-          </div>
-        )}
+
+          {canManageUsers && (
+            <button
+              type="button"
+              onClick={handleSyncUsersToSheet}
+              disabled={isSyncingUsers}
+              className="flex items-center gap-1.5 px-3 py-2 text-xs font-semibold bg-emerald-50 hover:bg-emerald-100 text-emerald-800 border border-emerald-200 rounded-xl transition-colors cursor-pointer disabled:opacity-50"
+              title="Kirim seluruh daftar pengguna ke Google Sheet tab Daftar_Pengguna"
+            >
+              <UploadCloud className="w-3.5 h-3.5 text-emerald-600" />
+              <span>Simpan ke Google Sheet</span>
+            </button>
+          )}
+
+          {canManageUsers ? (
+            <button
+              onClick={() => handleOpenAdd()}
+              className="flex items-center gap-1.5 px-4 py-2 text-xs font-bold bg-amber-500 hover:bg-amber-400 text-slate-950 rounded-xl shadow-xs transition-colors cursor-pointer"
+            >
+              <UserPlus className="w-4 h-4" />
+              <span>Tambah Pengguna Baru</span>
+            </button>
+          ) : (
+            <div className="px-3 py-1.5 rounded-xl bg-amber-50 border border-amber-200 text-amber-800 text-xs font-medium flex items-center gap-1.5">
+              <Lock className="w-4 h-4" />
+              <span>Akses Terbatas.</span>
+            </div>
+          )}
+        </div>
       </div>
 
       {/* Role Quotas Overview Grid */}

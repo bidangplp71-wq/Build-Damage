@@ -35,6 +35,9 @@ import {
   directSaveActivityLogToGoogleSheet,
   fetchAssessmentsFromGoogleSheet,
   isConfiguredSheetUrl,
+  directSaveUserToGoogleSheet,
+  syncAllUsersToGoogleSheet,
+  fetchUsersFromGoogleSheet,
 } from '../services/googleSheetsService';
 import {
   encryptPassword,
@@ -105,6 +108,8 @@ interface AppContextType {
   // Google Sheet & Firebase Configurations
   googleSheetConfig: GoogleSheetConfig;
   updateGoogleSheetConfig: (config: Partial<GoogleSheetConfig>) => void;
+  syncUsersToGoogleSheet: () => Promise<{ success: boolean; message: string; count: number }>;
+  fetchUsersFromSheet: () => Promise<{ success: boolean; users: UserAccount[]; message: string }>;
   firebaseShieldConfig: FirebaseShieldConfig;
   updateFirebaseShieldConfig: (config: Partial<FirebaseShieldConfig>) => void;
   isFirestoreQuotaExceeded: boolean;
@@ -1148,6 +1153,10 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
       });
     }
 
+    if (googleSheetConfig.webhookUrl && googleSheetConfig.webhookUrl.startsWith('http')) {
+      directSaveUserToGoogleSheet(newUser, googleSheetConfig).catch(() => {});
+    }
+
     return {
       success: true,
       message: `Akun pengguna ${newUser.name} (${roleLimit.title}) berhasil didaftarkan dan disimpan permanen.`,
@@ -1410,6 +1419,29 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
     }
 
     if (!user) {
+      try {
+        const sheetRes = await fetchUsersFromGoogleSheet(googleSheetConfig);
+        if (sheetRes.success && sheetRes.users.length > 0) {
+          const deletedUserIds = getStoredDeletedUserIds();
+          const validSheetUsers = sheetRes.users.filter((u) => u && u.id && !deletedUserIds.has(u.id));
+          if (validSheetUsers.length > 0) {
+            const userMap = new Map<string, UserAccount>();
+            INITIAL_USERS.forEach((u) => { if (!deletedUserIds.has(u.id)) userMap.set(u.id, u); });
+            usersToSearch.forEach((u) => { if (!deletedUserIds.has(u.id)) userMap.set(u.id, u); });
+            validSheetUsers.forEach((su) => { userMap.set(su.id, { ...(userMap.get(su.id) || {}), ...su }); });
+            const merged = Array.from(userMap.values());
+            setUsers(merged);
+            try { localStorage.setItem(STORAGE_KEYS.USERS, JSON.stringify(merged)); } catch {}
+
+            user = merged.find((u) => u.email && u.email.toLowerCase() === email);
+          }
+        }
+      } catch (e) {
+        console.warn('Live user lookup from Google Sheet notice:', e);
+      }
+    }
+
+    if (!user) {
       return {
         success: false,
         message: 'Email belum terdaftar di sistem. Akses ditolak!',
@@ -1486,6 +1518,33 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
         }
       } catch (err) {
         console.warn('Live user lookup from Firestore notice:', err);
+      }
+    }
+
+    if (!user) {
+      try {
+        const sheetRes = await fetchUsersFromGoogleSheet(googleSheetConfig);
+        if (sheetRes.success && sheetRes.users.length > 0) {
+          const deletedUserIds = getStoredDeletedUserIds();
+          const validSheetUsers = sheetRes.users.filter((u) => u && u.id && !deletedUserIds.has(u.id));
+          if (validSheetUsers.length > 0) {
+            const userMap = new Map<string, UserAccount>();
+            INITIAL_USERS.forEach((u) => { if (!deletedUserIds.has(u.id)) userMap.set(u.id, u); });
+            usersToSearch.forEach((u) => { if (!deletedUserIds.has(u.id)) userMap.set(u.id, u); });
+            validSheetUsers.forEach((su) => { userMap.set(su.id, { ...(userMap.get(su.id) || {}), ...su }); });
+            const merged = Array.from(userMap.values());
+            setUsers(merged);
+            try { localStorage.setItem(STORAGE_KEYS.USERS, JSON.stringify(merged)); } catch {}
+
+            user = merged.find((u) => 
+              (u.name && u.name.toLowerCase() === query) || 
+              (u.email && u.email.toLowerCase() === query) ||
+              (u.name && u.name.toLowerCase().includes(query))
+            );
+          }
+        }
+      } catch (e) {
+        console.warn('Live user lookup from Google Sheet notice:', e);
       }
     }
 
@@ -2172,12 +2231,42 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
     }
   };
 
-  // Automatically synchronize assessments from Google Sheet if URL is configured
+  /**
+   * Sync all local user accounts to Google Sheet tab 'Daftar_Pengguna'
+   */
+  const syncUsersToGoogleSheet = async (): Promise<{ success: boolean; message: string; count: number }> => {
+    const res = await syncAllUsersToGoogleSheet(users, googleSheetConfig);
+    return res;
+  };
+
+  /**
+   * Fetch user accounts from Google Sheet tab 'Daftar_Pengguna'
+   */
+  const fetchUsersFromSheet = async (): Promise<{ success: boolean; users: UserAccount[]; message: string }> => {
+    const res = await fetchUsersFromGoogleSheet(googleSheetConfig);
+    if (res.success && res.users.length > 0) {
+      const deletedUserIds = getStoredDeletedUserIds();
+      const sheetUsers = res.users.filter((u) => u && u.id && !deletedUserIds.has(u.id));
+      if (sheetUsers.length > 0) {
+        const userMap = new Map<string, UserAccount>();
+        INITIAL_USERS.forEach((u) => { if (!deletedUserIds.has(u.id)) userMap.set(u.id, u); });
+        users.forEach((u) => { if (!deletedUserIds.has(u.id)) userMap.set(u.id, u); });
+        sheetUsers.forEach((su) => { userMap.set(su.id, { ...(userMap.get(su.id) || {}), ...su }); });
+        const merged = Array.from(userMap.values());
+        setUsers(merged);
+        try { localStorage.setItem(STORAGE_KEYS.USERS, JSON.stringify(merged)); } catch {}
+      }
+    }
+    return res;
+  };
+
+  // Automatically synchronize assessments and users from Google Sheet if URL is configured
   useEffect(() => {
     if (googleSheetConfig.spreadsheetUrl && isConfiguredSheetUrl(googleSheetConfig.spreadsheetUrl)) {
       syncFromGoogleSheet(false);
+      fetchUsersFromSheet();
     }
-  }, [googleSheetConfig.spreadsheetUrl]);
+  }, [googleSheetConfig.spreadsheetUrl, googleSheetConfig.webhookUrl]);
 
   // Wilayah operations (Kecamatan)
   const addKecamatan = (data: Omit<Kecamatan, 'id' | 'createdAt'>) => {
@@ -2508,6 +2597,8 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
 
         googleSheetConfig,
         updateGoogleSheetConfig,
+        syncUsersToGoogleSheet,
+        fetchUsersFromSheet,
         firebaseShieldConfig,
         updateFirebaseShieldConfig,
         isFirestoreQuotaExceeded,

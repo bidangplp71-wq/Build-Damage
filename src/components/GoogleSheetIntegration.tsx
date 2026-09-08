@@ -43,6 +43,9 @@ export const GoogleSheetIntegration: React.FC = () => {
     kecamatans,
     syncAllToSheet,
     syncFromGoogleSheet,
+    users,
+    syncUsersToGoogleSheet,
+    fetchUsersFromSheet,
     showToast,
     currentUser,
   } = useApp();

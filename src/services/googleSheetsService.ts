@@ -1,5 +1,5 @@
 import * as XLSX from 'xlsx';
-import { BuildingAssessment, GoogleSheetConfig, Kecamatan, UserActivityLog } from '../types';
+import { BuildingAssessment, GoogleSheetConfig, Kecamatan, UserActivityLog, UserAccount } from '../types';
 import { formatRupiah } from '../utils/puprCalculations';
 
 export interface GoogleSheetRowPayload {
@@ -545,6 +545,59 @@ function doPost(e) {
       })).setMimeType(ContentService.MimeType.JSON);
     }
 
+    // ACTION 2E: SAVE SINGLE USER ACCOUNT TO GOOGLE SHEET (DAFTAR_PENGGUNA)
+    if (action === 'save_user' || action === 'delete_user') {
+      var userRowData = json.data;
+      var userTabName = json.userSheetName || "Daftar_Pengguna";
+      var userSheet = getOrCreateSheet(ss, userTabName);
+      var userId = json.userId || (userRowData ? userRowData['ID Pengguna'] : "");
+      
+      if (userRowData) {
+        saveOrUpdateRow(userSheet, userRowData, userId, json.email || "", action === 'delete_user' ? 'delete' : 'insert', "#4c1d95");
+      }
+      return ContentService.createTextOutput(JSON.stringify({
+        status: "success",
+        message: "Akun pengguna (" + (userRowData ? userRowData['Nama Lengkap'] : userId) + ") tersimpan di Google Sheet!"
+      })).setMimeType(ContentService.MimeType.JSON);
+    }
+
+    // ACTION 2F: SYNC ALL USER ACCOUNTS TO GOOGLE SHEET
+    if (action === 'sync_users') {
+      var allUserRows = json.data || [];
+      var userTabName2 = json.userSheetName || "Daftar_Pengguna";
+      var userSheet2 = getOrCreateSheet(ss, userTabName2);
+      writeTableToSheet(userSheet2, allUserRows, "#4c1d95");
+
+      return ContentService.createTextOutput(JSON.stringify({
+        status: "success",
+        message: "Berhasil menyinkronkan " + allUserRows.length + " data akun pengguna ke sheet '" + userTabName2 + "'!",
+        totalUsers: allUserRows.length
+      })).setMimeType(ContentService.MimeType.JSON);
+    }
+
+    // ACTION 2G: FETCH ALL USER ACCOUNTS FROM GOOGLE SHEET
+    if (action === 'fetch_users') {
+      var userTabName3 = json.userSheetName || "Daftar_Pengguna";
+      var userSheet3 = ss.getSheetByName(userTabName3);
+      var userList = [];
+      if (userSheet3 && userSheet3.getLastRow() > 1) {
+        var rawData = userSheet3.getDataRange().getValues();
+        var headers = rawData[0];
+        for (var i = 1; i < rawData.length; i++) {
+          var obj = {};
+          for (var h = 0; h < headers.length; h++) {
+            obj[headers[h]] = rawData[i][h];
+          }
+          userList.push(obj);
+        }
+      }
+      return ContentService.createTextOutput(JSON.stringify({
+        status: "success",
+        users: userList,
+        totalUsers: userList.length
+      })).setMimeType(ContentService.MimeType.JSON);
+    }
+
     // ACTION 3: INSERT / UPDATE SINGLE ROW (LANGSUNG DARI FORMULIR SURVEI)
     var rowData = json.data;
     if (!rowData) {
@@ -982,10 +1035,40 @@ function savePhotosToGoogleDrive(photos, regCode, buildingName, parentFolderInpu
 }
 
 function doGet(e) {
+  var action = e && e.parameter ? e.parameter.action : "";
+  if (action === 'fetch_users' || action === 'users') {
+    try {
+      var ss = SpreadsheetApp.getActiveSpreadsheet();
+      var userSheet = ss.getSheetByName("Daftar_Pengguna");
+      var userList = [];
+      if (userSheet && userSheet.getLastRow() > 1) {
+        var rawData = userSheet.getDataRange().getValues();
+        var headers = rawData[0];
+        for (var i = 1; i < rawData.length; i++) {
+          var obj = {};
+          for (var h = 0; h < headers.length; h++) {
+            obj[headers[h]] = rawData[i][h];
+          }
+          userList.push(obj);
+        }
+      }
+      return ContentService.createTextOutput(JSON.stringify({
+        status: "success",
+        users: userList,
+        totalUsers: userList.length
+      })).setMimeType(ContentService.MimeType.JSON);
+    } catch(err) {
+      return ContentService.createTextOutput(JSON.stringify({
+        status: "error",
+        message: err.toString()
+      })).setMimeType(ContentService.MimeType.JSON);
+    }
+  }
+
   return ContentService.createTextOutput(JSON.stringify({
     status: "active",
     app: "SIM-PKBG Penilaian Kerusakan Bangunan Gedung PUPR",
-    features: "Multi-Sheet per Kecamatan, Master Rekap & Auto-Sync",
+    features: "Multi-Sheet per Kecamatan, Master Rekap, Google Drive Photo Sync & Daftar Pengguna",
     timestamp: new Date().toISOString()
   })).setMimeType(ContentService.MimeType.JSON);
 }
@@ -1769,5 +1852,222 @@ export async function fetchAssessmentsFromGoogleSheet(
       message: `Gagal membaca Google Sheet: ${err.message || 'Koneksi terputus'}`,
     };
   }
+}
+
+/**
+ * Format UserAccount into row object for Google Sheet tab 'Daftar_Pengguna'
+ */
+export function formatUserForGoogleSheet(user: UserAccount): Record<string, any> {
+  return {
+    'ID Pengguna': user.id || '',
+    'Nama Lengkap': user.name || '',
+    'Email / Username': user.email || '',
+    'Peran / Hak Akses': user.role || 'admin_user',
+    'Instansi / SKPD': user.agency || '',
+    'No Telepon': user.phone || '',
+    'Status Akun': user.status || 'active',
+    'Password Hash': user.password || '',
+    'Terakhir Ubah Password': user.passwordLastChanged || '',
+    'Tanggal Terdaftar': user.createdAt || new Date().toISOString(),
+  };
+}
+
+/**
+ * Direct save a user account to Google Sheet
+ */
+export async function directSaveUserToGoogleSheet(
+  user: UserAccount,
+  config: GoogleSheetConfig,
+  action: 'save_user' | 'delete_user' = 'save_user'
+): Promise<{ success: boolean; message: string }> {
+  if (!config.webhookUrl || !config.webhookUrl.startsWith('http')) {
+    return { success: false, message: 'Link Webhook Google Sheet belum dikonfigurasi.' };
+  }
+
+  const payload = {
+    action,
+    userSheetName: 'Daftar_Pengguna',
+    userId: user.id,
+    email: user.email,
+    data: formatUserForGoogleSheet(user),
+    spreadsheetUrl: config.spreadsheetUrl,
+    spreadsheetId: extractSpreadsheetId(config.spreadsheetUrl) || undefined,
+    timestamp: new Date().toISOString(),
+  };
+
+  try {
+    await fetch(config.webhookUrl, {
+      method: 'POST',
+      mode: 'no-cors',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify(payload),
+    });
+
+    return {
+      success: true,
+      message: `Akun "${user.name}" (${user.email}) tersimpan langsung di Google Sheet (Tab: Daftar_Pengguna)!`,
+    };
+  } catch (err: any) {
+    return {
+      success: false,
+      message: `Gagal menyimpan user ke Google Sheet: ${err?.message || 'Koneksi gagal'}`,
+    };
+  }
+}
+
+/**
+ * Sync all users to Google Sheet
+ */
+export async function syncAllUsersToGoogleSheet(
+  users: UserAccount[],
+  config: GoogleSheetConfig
+): Promise<{ success: boolean; message: string; count: number }> {
+  if (!config.webhookUrl || !config.webhookUrl.startsWith('http')) {
+    return { success: false, message: 'Link Webhook Google Sheet belum dikonfigurasi.', count: 0 };
+  }
+
+  const formattedUsers = users.map(formatUserForGoogleSheet);
+  const payload = {
+    action: 'sync_users',
+    userSheetName: 'Daftar_Pengguna',
+    data: formattedUsers,
+    spreadsheetUrl: config.spreadsheetUrl,
+    spreadsheetId: extractSpreadsheetId(config.spreadsheetUrl) || undefined,
+    timestamp: new Date().toISOString(),
+  };
+
+  try {
+    await fetch(config.webhookUrl, {
+      method: 'POST',
+      mode: 'no-cors',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify(payload),
+    });
+
+    return {
+      success: true,
+      message: `Berhasil menyinkronkan seluruh ${users.length} akun pengguna ke Google Sheet (Tab: Daftar_Pengguna)!`,
+      count: users.length,
+    };
+  } catch (err: any) {
+    return {
+      success: false,
+      message: `Gagal menyinkronkan daftar pengguna ke Google Sheet: ${err?.message || 'Koneksi gagal'}`,
+      count: 0,
+    };
+  }
+}
+
+/**
+ * Fetch all registered users from Google Sheet
+ */
+export async function fetchUsersFromGoogleSheet(
+  config: GoogleSheetConfig
+): Promise<{ success: boolean; users: UserAccount[]; message: string }> {
+  if (!config.webhookUrl && !config.spreadsheetUrl) {
+    return { success: false, users: [], message: 'Integrasi Google Sheet belum dikonfigurasi.' };
+  }
+
+  // Method 1: Webhook POST or GET for JSON users
+  if (config.webhookUrl && config.webhookUrl.startsWith('http')) {
+    try {
+      const getUrl = `${config.webhookUrl}${config.webhookUrl.includes('?') ? '&' : '?'}action=fetch_users&_t=${Date.now()}`;
+      const res = await fetch(getUrl, { cache: 'no-store' });
+      if (res.ok) {
+        const json = await res.json();
+        if (json && json.status === 'success' && Array.isArray(json.users)) {
+          const parsedUsers: UserAccount[] = json.users.map((r: any) => {
+            const getVal = (keys: string[]) => {
+              for (const k of keys) {
+                if (r[k] !== undefined && r[k] !== null) return String(r[k]).trim();
+              }
+              return '';
+            };
+            const id = getVal(['ID Pengguna', 'id']) || `user_${Date.now()}_${Math.random().toString(36).substring(2, 6)}`;
+            const name = getVal(['Nama Lengkap', 'Nama', 'name']) || 'Pengguna';
+            const email = getVal(['Email / Username', 'Email', 'email']) || '';
+            const role = (getVal(['Peran / Hak Akses', 'Peran', 'role']) as any) || 'admin_user';
+            const agency = getVal(['Instansi / SKPD', 'Instansi', 'agency']) || 'Dinas PUPR';
+            const phone = getVal(['No Telepon', 'Telepon', 'phone']) || '';
+            const status = (getVal(['Status Akun', 'Status', 'status']) as any) || 'active';
+            const password = getVal(['Password Hash', 'Password', 'password']) || '';
+            const passwordLastChanged = getVal(['Terakhir Ubah Password', 'passwordLastChanged']) || new Date().toISOString();
+            const createdAt = getVal(['Tanggal Terdaftar', 'createdAt']) || new Date().toISOString();
+
+            return { id, name, email, role, agency, phone, status, password, passwordLastChanged, createdAt };
+          }).filter((u: UserAccount) => u.email || u.name);
+
+          if (parsedUsers.length > 0) {
+            return {
+              success: true,
+              users: parsedUsers,
+              message: `Berhasil mengambil ${parsedUsers.length} data pengguna dari Google Sheet Webhook!`,
+            };
+          }
+        }
+      }
+    } catch (e) {
+      console.warn('Google Sheet Webhook fetchUsers notice:', e);
+    }
+  }
+
+  // Method 2: CSV Export Fallback from Spreadsheet ID
+  const spreadsheetId = extractSpreadsheetId(config.spreadsheetUrl);
+  if (!spreadsheetId) {
+    return { success: false, users: [], message: 'Spreadsheet ID tidak valid.' };
+  }
+
+  const csvUrls = [
+    `https://docs.google.com/spreadsheets/d/${spreadsheetId}/gviz/tq?tqx=out:csv&sheet=Daftar_Pengguna&_t=${Date.now()}`,
+    `https://docs.google.com/spreadsheets/d/${spreadsheetId}/export?format=csv&_t=${Date.now()}`,
+  ];
+
+  for (const url of csvUrls) {
+    try {
+      const res = await fetch(url, { cache: 'no-store' });
+      if (res.ok) {
+        const text = await res.text();
+        if (text && !text.trim().startsWith('<!DOCTYPE') && !text.includes('<html')) {
+          const workbook = XLSX.read(text, { type: 'string', raw: true });
+          const firstSheet = workbook.SheetNames[0];
+          const sheet = workbook.Sheets[firstSheet];
+          const jsonRows: any[] = XLSX.utils.sheet_to_json(sheet, { defval: '' });
+
+          if (Array.isArray(jsonRows) && jsonRows.length > 0) {
+            const parsedUsers: UserAccount[] = jsonRows.map((r) => {
+              const getVal = (keys: string[]) => {
+                for (const k of keys) {
+                  if (r[k] !== undefined && r[k] !== null) return String(r[k]).trim();
+                }
+                return '';
+              };
+              const id = getVal(['ID Pengguna', 'id']) || `user_${Date.now()}_${Math.random().toString(36).substring(2, 6)}`;
+              const name = getVal(['Nama Lengkap', 'Nama', 'name']) || 'Pengguna';
+              const email = getVal(['Email / Username', 'Email', 'email']) || '';
+              const role = (getVal(['Peran / Hak Akses', 'Peran', 'role']) as any) || 'admin_user';
+              const agency = getVal(['Instansi / SKPD', 'Instansi', 'agency']) || 'Dinas PUPR';
+              const phone = getVal(['No Telepon', 'Telepon', 'phone']) || '';
+              const status = (getVal(['Status Akun', 'Status', 'status']) as any) || 'active';
+              const password = getVal(['Password Hash', 'Password', 'password']) || '';
+              const passwordLastChanged = getVal(['Terakhir Ubah Password', 'passwordLastChanged']) || new Date().toISOString();
+              const createdAt = getVal(['Tanggal Terdaftar', 'createdAt']) || new Date().toISOString();
+
+              return { id, name, email, role, agency, phone, status, password, passwordLastChanged, createdAt };
+            }).filter((u) => u.email || u.name);
+
+            if (parsedUsers.length > 0) {
+              return {
+                success: true,
+                users: parsedUsers,
+                message: `Berhasil membaca ${parsedUsers.length} data akun pengguna dari Google Sheet CSV!`,
+              };
+            }
+          }
+        }
+      }
+    } catch {}
+  }
+
+  return { success: false, users: [], message: 'Gagal membaca daftar pengguna dari Google Sheet.' };
 }
 
