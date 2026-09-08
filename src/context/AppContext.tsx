@@ -1367,7 +1367,8 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
 
   const loginByEmailPassword = (emailInput: string, passwordInput: string) => {
     const email = emailInput.trim().toLowerCase();
-    const user = users.find((u) => u.email.toLowerCase() === email);
+    const usersToSearch = users.length > 0 ? users : INITIAL_USERS;
+    const user = usersToSearch.find((u) => u.email && u.email.toLowerCase() === email);
 
     if (!user) {
       return {
@@ -1408,12 +1409,18 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
   const loginByNamePassword = (nameInput: string, passwordInput: string) => {
     const query = nameInput.trim().toLowerCase();
     
+    // Ensure we have users to search, fallback to INITIAL_USERS if state is empty
+    const usersToSearch = users.length > 0 ? users : INITIAL_USERS;
+
     // First try exact match on email or name
-    let user = users.find((u) => u.name.toLowerCase() === query || u.email.toLowerCase() === query);
+    let user = usersToSearch.find((u) => 
+      (u.name && u.name.toLowerCase() === query) || 
+      (u.email && u.email.toLowerCase() === query)
+    );
     
     // If not found, try partial match on name
     if (!user) {
-      user = users.find((u) => u.name.toLowerCase().includes(query));
+      user = usersToSearch.find((u) => u.name && u.name.toLowerCase().includes(query));
     }
 
     if (!user) {
