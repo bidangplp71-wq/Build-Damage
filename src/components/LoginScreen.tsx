@@ -17,6 +17,7 @@ import {
   AlertCircle,
   Loader2,
   Settings,
+  X,
 } from 'lucide-react';
 
 export const LoginScreen: React.FC = () => {
@@ -84,26 +85,21 @@ export const LoginScreen: React.FC = () => {
     setSyncMessage('');
 
     try {
-      // 1. Save config locally
+      // 1. Save config locally and upload to Cloud Firestore
       await updateGoogleSheetConfig({
         spreadsheetUrl: spreadsheetUrlInput.trim(),
         webhookUrl: webhookUrlInput.trim(),
       });
 
       // 2. Fetch users directly
-      // Since updateGoogleSheetConfig updates state asynchronously, we temporarily pass the new values inside local storage 
-      // or directly rely on context if it handles it.
-      // fetchUsersFromSheet uses googleSheetConfig from context. Let's make sure it's synced.
-      // To guarantee instant fetch with entered credentials, let's call it after updating.
-      // Since fetchUsersFromSheet is an async action in context, we wait a tiny moment or fetch directly
       setTimeout(async () => {
         try {
           const res = await fetchUsersFromSheet();
           setSyncLoading(false);
           if (res.success) {
             setSyncStatus('success');
-            setSyncMessage(res.message || 'Berhasil menghubungkan Google Sheet & menyinkronkan akun pengguna!');
-            showToast('Google Sheet berhasil dihubungkan!', 'success');
+            setSyncMessage('Koneksi sukses! Pengaturan disimpan di Cloud Firestore. Seluruh pengguna lain di semua perangkat otomatis terhubung tanpa perlu menginput ulang!');
+            showToast('Google Sheet berhasil dihubungkan & disimpan ke Cloud Firestore!', 'success');
           } else {
             setSyncStatus('error');
             setSyncMessage(res.message || 'Gagal membaca data dari Google Sheet. Silakan periksa izin akses sheet (Share as Anyone with link can view).');
@@ -127,7 +123,7 @@ export const LoginScreen: React.FC = () => {
       <div className="absolute top-1/4 left-1/2 -translate-x-1/2 -translate-y-1/2 w-[600px] h-[600px] bg-amber-500/10 rounded-full blur-3xl pointer-events-none"></div>
       <div className="absolute bottom-10 right-10 w-[400px] h-[400px] bg-indigo-600/10 rounded-full blur-3xl pointer-events-none"></div>
 
-      <div className="w-full max-w-md relative z-10 space-y-6">
+      <div className="w-full max-w-md relative z-10 space-y-6 animate-in fade-in zoom-in-95 duration-300">
         {/* Header Logo & Title */}
         <div className="text-center space-y-2">
           <div className="inline-flex items-center justify-center w-16 h-16 rounded-2xl bg-gradient-to-br from-amber-500 to-amber-600 text-slate-950 shadow-xl shadow-amber-500/20 mb-2">
@@ -146,8 +142,10 @@ export const LoginScreen: React.FC = () => {
         </div>
 
         {/* Login Card */}
-        <div className="bg-slate-900/90 backdrop-blur-md border border-slate-800 rounded-3xl shadow-2xl p-6 sm:p-8 space-y-6">
-          <div className="border-b border-slate-800 pb-4">
+        <div className="bg-slate-900/90 backdrop-blur-md border border-slate-800 rounded-3xl shadow-2xl p-6 sm:p-8 space-y-6 relative">
+          
+          {/* Header of Login with discreet settings gear icon */}
+          <div className="border-b border-slate-800 pb-4 relative">
             <h2 className="text-base font-bold text-white flex items-center gap-2">
               <KeyRound className="w-4 h-4 text-amber-400" />
               <span>Autentikasi Akun Pengguna</span>
@@ -155,6 +153,20 @@ export const LoginScreen: React.FC = () => {
             <p className="text-xs text-slate-400 mt-0.5">
               Masukkan nama pengguna, email, atau email-prefix (username) dan kata sandi Anda.
             </p>
+            
+            {/* Subtle, hidden settings button for Admin only to avoid confusing normal users */}
+            <button
+              type="button"
+              onClick={() => {
+                setSyncStatus('idle');
+                setSyncMessage('');
+                setShowEmergencyConfig(true);
+              }}
+              title="Konfigurasi Integrasi Google Sheet (Khusus Admin)"
+              className="absolute top-0.5 right-0 p-1.5 rounded-lg text-slate-600 hover:text-amber-400 hover:bg-slate-800/60 transition-all cursor-pointer"
+            >
+              <Settings className="w-4 h-4" />
+            </button>
           </div>
 
           <form onSubmit={handleLogin} className="space-y-4">
@@ -225,88 +237,6 @@ export const LoginScreen: React.FC = () => {
               <ArrowRight className="w-4 h-4" />
             </button>
           </form>
-
-          {/* Emergency Bypass / Config Options */}
-          <div className="border-t border-slate-800 pt-4 mt-2">
-            <button
-              type="button"
-              onClick={() => setShowEmergencyConfig(!showEmergencyConfig)}
-              className="w-full py-2 px-3 rounded-lg bg-slate-950 border border-slate-800 hover:border-slate-700 text-[11px] text-slate-400 hover:text-slate-200 flex items-center justify-between transition-colors font-medium cursor-pointer"
-            >
-              <div className="flex items-center gap-2">
-                <Database className="w-3.5 h-3.5 text-amber-500 animate-pulse" />
-                <span>Integrasi Google Sheet (Mode Penyelamatan)</span>
-              </div>
-              <Settings className={`w-3.5 h-3.5 transition-transform ${showEmergencyConfig ? 'rotate-90 text-amber-500' : ''}`} />
-            </button>
-
-            {showEmergencyConfig && (
-              <div className="mt-3 p-3 bg-slate-950/60 rounded-xl border border-slate-800/80 space-y-3 animate-in slide-in-from-top-2 duration-200">
-                <p className="text-[10px] text-slate-400 leading-relaxed">
-                  ⚠️ <strong>Info Limit Firestore:</strong> Jika akun baru Anda belum terbaca di perangkat ini, harap tempel Tautan Google Sheet Anda di bawah ini untuk mengaktifkan sinkronisasi tim langsung ke browser ini.
-                </p>
-
-                <div className="space-y-2">
-                  <div>
-                    <label className="block text-[10px] font-semibold text-slate-400 mb-1">
-                      Tautan Google Sheet (Spreadsheet URL)
-                    </label>
-                    <input
-                      type="text"
-                      value={spreadsheetUrlInput}
-                      onChange={(e) => setSpreadsheetUrlInput(e.target.value)}
-                      placeholder="https://docs.google.com/spreadsheets/d/..."
-                      className="w-full px-2.5 py-1.5 bg-slate-900 border border-slate-800 rounded-lg text-[11px] text-white focus:outline-none focus:ring-1 focus:ring-amber-500 placeholder-slate-700"
-                    />
-                  </div>
-
-                  <div>
-                    <label className="block text-[10px] font-semibold text-slate-400 mb-1 flex items-center justify-between">
-                      <span>Tautan Webhook Apps Script (Opsional)</span>
-                      <span className="text-[9px] text-slate-600 font-normal">Untuk simpan langsung</span>
-                    </label>
-                    <input
-                      type="text"
-                      value={webhookUrlInput}
-                      onChange={(e) => setWebhookUrlInput(e.target.value)}
-                      placeholder="https://script.google.com/macros/s/.../exec"
-                      className="w-full px-2.5 py-1.5 bg-slate-900 border border-slate-800 rounded-lg text-[11px] text-white focus:outline-none focus:ring-1 focus:ring-amber-500 placeholder-slate-700"
-                    />
-                  </div>
-
-                  {syncMessage && (
-                    <div className={`p-2 rounded-lg text-[10px] flex items-start gap-1.5 leading-relaxed ${
-                      syncStatus === 'success' ? 'bg-emerald-500/10 border border-emerald-500/20 text-emerald-400' :
-                      syncStatus === 'error' ? 'bg-rose-500/10 border border-rose-500/20 text-rose-400' :
-                      'bg-slate-900 border border-slate-800 text-slate-400'
-                    }`}>
-                      {syncStatus === 'success' ? <CheckCircle2 className="w-3.5 h-3.5 shrink-0 text-emerald-400 mt-0.5" /> : <AlertCircle className="w-3.5 h-3.5 shrink-0 text-rose-400 mt-0.5" />}
-                      <span>{syncMessage}</span>
-                    </div>
-                  )}
-
-                  <button
-                    type="button"
-                    disabled={syncLoading}
-                    onClick={handleApplySheetConfig}
-                    className="w-full py-2 px-3 rounded-lg bg-amber-500 hover:bg-amber-400 disabled:bg-slate-800 text-slate-950 disabled:text-slate-600 text-[11px] font-bold flex items-center justify-center gap-1.5 transition-all cursor-pointer"
-                  >
-                    {syncLoading ? (
-                      <>
-                        <Loader2 className="w-3.5 h-3.5 animate-spin" />
-                        <span>Menyinkronkan Akun...</span>
-                      </>
-                    ) : (
-                      <>
-                        <Link2 className="w-3.5 h-3.5" />
-                        <span>Hubungkan & Sinkronkan Akun</span>
-                      </>
-                    )}
-                  </button>
-                </div>
-              </div>
-            )}
-          </div>
         </div>
 
         {/* Footer info */}
@@ -317,6 +247,112 @@ export const LoginScreen: React.FC = () => {
           </p>
         </div>
       </div>
+
+      {/* SYSTEM INTEGRATION DIALOG (MODAL OVERLAY - EXCLUSIVELY FOR SUPER ADMINS) */}
+      {showEmergencyConfig && (
+        <div className="fixed inset-0 bg-slate-950/80 backdrop-blur-sm flex justify-center items-center p-4 z-50 animate-in fade-in duration-200">
+          <div className="w-full max-w-md bg-slate-900 border border-slate-800 rounded-3xl shadow-2xl p-6 relative space-y-4 animate-in slide-in-from-bottom-4 duration-300">
+            
+            {/* Modal Title */}
+            <div className="flex items-start justify-between border-b border-slate-800 pb-3">
+              <div className="flex items-center gap-2">
+                <Database className="w-5 h-5 text-amber-500" />
+                <div>
+                  <h3 className="text-sm font-bold text-white">Konfigurasi Cloud & Google Sheet</h3>
+                  <p className="text-[10px] text-amber-400 font-medium">Menu Khusus Super Admin / Dinas PUPR</p>
+                </div>
+              </div>
+              <button
+                type="button"
+                onClick={() => setShowEmergencyConfig(false)}
+                className="text-slate-500 hover:text-slate-300 p-1 rounded-lg hover:bg-slate-850 transition-colors cursor-pointer"
+              >
+                <X className="w-4 h-4" />
+              </button>
+            </div>
+
+            {/* Explanatory text */}
+            <p className="text-[11px] text-slate-400 leading-relaxed">
+              Konfigurasi ini digunakan untuk menautkan Google Sheet ke seluruh sistem SIM-PKBG. 
+              <strong> Sekali disimpan, pengaturan ini otomatis tersimpan di Cloud Firestore sehingga seluruh perangkat pengguna otomatis terhubung tanpa perlu menginput ulang!</strong>
+            </p>
+
+            {/* Inputs Form */}
+            <div className="space-y-3">
+              <div>
+                <label className="block text-[11px] font-semibold text-slate-300 mb-1">
+                  Tautan Google Sheet (Spreadsheet URL)
+                </label>
+                <input
+                  type="text"
+                  value={spreadsheetUrlInput}
+                  onChange={(e) => setSpreadsheetUrlInput(e.target.value)}
+                  placeholder="https://docs.google.com/spreadsheets/d/..."
+                  className="w-full px-3 py-2 bg-slate-950 border border-slate-800 rounded-lg text-xs text-white focus:outline-none focus:ring-1 focus:ring-amber-500 placeholder-slate-700 font-medium"
+                />
+              </div>
+
+              <div>
+                <label className="block text-[11px] font-semibold text-slate-300 mb-1 flex items-center justify-between">
+                  <span>Tautan Webhook Apps Script (Opsional)</span>
+                  <span className="text-[10px] text-slate-500 font-normal">Guna simpan data instan</span>
+                </label>
+                <input
+                  type="text"
+                  value={webhookUrlInput}
+                  onChange={(e) => setWebhookUrlInput(e.target.value)}
+                  placeholder="https://script.google.com/macros/s/.../exec"
+                  className="w-full px-3 py-2 bg-slate-950 border border-slate-800 rounded-lg text-xs text-white focus:outline-none focus:ring-1 focus:ring-amber-500 placeholder-slate-700 font-medium"
+                />
+              </div>
+
+              {syncMessage && (
+                <div className={`p-3 rounded-lg text-[11px] flex items-start gap-2 leading-relaxed ${
+                  syncStatus === 'success' ? 'bg-emerald-500/10 border border-emerald-500/20 text-emerald-400' :
+                  syncStatus === 'error' ? 'bg-rose-500/10 border border-rose-500/20 text-rose-400' :
+                  'bg-slate-905 border border-slate-800 text-slate-400'
+                }`}>
+                  {syncStatus === 'success' ? (
+                    <CheckCircle2 className="w-4 h-4 shrink-0 text-emerald-400 mt-0.5" />
+                  ) : (
+                    <AlertCircle className="w-4 h-4 shrink-0 text-rose-400 mt-0.5" />
+                  )}
+                  <span>{syncMessage}</span>
+                </div>
+              )}
+
+              {/* Action buttons */}
+              <div className="flex gap-2 pt-2">
+                <button
+                  type="button"
+                  onClick={() => setShowEmergencyConfig(false)}
+                  className="flex-1 py-2 px-3 bg-slate-850 hover:bg-slate-800 text-slate-300 hover:text-white rounded-lg text-xs font-semibold transition-colors cursor-pointer"
+                >
+                  Tutup
+                </button>
+                <button
+                  type="button"
+                  disabled={syncLoading}
+                  onClick={handleApplySheetConfig}
+                  className="flex-1 py-2 px-3 bg-amber-500 hover:bg-amber-400 disabled:bg-slate-850 text-slate-950 disabled:text-slate-600 rounded-lg text-xs font-bold flex items-center justify-center gap-1.5 transition-all cursor-pointer"
+                >
+                  {syncLoading ? (
+                    <>
+                      <Loader2 className="w-3.5 h-3.5 animate-spin" />
+                      <span>Menyinkronkan...</span>
+                    </>
+                  ) : (
+                    <>
+                      <Link2 className="w-3.5 h-3.5" />
+                      <span>Simpan & Sinkron</span>
+                    </>
+                  )}
+                </button>
+              </div>
+            </div>
+          </div>
+        </div>
+      )}
     </div>
   );
 };
