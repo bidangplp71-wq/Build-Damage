@@ -2295,9 +2295,11 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
     return res;
   };
 
-  // Automatically synchronize assessments and users from Google Sheet if URL is configured
+  // Automatically synchronize assessments and users from Google Sheet if URL or Webhook is configured
   useEffect(() => {
-    if (googleSheetConfig.spreadsheetUrl && isConfiguredSheetUrl(googleSheetConfig.spreadsheetUrl)) {
+    const hasSpreadsheet = Boolean(googleSheetConfig.spreadsheetUrl && isConfiguredSheetUrl(googleSheetConfig.spreadsheetUrl));
+    const hasWebhook = Boolean(googleSheetConfig.webhookUrl && googleSheetConfig.webhookUrl.startsWith('http'));
+    if (hasSpreadsheet || hasWebhook) {
       syncFromGoogleSheet(false);
       fetchUsersFromSheet();
     }
