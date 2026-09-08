@@ -2,7 +2,7 @@ import React, { useState, useEffect } from 'react';
 import { createPortal } from 'react-dom';
 import { useApp } from '../context/AppContext';
 import { BuildingAssessment, BUILDING_CATEGORY_CONFIGS } from '../types';
-import { formatRupiah, terbilang } from '../utils/puprCalculations';
+import { formatRupiah, terbilang, getInitialSubComponents } from '../utils/puprCalculations';
 import {
   Printer,
   FileSpreadsheet,
@@ -37,6 +37,30 @@ export const AssessmentDetailModal: React.FC<Props> = ({ assessment, onClose }) 
   const hasPhotos = Boolean(assessment.photos && assessment.photos.length > 0);
   const hasDriveFolder = Boolean(assessment.googleDriveFolderUrl);
   const [showPhotos, setShowPhotos] = useState(true);
+
+  const displayComponents = React.useMemo(() => {
+    const rawComps = assessment?.components || [];
+    if (rawComps.length > 0) {
+      const hasNonZero = rawComps.some((c: any) => safeNumber(c?.damagePercentInput ?? c?.damagePercent ?? c?.calculatedScore ?? 0) > 0);
+      if (hasNonZero || !assessment.totalDamagePercent) {
+        return rawComps;
+      }
+    }
+    
+    const totalDmg = safeNumber(assessment.totalDamagePercent);
+    if (totalDmg > 0) {
+      return getInitialSubComponents().map((comp) => {
+        const calc = Number(((comp.bobotPercent * totalDmg) / 100).toFixed(3));
+        return {
+          ...comp,
+          damagePercentInput: totalDmg,
+          calculatedScore: calc,
+        };
+      });
+    }
+
+    return rawComps.length > 0 ? rawComps : getInitialSubComponents();
+  }, [assessment]);
 
   const handleSyncPhotosToDrive = async () => {
     if (!googleSheetConfig.webhookUrl) {
@@ -318,14 +342,14 @@ export const AssessmentDetailModal: React.FC<Props> = ({ assessment, onClose }) 
                     </tr>
                   </thead>
                   <tbody className="divide-y divide-slate-200">
-                    {!assessment.components || assessment.components.length === 0 ? (
+                    {!displayComponents || displayComponents.length === 0 ? (
                       <tr>
                         <td colSpan={5} className="py-4 text-center text-slate-400 italic">
                           Belum ada rincian komponen yang tersimpan.
                         </td>
                       </tr>
                     ) : (
-                      assessment.components.map((c: any, index: number) => {
+                      displayComponents.map((c: any, index: number) => {
                         const weight = safeNumber(c?.bobotPercent ?? c?.weight ?? 0);
                         const damagePercent = safeNumber(c?.damagePercentInput ?? c?.damagePercent ?? 0);
                         const weightedDamage = safeNumber(

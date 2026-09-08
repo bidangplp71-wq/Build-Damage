@@ -353,8 +353,33 @@ export const AssessmentForm: React.FC = () => {
       setHsbgnPerM2(a.hsbgnPerM2 && a.hsbgnPerM2 > 0 ? a.hsbgnPerM2 : getCategoryConfig(cat).defaultHsbgn);
       setDemolitionPercent(a.demolitionPercent ?? 8);
 
-      // Must check .length > 0 so that an empty array [] doesn't overwrite components with 0 subcomponents!
-      setComponents(a.components && a.components.length > 0 ? a.components : getInitialSubComponents());
+      // Populate subcomponent damage inputs accurately
+      if (a.components && a.components.length > 0) {
+        const hasNonZero = a.components.some((c: any) => (c.damagePercentInput || c.calculatedScore || 0) > 0);
+        if (hasNonZero || !a.totalDamagePercent) {
+          setComponents(a.components);
+        } else {
+          const totalDmg = a.totalDamagePercent || 0;
+          const synthesized = getInitialSubComponents().map((comp) => ({
+            ...comp,
+            damagePercentInput: totalDmg,
+            calculatedScore: Number(((comp.bobotPercent * totalDmg) / 100).toFixed(3)),
+          }));
+          setComponents(synthesized);
+        }
+      } else {
+        const totalDmg = a.totalDamagePercent || 0;
+        if (totalDmg > 0) {
+          const synthesized = getInitialSubComponents().map((comp) => ({
+            ...comp,
+            damagePercentInput: totalDmg,
+            calculatedScore: Number(((comp.bobotPercent * totalDmg) / 100).toFixed(3)),
+          }));
+          setComponents(synthesized);
+        } else {
+          setComponents(getInitialSubComponents());
+        }
+      }
       setPhotos(a.photos || []);
       setNikPemilik(a.nikPemilik || '0');
       setNoKkPemilik(a.noKkPemilik || '0');

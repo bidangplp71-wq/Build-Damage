@@ -1,6 +1,6 @@
 import * as XLSX from 'xlsx';
 import { BuildingAssessment, GoogleSheetConfig, Kecamatan, UserActivityLog, UserAccount } from '../types';
-import { formatRupiah } from '../utils/puprCalculations';
+import { formatRupiah, getInitialSubComponents } from '../utils/puprCalculations';
 
 export interface GoogleSheetRowPayload {
   action: 'insert' | 'update' | 'delete' | 'sync_all' | 'ping' | 'sync_activity_logs' | 'log_user_access' | 'test_drive';
@@ -147,6 +147,7 @@ export function formatAssessmentForGoogleSheet(item: BuildingAssessment) {
     'Nama Kepala Dinas': item.headOfDepartment?.name || '-',
     'NIP Kepala Dinas': item.headOfDepartment?.nip || '-',
     'Tim Analisis': item.analysisTeam?.join(', ') || '-',
+    'Rincian Komponen JSON': JSON.stringify(item.components || []),
     'Terakhir Diperbarui': new Date(item.updatedAt).toLocaleString('id-ID'),
   };
 }
@@ -1692,6 +1693,28 @@ export function parseExtractedRowsToAssessments(
     const rawTeam = String(getVal(rowObj, ['Tim Analisis', 'Tim Evaluasi', 'Tim Surveyor']) || '');
     const analysisTeam = rawTeam ? rawTeam.split(',').map(s => s.trim()).filter(Boolean) : [];
 
+    const rawComponentsJson = getVal(rowObj, ['Rincian Komponen JSON', 'Komponen JSON', 'Rincian Komponen', 'Komponen']);
+    let parsedComponents: any[] = [];
+    if (rawComponentsJson && typeof rawComponentsJson === 'string' && rawComponentsJson.trim().startsWith('[')) {
+      try {
+        parsedComponents = JSON.parse(rawComponentsJson);
+      } catch (e) {
+        // Ignored
+      }
+    }
+
+    if (parsedComponents.length === 0) {
+      if (totalDamagePercent > 0) {
+        parsedComponents = getInitialSubComponents().map((comp) => ({
+          ...comp,
+          damagePercentInput: totalDamagePercent,
+          calculatedScore: Number(((comp.bobotPercent * totalDamagePercent) / 100).toFixed(3)),
+        }));
+      } else {
+        parsedComponents = getInitialSubComponents();
+      }
+    }
+
     return {
       id,
       code,
@@ -1715,7 +1738,7 @@ export function parseExtractedRowsToAssessments(
       totalFloorAreaM2,
       numberOfFloors,
       yearBuilt,
-      components: [],
+      components: parsedComponents,
       totalDamagePercent,
       damageClassification,
       hsbgnPerM2,

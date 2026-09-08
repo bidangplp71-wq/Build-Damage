@@ -1427,7 +1427,32 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
     let usersToSearch = users.length > 0 ? users : INITIAL_USERS;
     let user = usersToSearch.find((u) => u.email && u.email.toLowerCase() === email);
 
-    if (!user && db) {
+    const isGSheetActive = Boolean(googleSheetConfig.spreadsheetUrl && isConfiguredSheetUrl(googleSheetConfig.spreadsheetUrl));
+
+    if (!user && isGSheetActive) {
+      try {
+        const sheetRes = await fetchUsersFromGoogleSheet(googleSheetConfig);
+        if (sheetRes.success && sheetRes.users.length > 0) {
+          const deletedUserIds = getStoredDeletedUserIds();
+          const validSheetUsers = sheetRes.users.filter((u) => u && u.id && !deletedUserIds.has(u.id));
+          if (validSheetUsers.length > 0) {
+            const userMap = new Map<string, UserAccount>();
+            INITIAL_USERS.forEach((u) => { if (!deletedUserIds.has(u.id)) userMap.set(u.id, u); });
+            usersToSearch.forEach((u) => { if (!deletedUserIds.has(u.id)) userMap.set(u.id, u); });
+            validSheetUsers.forEach((su) => { userMap.set(su.id, { ...(userMap.get(su.id) || {}), ...su }); });
+            const merged = Array.from(userMap.values());
+            setUsers(merged);
+            try { localStorage.setItem(STORAGE_KEYS.USERS, JSON.stringify(merged)); } catch {}
+
+            user = merged.find((u) => u.email && u.email.toLowerCase() === email);
+          }
+        }
+      } catch (e) {
+        console.warn('Live user lookup from Google Sheet notice:', e);
+      }
+    }
+
+    if (!user && db && !isGSheetActive) {
       try {
         const snapshot = await getDocs(collection(db, 'users'));
         if (!snapshot.empty) {
@@ -1450,29 +1475,6 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
         }
       } catch (err) {
         console.warn('Live user lookup from Firestore notice:', err);
-      }
-    }
-
-    if (!user) {
-      try {
-        const sheetRes = await fetchUsersFromGoogleSheet(googleSheetConfig);
-        if (sheetRes.success && sheetRes.users.length > 0) {
-          const deletedUserIds = getStoredDeletedUserIds();
-          const validSheetUsers = sheetRes.users.filter((u) => u && u.id && !deletedUserIds.has(u.id));
-          if (validSheetUsers.length > 0) {
-            const userMap = new Map<string, UserAccount>();
-            INITIAL_USERS.forEach((u) => { if (!deletedUserIds.has(u.id)) userMap.set(u.id, u); });
-            usersToSearch.forEach((u) => { if (!deletedUserIds.has(u.id)) userMap.set(u.id, u); });
-            validSheetUsers.forEach((su) => { userMap.set(su.id, { ...(userMap.get(su.id) || {}), ...su }); });
-            const merged = Array.from(userMap.values());
-            setUsers(merged);
-            try { localStorage.setItem(STORAGE_KEYS.USERS, JSON.stringify(merged)); } catch {}
-
-            user = merged.find((u) => u.email && u.email.toLowerCase() === email);
-          }
-        }
-      } catch (e) {
-        console.warn('Live user lookup from Google Sheet notice:', e);
       }
     }
 
@@ -1526,7 +1528,36 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
       user = usersToSearch.find((u) => u.name && u.name.toLowerCase().includes(query));
     }
 
-    if (!user && db) {
+    const isGSheetActive = Boolean(googleSheetConfig.spreadsheetUrl && isConfiguredSheetUrl(googleSheetConfig.spreadsheetUrl));
+
+    if (!user && isGSheetActive) {
+      try {
+        const sheetRes = await fetchUsersFromGoogleSheet(googleSheetConfig);
+        if (sheetRes.success && sheetRes.users.length > 0) {
+          const deletedUserIds = getStoredDeletedUserIds();
+          const validSheetUsers = sheetRes.users.filter((u) => u && u.id && !deletedUserIds.has(u.id));
+          if (validSheetUsers.length > 0) {
+            const userMap = new Map<string, UserAccount>();
+            INITIAL_USERS.forEach((u) => { if (!deletedUserIds.has(u.id)) userMap.set(u.id, u); });
+            usersToSearch.forEach((u) => { if (!deletedUserIds.has(u.id)) userMap.set(u.id, u); });
+            validSheetUsers.forEach((su) => { userMap.set(su.id, { ...(userMap.get(su.id) || {}), ...su }); });
+            const merged = Array.from(userMap.values());
+            setUsers(merged);
+            try { localStorage.setItem(STORAGE_KEYS.USERS, JSON.stringify(merged)); } catch {}
+
+            user = merged.find((u) => 
+              (u.name && u.name.toLowerCase() === query) || 
+              (u.email && u.email.toLowerCase() === query) ||
+              (u.name && u.name.toLowerCase().includes(query))
+            );
+          }
+        }
+      } catch (e) {
+        console.warn('Live user lookup from Google Sheet notice:', e);
+      }
+    }
+
+    if (!user && db && !isGSheetActive) {
       try {
         const snapshot = await getDocs(collection(db, 'users'));
         if (!snapshot.empty) {
@@ -1553,33 +1584,6 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
         }
       } catch (err) {
         console.warn('Live user lookup from Firestore notice:', err);
-      }
-    }
-
-    if (!user) {
-      try {
-        const sheetRes = await fetchUsersFromGoogleSheet(googleSheetConfig);
-        if (sheetRes.success && sheetRes.users.length > 0) {
-          const deletedUserIds = getStoredDeletedUserIds();
-          const validSheetUsers = sheetRes.users.filter((u) => u && u.id && !deletedUserIds.has(u.id));
-          if (validSheetUsers.length > 0) {
-            const userMap = new Map<string, UserAccount>();
-            INITIAL_USERS.forEach((u) => { if (!deletedUserIds.has(u.id)) userMap.set(u.id, u); });
-            usersToSearch.forEach((u) => { if (!deletedUserIds.has(u.id)) userMap.set(u.id, u); });
-            validSheetUsers.forEach((su) => { userMap.set(su.id, { ...(userMap.get(su.id) || {}), ...su }); });
-            const merged = Array.from(userMap.values());
-            setUsers(merged);
-            try { localStorage.setItem(STORAGE_KEYS.USERS, JSON.stringify(merged)); } catch {}
-
-            user = merged.find((u) => 
-              (u.name && u.name.toLowerCase() === query) || 
-              (u.email && u.email.toLowerCase() === query) ||
-              (u.name && u.name.toLowerCase().includes(query))
-            );
-          }
-        }
-      } catch (e) {
-        console.warn('Live user lookup from Google Sheet notice:', e);
       }
     }
 
