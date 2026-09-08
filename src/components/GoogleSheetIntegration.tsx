@@ -227,6 +227,17 @@ export const GoogleSheetIntegration: React.FC = () => {
     setTimeout(() => setCopiedScript(false), 2500);
   };
 
+  const handleShareAppWithSheet = () => {
+    if (!googleSheetConfig.spreadsheetUrl) {
+      showToast('Atur dan simpan link Google Sheet terlebih dahulu!', 'error');
+      return;
+    }
+    const baseUrl = window.location.origin + window.location.pathname;
+    const shareUrl = `${baseUrl}?sheetUrl=${encodeURIComponent(googleSheetConfig.spreadsheetUrl)}${googleSheetConfig.webhookUrl ? `&webhookUrl=${encodeURIComponent(googleSheetConfig.webhookUrl)}` : ''}`;
+    navigator.clipboard.writeText(shareUrl);
+    showToast('Link aplikasi terhubung Google Sheet berhasil disalin! Kirimkan link ini ke surveyor/perangkat lain agar langsung terkoneksi.', 'success');
+  };
+
   const syncedCount = assessments.filter((a) => a.googleSheetSynced).length;
 
   return (
@@ -301,15 +312,27 @@ export const GoogleSheetIntegration: React.FC = () => {
           )}
 
           {googleSheetConfig.spreadsheetUrl && (
-            <button
-              onClick={handleSyncFromSheet}
-              disabled={isSyncingFromSheet}
-              title="Tarik dan muat seluruh data survei dari Google Sheet mulai dari baris A2 ke bawah"
-              className="flex items-center gap-1.5 px-3.5 py-2 text-xs font-bold bg-indigo-50 hover:bg-indigo-100 text-indigo-900 rounded-xl border border-indigo-300 transition-colors cursor-pointer disabled:opacity-50"
-            >
-              <RefreshCw className={`w-4 h-4 text-indigo-600 ${isSyncingFromSheet ? 'animate-spin' : ''}`} />
-              <span>{isSyncingFromSheet ? 'Memuat Sheet...' : 'Tarik dari Sheet (A2)'}</span>
-            </button>
+            <>
+              <button
+                type="button"
+                onClick={handleShareAppWithSheet}
+                title="Salin link aplikasi yang sudah langsung terhubung dengan Google Sheet ini untuk dikirimkan ke perangkat lain"
+                className="flex items-center gap-1.5 px-3.5 py-2 text-xs font-bold bg-amber-50 hover:bg-amber-100 text-amber-900 rounded-xl border border-amber-300 transition-colors cursor-pointer"
+              >
+                <Link2 className="w-4 h-4 text-amber-600" />
+                <span>Bagikan Link Terhubung</span>
+              </button>
+
+              <button
+                onClick={handleSyncFromSheet}
+                disabled={isSyncingFromSheet}
+                title="Tarik dan muat seluruh data survei dari Google Sheet mulai dari baris A2 ke bawah"
+                className="flex items-center gap-1.5 px-3.5 py-2 text-xs font-bold bg-indigo-50 hover:bg-indigo-100 text-indigo-900 rounded-xl border border-indigo-300 transition-colors cursor-pointer disabled:opacity-50"
+              >
+                <RefreshCw className={`w-4 h-4 text-indigo-600 ${isSyncingFromSheet ? 'animate-spin' : ''}`} />
+                <span>{isSyncingFromSheet ? 'Memuat Sheet...' : 'Tarik dari Sheet (A2)'}</span>
+              </button>
+            </>
           )}
 
           <button

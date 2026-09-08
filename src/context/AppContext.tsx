@@ -368,14 +368,49 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
     }
   });
 
-  // Initialize Google Sheet Config
+  // Initialize Google Sheet Config with URL parameter auto-detection
   const [googleSheetConfig, setGoogleSheetConfig] = useState<GoogleSheetConfig>(() => {
+    let initial = DEFAULT_GOOGLE_SHEET_CONFIG;
     try {
       const saved = localStorage.getItem(STORAGE_KEYS.GOOGLE_SHEET);
-      return saved ? JSON.parse(saved) : DEFAULT_GOOGLE_SHEET_CONFIG;
-    } catch {
-      return DEFAULT_GOOGLE_SHEET_CONFIG;
-    }
+      if (saved) {
+        initial = { ...initial, ...JSON.parse(saved) };
+      }
+    } catch {}
+
+    try {
+      if (typeof window !== 'undefined' && window.location) {
+        const searchParams = new URLSearchParams(window.location.search);
+        const hash = window.location.hash || '';
+
+        let sUrl = searchParams.get('sheetUrl') || searchParams.get('spreadsheetUrl') || searchParams.get('sUrl') || '';
+        let wUrl = searchParams.get('webhookUrl') || searchParams.get('wUrl') || '';
+        const sId = searchParams.get('sheetId') || searchParams.get('sId') || '';
+
+        if (!sUrl && hash.includes('sheetUrl=')) {
+          const hashParams = new URLSearchParams(hash.replace(/^#\/?/, '?'));
+          sUrl = hashParams.get('sheetUrl') || hashParams.get('spreadsheetUrl') || hashParams.get('sUrl') || '';
+          wUrl = wUrl || hashParams.get('webhookUrl') || hashParams.get('wUrl') || '';
+        }
+
+        if (!sUrl && sId) {
+          sUrl = `https://docs.google.com/spreadsheets/d/${sId}/edit`;
+        }
+
+        if (sUrl || wUrl) {
+          initial = {
+            ...initial,
+            spreadsheetUrl: sUrl.trim() || initial.spreadsheetUrl,
+            webhookUrl: wUrl.trim() || initial.webhookUrl,
+          };
+          try {
+            localStorage.setItem(STORAGE_KEYS.GOOGLE_SHEET, JSON.stringify(initial));
+          } catch {}
+        }
+      }
+    } catch {}
+
+    return initial;
   });
 
   // Initialize HSBGN Regional Standards Config
