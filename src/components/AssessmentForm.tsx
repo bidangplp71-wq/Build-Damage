@@ -313,36 +313,57 @@ export const AssessmentForm: React.FC = () => {
     if (selectedAssessmentForEdit) {
       const a = selectedAssessmentForEdit;
       setCode(a.code || generateNextRegistrationCode(assessments));
-      setBuildingCategory(a.buildingCategory || 'Gedung Pemerintah');
+      const cat = a.buildingCategory || 'Gedung Pemerintah';
+      setBuildingCategory(cat);
       setBuildingName(a.buildingName || '');
-      setNamaPemilikRumah(a.namaPemilikRumah || (a.buildingCategory === 'Hunian Masyarakat' ? (a.ownerAgency || '') : ''));
-      setNamaPemilikGedung(a.namaPemilikGedung || (a.buildingCategory !== 'Hunian Masyarakat' ? (a.ownerAgency || '') : ''));
+
+      const ownerVal = a.namaPemilikRumah || a.namaPemilikGedung || a.ownerAgency || '';
+      setNamaPemilikRumah(a.namaPemilikRumah || ownerVal);
+      setNamaPemilikGedung(a.namaPemilikGedung || ownerVal);
+      setOwnerAgency(a.ownerAgency || ownerVal);
+
       setDisasterType(a.disasterType || 'Gempa Bumi');
       setDisasterDate(a.disasterDate || new Date().toISOString().slice(0, 10));
       setAssessmentDate(a.assessmentDate || new Date().toISOString().slice(0, 10));
-      setYearBuilt(a.yearBuilt ?? 2018);
-      setOwnerAgency(a.ownerAgency || '');
+      setYearBuilt(a.yearBuilt && a.yearBuilt > 1900 ? a.yearBuilt : 2018);
       setResponsibleDepartment(a.responsibleDepartment || 'Dinas Pekerjaan Umum dan Penataan Ruang');
       setBuildingClass(a.buildingClass || 'Bangunan Tidak Sederhana');
-      setTotalFloorAreaM2(a.totalFloorAreaM2 ?? 150);
-      setNumberOfFloors(a.numberOfFloors ?? 1);
-      setKecamatanId(a.kecamatanId || '');
-      setDesaId(a.desaId || '');
+      setTotalFloorAreaM2(a.totalFloorAreaM2 || 150);
+      setNumberOfFloors(a.numberOfFloors || 1);
+
+      // Match kecamatan
+      let matchedKecId = a.kecamatanId || '';
+      if (a.kecamatanName) {
+        const foundKec = kecamatans.find((k) => k.name.toLowerCase().trim() === a.kecamatanName.toLowerCase().trim());
+        if (foundKec) matchedKecId = foundKec.id;
+      }
+      setKecamatanId(matchedKecId || kecamatans[0]?.id || '');
+
+      // Match desa
+      let matchedDesaId = a.desaId || '';
+      if (a.desaName) {
+        const foundDesa = desas.find((d) => d.name.toLowerCase().trim() === a.desaName.toLowerCase().trim());
+        if (foundDesa) matchedDesaId = foundDesa.id;
+      }
+      setDesaId(matchedDesaId);
+
       setDetailedAddress(a.detailedAddress || '');
       setLatitude(a.latitude ?? -8.6754);
       setLongitude(a.longitude ?? 121.3021);
-      setHsbgnPerM2(a.hsbgnPerM2 ?? getCategoryConfig(a.buildingCategory || 'Hunian Masyarakat').defaultHsbgn);
+      setHsbgnPerM2(a.hsbgnPerM2 && a.hsbgnPerM2 > 0 ? a.hsbgnPerM2 : getCategoryConfig(cat).defaultHsbgn);
       setDemolitionPercent(a.demolitionPercent ?? 8);
-      setComponents(a.components || getInitialSubComponents());
+
+      // Must check .length > 0 so that an empty array [] doesn't overwrite components with 0 subcomponents!
+      setComponents(a.components && a.components.length > 0 ? a.components : getInitialSubComponents());
       setPhotos(a.photos || []);
-      setNikPemilik(a.nikPemilik || '');
-      setNoKkPemilik(a.noKkPemilik || '');
+      setNikPemilik(a.nikPemilik || '0');
+      setNoKkPemilik(a.noKkPemilik || '0');
       setCityLocation(a.cityLocation || 'Mbay');
       setReportDateStr(a.reportDateStr || 'September 2026');
       setHeadName(a.headOfDepartment?.name || '');
       setHeadNip(a.headOfDepartment?.nip || '');
       setHeadRank(a.headOfDepartment?.rank || '');
-      setAnalysisTeam(a.analysisTeam || []);
+      setAnalysisTeam(a.analysisTeam && a.analysisTeam.length > 0 ? a.analysisTeam : []);
     } else {
       // New assessment: ensure code is populated with next sequential code if empty and head officials are empty by default
       setCode((prev) => (prev && prev.trim() ? prev : generateNextRegistrationCode(assessments)));
@@ -350,17 +371,17 @@ export const AssessmentForm: React.FC = () => {
       setHeadNip('');
       setHeadRank('');
     }
-  }, [selectedAssessmentForEdit, assessments]);
+  }, [selectedAssessmentForEdit, assessments, kecamatans, desas]);
 
   // Filter available desas based on selected kecamatan
   const availableDesas = desas.filter((d) => d.kecamatanId === kecamatanId);
 
-  // Default select first desa when kecamatan changes if empty
+  // Default select first desa when kecamatan changes if empty & not editing
   useEffect(() => {
-    if (availableDesas.length > 0 && (!desaId || !availableDesas.some((d) => d.id === desaId))) {
+    if (!selectedAssessmentForEdit && availableDesas.length > 0 && (!desaId || !availableDesas.some((d) => d.id === desaId))) {
       setDesaId(availableDesas[0].id);
     }
-  }, [kecamatanId, availableDesas, desaId]);
+  }, [kecamatanId, availableDesas, desaId, selectedAssessmentForEdit]);
 
   // Dukcapil search results
   const dukcapilSearchResults = React.useMemo(() => {

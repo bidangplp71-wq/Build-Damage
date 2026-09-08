@@ -106,6 +106,7 @@ export function sanitizeSheetName(name: string): string {
  * Formats assessment data into tabular row columns for Google Sheets & Excel
  */
 export function formatAssessmentForGoogleSheet(item: BuildingAssessment) {
+  const ownerName = item.namaPemilikRumah || item.namaPemilikGedung || item.ownerAgency || '-';
   return {
     'No Registrasi': item.code || item.id,
     'Nama Bangunan': item.buildingName,
@@ -113,7 +114,11 @@ export function formatAssessmentForGoogleSheet(item: BuildingAssessment) {
     'Jenis Bencana': item.disasterType,
     'Tanggal Bencana': item.disasterDate,
     'Tanggal Penilaian': item.assessmentDate,
-    'Pengguna / Pemilik': item.ownerAgency,
+    'Pengguna / Pemilik': ownerName,
+    'Nama Pemilik Rumah': item.namaPemilikRumah || '-',
+    'Nama Pemilik Gedung': item.namaPemilikGedung || '-',
+    'NIK Pemilik': item.nikPemilik || '0',
+    'No KK Pemilik': item.noKkPemilik || '0',
     'Dinas Teknis': item.responsibleDepartment,
     'Kelas Bangunan': item.buildingClass,
     'Kecamatan': item.kecamatanName,
@@ -139,7 +144,9 @@ export function formatAssessmentForGoogleSheet(item: BuildingAssessment) {
     'Link Folder Foto Google Drive': item.googleDriveFolderUrl || '-',
     'Surveyor / Petugas': item.createdByName,
     'Kota Laporan': item.cityLocation,
-    'Jumlah Tim Analisis': item.analysisTeam ? item.analysisTeam.length : 0,
+    'Nama Kepala Dinas': item.headOfDepartment?.name || '-',
+    'NIP Kepala Dinas': item.headOfDepartment?.nip || '-',
+    'Tim Analisis': item.analysisTeam?.join(', ') || '-',
     'Terakhir Diperbarui': new Date(item.updatedAt).toLocaleString('id-ID'),
   };
 }
@@ -1672,6 +1679,19 @@ export function parseExtractedRowsToAssessments(
     const desaName = String(getVal(rowObj, ['Desa / Kelurahan', 'Desa', 'Kelurahan', 'Nama Desa']) || '').trim();
     const desaId = `desa_${desaName.toLowerCase().replace(/\s+/g, '_') || 'umum'}`;
 
+    const ownerAgency = String(getVal(rowObj, ['Pengguna / Pemilik', 'Pemilik', 'Pengguna', 'Instansi', 'Pemilik / Pengelola']) || '');
+    const namaPemilikRumah = String(getVal(rowObj, ['Nama Pemilik Rumah', 'Pemilik Rumah']) || '');
+    const namaPemilikGedung = String(getVal(rowObj, ['Nama Pemilik Gedung', 'Pemilik Gedung']) || '');
+    const nikPemilik = String(getVal(rowObj, ['NIK Pemilik', 'NIK', 'NIK 16 Digit']) || '0');
+    const noKkPemilik = String(getVal(rowObj, ['No KK Pemilik', 'No KK', 'Nomor KK', 'No. KK']) || '0');
+
+    const headName = String(getVal(rowObj, ['Nama Kepala Dinas', 'Kepala Dinas', 'Kadis']) || '');
+    const headNip = String(getVal(rowObj, ['NIP Kepala Dinas', 'NIP Kadis', 'NIP']) || '');
+    const headRank = String(getVal(rowObj, ['Pangkat Kepala Dinas', 'Pangkat / Golongan', 'Pangkat']) || '');
+    
+    const rawTeam = String(getVal(rowObj, ['Tim Analisis', 'Tim Evaluasi', 'Tim Surveyor']) || '');
+    const analysisTeam = rawTeam ? rawTeam.split(',').map(s => s.trim()).filter(Boolean) : [];
+
     return {
       id,
       code,
@@ -1680,7 +1700,11 @@ export function parseExtractedRowsToAssessments(
       disasterType: (getVal(rowObj, ['Jenis Bencana', 'Bencana']) as any) || 'Gempa Bumi',
       disasterDate,
       assessmentDate,
-      ownerAgency: String(getVal(rowObj, ['Pengguna / Pemilik', 'Pemilik', 'Pengguna', 'Instansi']) || ''),
+      ownerAgency: ownerAgency || namaPemilikRumah || namaPemilikGedung,
+      namaPemilikRumah: namaPemilikRumah || ownerAgency,
+      namaPemilikGedung: namaPemilikGedung || ownerAgency,
+      nikPemilik,
+      noKkPemilik,
       responsibleDepartment: String(getVal(rowObj, ['Dinas Teknis', 'Dinas']) || 'Dinas Pekerjaan Umum dan Penataan Ruang'),
       buildingClass: (getVal(rowObj, ['Kelas Bangunan', 'Kelas']) as any) || 'Bangunan Sederhana',
       kecamatanId: kecInfo.id,
@@ -1708,11 +1732,11 @@ export function parseExtractedRowsToAssessments(
       headOfDepartment: {
         title: 'Kepala Dinas Pekerjaan Umum dan Penataan Ruang',
         subTitle: 'Kabupaten Nagekeo',
-        rank: '',
-        name: '',
-        nip: '',
+        rank: headRank,
+        name: headName,
+        nip: headNip,
       },
-      analysisTeam: [],
+      analysisTeam,
       verificationStatus,
       verifiedBy,
       verificationNotes,
