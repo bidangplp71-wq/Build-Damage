@@ -148,6 +148,7 @@ export function formatAssessmentForGoogleSheet(item: BuildingAssessment) {
     'NIP Kepala Dinas': item.headOfDepartment?.nip || '-',
     'Tim Analisis': item.analysisTeam?.join(', ') || '-',
     'Rincian Komponen JSON': JSON.stringify(item.components || []),
+    'Foto JSON': JSON.stringify(item.photos || []),
     'Terakhir Diperbarui': new Date(item.updatedAt).toLocaleString('id-ID'),
   };
 }
@@ -1703,6 +1704,16 @@ export function parseExtractedRowsToAssessments(
       }
     }
 
+    const rawPhotosJson = getVal(rowObj, ['Foto JSON', 'Daftar Foto JSON', 'Photos JSON', 'Foto']);
+    let parsedPhotos: any[] = [];
+    if (rawPhotosJson && typeof rawPhotosJson === 'string' && rawPhotosJson.trim().startsWith('[')) {
+      try {
+        parsedPhotos = JSON.parse(rawPhotosJson);
+      } catch (e) {
+        // Ignored
+      }
+    }
+
     return {
       id,
       code,
@@ -1737,7 +1748,7 @@ export function parseExtractedRowsToAssessments(
       totalRehabCost: roundedRehabCost || (totalFloorAreaM2 * totalCostPerM2),
       roundedRehabCost,
       costTerbilang,
-      photos: [],
+      photos: parsedPhotos,
       cityLocation: String(getVal(rowObj, ['Kota Laporan', 'Kota']) || 'Mbay'),
       reportDateStr: 'September 2026',
       headOfDepartment: {
