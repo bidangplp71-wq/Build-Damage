@@ -77,6 +77,7 @@ export const ROLE_NAV_CONFIGS: Record<UserRole, RoleNavConfig> = {
       'users',
       'google_sheet',
       'googlesheets',
+      'drive_links',
       'log_aktivitas',
       'firebase_shield',
       'firebase',
@@ -100,6 +101,7 @@ export const ROLE_NAV_CONFIGS: Record<UserRole, RoleNavConfig> = {
       'users',
       'google_sheet',
       'googlesheets',
+      'drive_links',
       'log_aktivitas',
       'firebase_shield',
       'firebase',
@@ -112,21 +114,24 @@ export const ROLE_NAV_CONFIGS: Record<UserRole, RoleNavConfig> = {
   },
   admin_verifikator: {
     defaultTab: 'penilaian',
-    allowedTabs: ['penilaian', 'dashboard', 'google_sheet', 'googlesheets', 'hsbgn_settings', 'hsbgn'],
+    allowedTabs: ['penilaian', 'dashboard', 'google_sheet', 'googlesheets',
+      'drive_links', 'hsbgn_settings', 'hsbgn'],
     roleTitle: 'Tim Ahli Verifikator (TABG PUPR)',
     roleSubtitle: 'Fokus Khusus: Validasi Teknis, Audit Foto & Persetujuan Survei',
     badgeLabel: 'Mode Verifikator TABG',
   },
   admin_user: {
     defaultTab: 'input_baru',
-    allowedTabs: ['input_baru', 'tambah', 'penilaian', 'google_sheet', 'googlesheets', 'hsbgn_settings', 'hsbgn'],
+    allowedTabs: ['input_baru', 'tambah', 'penilaian', 'google_sheet', 'googlesheets',
+      'drive_links', 'hsbgn_settings', 'hsbgn'],
     roleTitle: 'Petugas Surveyor Lapangan PUPR',
     roleSubtitle: 'Fokus Khusus: Pengisian Formulir Penilaian Cepat Kerusakan',
     badgeLabel: 'Mode Surveyor Lapangan',
   },
   admin_publik: {
     defaultTab: 'dashboard',
-    allowedTabs: ['dashboard', 'penilaian', 'google_sheet', 'googlesheets', 'hsbgn_settings', 'hsbgn'],
+    allowedTabs: ['dashboard', 'penilaian', 'google_sheet', 'googlesheets',
+      'drive_links', 'hsbgn_settings', 'hsbgn'],
     roleTitle: 'Portal Informasi Publik',
     roleSubtitle: 'Fokus Khusus: Dashboard Ringkasan & Pencarian Data Publik',
     badgeLabel: 'Mode Publik (Read-Only)',
@@ -143,6 +148,7 @@ export interface UserAccount {
   status: 'active' | 'inactive';
   password?: string; // Encrypted password (ENC::...)
   passwordLastChanged?: string;
+  driveFolderUrl?: string; // Link folder G-Drive untuk backup/upload foto surveyor
   createdAt: string;
 }
 

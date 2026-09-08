@@ -2016,6 +2016,7 @@ export function formatUserForGoogleSheet(user: UserAccount): Record<string, any>
     'Status Akun': user.status || 'active',
     'Password Hash': user.password || '',
     'Terakhir Ubah Password': user.passwordLastChanged || '',
+    'Link Folder G-Drive': user.driveFolderUrl || '',
     'Tanggal Terdaftar': user.createdAt || new Date().toISOString(),
   };
 }
@@ -2140,9 +2141,10 @@ export async function fetchUsersFromGoogleSheet(
             const status = (getVal(['Status Akun', 'Status', 'status']) as any) || 'active';
             const password = getVal(['Password Hash', 'Password', 'password']) || '';
             const passwordLastChanged = getVal(['Terakhir Ubah Password', 'passwordLastChanged']) || new Date().toISOString();
+            const driveFolderUrl = getVal(['Link Folder G-Drive', 'driveFolderUrl', 'Link G-Drive']) || undefined;
             const createdAt = getVal(['Tanggal Terdaftar', 'createdAt']) || new Date().toISOString();
 
-            return { id, name, email, role, agency, phone, status, password, passwordLastChanged, createdAt };
+            return { id, name, email, role, agency, phone, status, password, passwordLastChanged, driveFolderUrl, createdAt };
           }).filter((u: UserAccount) => u.email || u.name);
 
           if (parsedUsers.length > 0) {
@@ -2198,9 +2200,10 @@ export async function fetchUsersFromGoogleSheet(
               const status = (getVal(['Status Akun', 'Status', 'status']) as any) || 'active';
               const password = getVal(['Password Hash', 'Password', 'password']) || '';
               const passwordLastChanged = getVal(['Terakhir Ubah Password', 'passwordLastChanged']) || new Date().toISOString();
+              const driveFolderUrl = getVal(['Link Folder G-Drive', 'driveFolderUrl', 'Link G-Drive']) || undefined;
               const createdAt = getVal(['Tanggal Terdaftar', 'createdAt']) || new Date().toISOString();
 
-              return { id, name, email, role, agency, phone, status, password, passwordLastChanged, createdAt };
+              return { id, name, email, role, agency, phone, status, password, passwordLastChanged, driveFolderUrl, createdAt };
             }).filter((u) => u.email || u.name);
 
             if (parsedUsers.length > 0) {

@@ -21,6 +21,7 @@ import {
   LogOut,
   Activity,
   Award,
+  HardDrive,
 } from 'lucide-react';
 
 interface NavigationProps {
@@ -91,6 +92,13 @@ export const Navigation: React.FC<NavigationProps> = ({ mobileOpen, onCloseMobil
             badge: null,
           },
           {
+            id: 'drive_links',
+            label: 'Direktori Drive Backup',
+            desc: 'Upload/Akses foto G-Drive',
+            icon: HardDrive,
+            badge: null,
+          },
+          {
             id: 'hsbgn_settings',
             label: 'Standar HSBGN Daerah',
             desc: 'Lihat harga satuan bangunan',
@@ -126,6 +134,13 @@ export const Navigation: React.FC<NavigationProps> = ({ mobileOpen, onCloseMobil
             badge: null,
           },
           {
+            id: 'drive_links',
+            label: 'Direktori Drive Backup',
+            desc: 'Akses G-Drive surveyor',
+            icon: HardDrive,
+            badge: null,
+          },
+          {
             id: 'hsbgn_settings',
             label: 'Standar HSBGN Daerah',
             desc: 'Lihat harga satuan bangunan',
@@ -157,6 +172,13 @@ export const Navigation: React.FC<NavigationProps> = ({ mobileOpen, onCloseMobil
             label: 'Google Sheet Publik',
             desc: 'Lihat lembar data online',
             icon: FileSpreadsheet,
+            badge: null,
+          },
+          {
+            id: 'drive_links',
+            label: 'Direktori Drive Backup',
+            desc: 'Akses foto lapangan (Read-Only)',
+            icon: HardDrive,
             badge: null,
           },
         ];
@@ -217,6 +239,13 @@ export const Navigation: React.FC<NavigationProps> = ({ mobileOpen, onCloseMobil
             icon: FileSpreadsheet,
             badge: assessments.filter((a) => a.googleSheetSynced).length,
             badgeLabel: 'tersimpan',
+          },
+          {
+            id: 'drive_links',
+            label: 'Direktori Drive Backup',
+            desc: 'Tautan folder G-Drive surveyor',
+            icon: HardDrive,
+            badge: null,
           },
           {
             id: 'hsbgn_settings',

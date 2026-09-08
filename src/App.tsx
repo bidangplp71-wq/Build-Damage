@@ -12,6 +12,7 @@ import { WilayahManagement } from './components/WilayahManagement';
 import { DukcapilManagement } from './components/DukcapilManagement';
 import { UserManagement } from './components/UserManagement';
 import { GoogleSheetIntegration } from './components/GoogleSheetIntegration';
+import { DriveDirectory } from './components/DriveDirectory';
 import { FirebaseProtection } from './components/FirebaseProtection';
 import { UserActivityLogView } from './components/UserActivityLogView';
 import { HsbgnSettings } from './components/HsbgnSettings';
@@ -81,6 +82,7 @@ const MainLayout: React.FC = () => {
             {activeTab === 'dukcapil' && <DukcapilManagement />}
             {(activeTab === 'manajemen_user' || activeTab === 'users') && <UserManagement />}
             {(activeTab === 'google_sheet' || activeTab === 'googlesheets') && <GoogleSheetIntegration />}
+            {activeTab === 'drive_links' && <DriveDirectory />}
             {activeTab === 'log_aktivitas' && <UserActivityLogView />}
             {(activeTab === 'firebase_shield' || activeTab === 'firebase') && <FirebaseProtection />}
             {(activeTab === 'hsbgn_settings' || activeTab === 'hsbgn') && <HsbgnSettings />}
