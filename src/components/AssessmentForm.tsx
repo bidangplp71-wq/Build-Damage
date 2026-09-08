@@ -344,8 +344,11 @@ export const AssessmentForm: React.FC = () => {
       setHeadRank(a.headOfDepartment?.rank || '');
       setAnalysisTeam(a.analysisTeam || []);
     } else {
-      // New assessment: ensure code is populated with next sequential code if empty
+      // New assessment: ensure code is populated with next sequential code if empty and head officials are empty by default
       setCode((prev) => (prev && prev.trim() ? prev : generateNextRegistrationCode(assessments)));
+      setHeadName('');
+      setHeadNip('');
+      setHeadRank('');
     }
   }, [selectedAssessmentForEdit, assessments]);
 
@@ -2564,7 +2567,8 @@ export const AssessmentForm: React.FC = () => {
               type="text"
               value={headName || ''}
               onChange={(e) => setHeadName(e.target.value)}
-              className="w-full px-3 py-2 rounded-xl border border-slate-200 font-semibold"
+              placeholder="Kosongkan jika belum ada / diisi saat pengesahan"
+              className="w-full px-3 py-2 rounded-xl border border-slate-200 font-semibold text-slate-900"
             />
           </div>
 
@@ -2574,7 +2578,8 @@ export const AssessmentForm: React.FC = () => {
               type="text"
               value={headNip || ''}
               onChange={(e) => setHeadNip(e.target.value)}
-              className="w-full px-3 py-2 rounded-xl border border-slate-200 font-mono"
+              placeholder="NIP Pejabat"
+              className="w-full px-3 py-2 rounded-xl border border-slate-200 font-mono text-slate-900"
             />
           </div>
         </div>

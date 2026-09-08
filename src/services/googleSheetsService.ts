@@ -1737,9 +1737,9 @@ export async function fetchAssessmentsFromGoogleSheet(
         headOfDepartment: {
           title: 'Kepala Dinas Pekerjaan Umum dan Penataan Ruang',
           subTitle: 'Kabupaten Nagekeo',
-          rank: 'Pembina Utama Muda (IV/c)',
-          name: 'Ir. Bernardinus Fansiena, M.T.',
-          nip: '19710512 199803 1 005',
+          rank: '',
+          name: '',
+          nip: '',
         },
         analysisTeam: [],
         verificationStatus,
