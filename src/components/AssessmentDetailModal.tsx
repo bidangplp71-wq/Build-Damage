@@ -13,6 +13,7 @@ import {
   AlertTriangle,
   ExternalLink,
   UploadCloud,
+  Folder,
 } from 'lucide-react';
 import { BuildingPhotoGallery } from './BuildingPhotoGallery';
 import { syncAssessmentPhotosToDrive } from '../services/googleSheetsService';
@@ -34,7 +35,8 @@ export const AssessmentDetailModal: React.FC<Props> = ({ assessment, onClose }) 
   const [showSignatures, setShowSignatures] = useState(true);
 
   const hasPhotos = Boolean(assessment.photos && assessment.photos.length > 0);
-  const [showPhotos, setShowPhotos] = useState(false);
+  const hasDriveFolder = Boolean(assessment.googleDriveFolderUrl);
+  const [showPhotos, setShowPhotos] = useState(true);
 
   const handleSyncPhotosToDrive = async () => {
     if (!googleSheetConfig.webhookUrl) {
@@ -134,7 +136,7 @@ export const AssessmentDetailModal: React.FC<Props> = ({ assessment, onClose }) 
 
             <div className="flex items-center gap-2 flex-wrap">
               {/* Toggle with Photos preview */}
-              {hasPhotos ? (
+              {(hasPhotos || hasDriveFolder) ? (
                 <label className="flex items-center gap-1.5 cursor-pointer text-xs font-semibold text-slate-700 bg-white border border-slate-300 px-2.5 py-1.5 rounded-xl hover:bg-slate-50 transition-colors shadow-2xs">
                   <input
                     type="checkbox"
@@ -144,7 +146,11 @@ export const AssessmentDetailModal: React.FC<Props> = ({ assessment, onClose }) 
                   />
                   <span className="flex items-center gap-1">
                     <Camera className="w-3.5 h-3.5 text-amber-600" />
-                    Sertakan Foto ({assessment.photos?.length})
+                    <span>
+                      {hasPhotos
+                        ? `Sertakan Foto (${assessment.photos?.length})`
+                        : 'Sertakan Folder Foto Drive'}
+                    </span>
                   </span>
                 </label>
               ) : null}
@@ -427,18 +433,18 @@ export const AssessmentDetailModal: React.FC<Props> = ({ assessment, onClose }) 
               </div>
             </div>
 
-            {/* Visual Photos Documentation (Rendered ONLY when showPhotos is true) */}
-            {showPhotos && hasPhotos && (
+            {/* Visual Photos Documentation (Rendered when showPhotos is true and photos or Drive folder exists) */}
+            {showPhotos && (hasPhotos || hasDriveFolder) && (
               <div className="border border-slate-300 p-4 rounded-xl space-y-3 bg-slate-50/70 avoid-break">
                 <div className="flex items-center justify-between border-b border-slate-200 pb-2">
                   <div className="flex items-center gap-2">
                     <Camera className="w-4 h-4 text-amber-600" />
                     <span className="text-xs font-bold uppercase tracking-wider text-slate-900">
-                      Dokumentasi Visual Kerusakan Fisik Bangunan ({assessment.photos?.length || 0} / 20 Foto)
+                      Dokumentasi Visual Kerusakan Fisik Bangunan ({hasPhotos ? `${assessment.photos?.length} Foto` : 'Google Drive Cloud'})
                     </span>
                   </div>
                   <div className="flex items-center gap-2 print:hidden">
-                    {googleSheetConfig.webhookUrl && (
+                    {googleSheetConfig.webhookUrl && hasPhotos && (
                       <button
                         type="button"
                         onClick={handleSyncPhotosToDrive}
@@ -455,25 +461,48 @@ export const AssessmentDetailModal: React.FC<Props> = ({ assessment, onClose }) 
                         href={assessment.googleDriveFolderUrl}
                         target="_blank"
                         rel="noopener noreferrer"
-                        className="inline-flex items-center gap-1.5 px-2.5 py-1 rounded-lg bg-indigo-50 hover:bg-indigo-100 text-indigo-700 text-xs font-semibold border border-indigo-200 transition-colors"
+                        className="inline-flex items-center gap-1.5 px-2.5 py-1 rounded-lg bg-indigo-600 hover:bg-indigo-700 text-white text-xs font-bold shadow-xs transition-colors"
                         title="Buka folder arsip foto gedung ini di Google Drive"
                       >
-                        <ExternalLink className="w-3.5 h-3.5 text-indigo-600" />
-                        <span>Folder Google Drive</span>
+                        <Folder className="w-3.5 h-3.5 text-white" />
+                        <span>Folder Google Drive ↗</span>
                       </a>
                     )}
                     <span className="text-[11px] text-slate-500 font-medium hidden sm:inline">
-                      Dilengkapi keterangan bagian kerusakan untuk verifikasi
+                      Dokumentasi resmi untuk verifikasi fisik
                     </span>
                   </div>
                 </div>
 
-                {/* Gallery Component */}
-                <BuildingPhotoGallery
-                  photos={assessment.photos || []}
-                  buildingTitle={`${assessment.buildingName} (${assessment.code || 'Tanpa No. Reg'})`}
-                  isEditable={false}
-                />
+                {hasPhotos ? (
+                  <BuildingPhotoGallery
+                    photos={assessment.photos || []}
+                    buildingTitle={`${assessment.buildingName} (${assessment.code || 'Tanpa No. Reg'})`}
+                    isEditable={false}
+                    googleDriveFolderUrl={assessment.googleDriveFolderUrl}
+                  />
+                ) : hasDriveFolder ? (
+                  <div className="p-4 bg-indigo-50/90 rounded-xl border border-indigo-200 text-indigo-950 flex flex-col sm:flex-row items-start sm:items-center justify-between gap-3">
+                    <div className="space-y-1">
+                      <div className="flex items-center gap-2 font-bold text-xs text-indigo-900">
+                        <Folder className="w-4 h-4 text-indigo-600 shrink-0" />
+                        <span>Dokumentasi Foto Gedung Tersimpan di Google Drive</span>
+                      </div>
+                      <p className="text-[11px] text-indigo-700 leading-relaxed max-w-xl">
+                        Foto-foto survei visual gedung ini tersimpan di Google Drive secara terpusat untuk menjaga performa Google Sheet agar tetap cepat dan ringan.
+                      </p>
+                    </div>
+                    <a
+                      href={assessment.googleDriveFolderUrl}
+                      target="_blank"
+                      rel="noopener noreferrer"
+                      className="shrink-0 inline-flex items-center gap-2 px-3.5 py-2 rounded-xl bg-indigo-600 hover:bg-indigo-700 text-white text-xs font-bold shadow-xs transition-colors cursor-pointer"
+                    >
+                      <Folder className="w-4 h-4 text-white" />
+                      <span>Buka Folder Foto Drive ↗</span>
+                    </a>
+                  </div>
+                ) : null}
               </div>
             )}
 

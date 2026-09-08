@@ -9,7 +9,8 @@ import {
   Camera, 
   Download, 
   Layers,
-  RotateCcw
+  RotateCcw,
+  Folder
 } from 'lucide-react';
 import { BuildingPhoto } from '../types';
 import { getPhotoLocally } from '../utils/photoStorage';
@@ -18,6 +19,7 @@ interface PhotoViewerModalProps {
   photos: BuildingPhoto[];
   initialIndex?: number;
   buildingTitle?: string;
+  googleDriveFolderUrl?: string;
   onClose: () => void;
 }
 
@@ -70,6 +72,7 @@ export const PhotoViewerModal: React.FC<PhotoViewerModalProps> = ({
   photos,
   initialIndex = 0,
   buildingTitle,
+  googleDriveFolderUrl,
   onClose,
 }) => {
   const [currentIndex, setCurrentIndex] = useState(
@@ -194,6 +197,18 @@ export const PhotoViewerModal: React.FC<PhotoViewerModalProps> = ({
 
         {/* Toolbar Controls */}
         <div className="flex items-center gap-1 sm:gap-2">
+          {googleDriveFolderUrl && (
+            <a
+              href={googleDriveFolderUrl}
+              target="_blank"
+              rel="noopener noreferrer"
+              title="Buka Folder Foto Gedung di Google Drive"
+              className="px-2.5 py-1.5 text-indigo-300 hover:text-white bg-indigo-900/60 hover:bg-indigo-800 rounded-lg transition-colors flex items-center gap-1 text-xs font-semibold cursor-pointer border border-indigo-700/50"
+            >
+              <Folder className="w-4 h-4 text-indigo-400" />
+              <span className="hidden sm:inline">Folder Drive ↗</span>
+            </a>
+          )}
           <button
             type="button"
             onClick={handleZoomIn}

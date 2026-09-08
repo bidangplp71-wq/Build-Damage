@@ -41,6 +41,7 @@ import {
   Layers,
   ZoomIn,
   Copy,
+  Folder,
 } from 'lucide-react';
 import { PhotoViewerModal } from './PhotoViewerModal';
 import { DuplicateAuditModal } from './DuplicateAuditModal';
@@ -938,6 +939,17 @@ export const AssessmentTable: React.FC = () => {
                             <Camera className="w-3.5 h-3.5 text-amber-600" />
                             <span>{item.photos.length}</span>
                           </button>
+                        ) : item.googleDriveFolderUrl ? (
+                          <a
+                            href={item.googleDriveFolderUrl}
+                            target="_blank"
+                            rel="noopener noreferrer"
+                            title="Buka Folder Dokumentasi Foto Gedung di Google Drive"
+                            className="p-1.5 rounded-lg bg-indigo-50 hover:bg-indigo-100 text-indigo-700 border border-indigo-200 transition-colors flex items-center gap-1 text-[10px] font-bold cursor-pointer"
+                          >
+                            <Folder className="w-3.5 h-3.5 text-indigo-600" />
+                            <span>Drive</span>
+                          </a>
                         ) : (
                           <span
                             title="Belum ada foto visual"
