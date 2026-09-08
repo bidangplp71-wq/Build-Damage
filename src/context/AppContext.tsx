@@ -42,7 +42,7 @@ import {
   canManageUserPassword,
   canViewUserPassword,
 } from '../utils/security';
-import { db, isQuotaError, FIRESTORE_DATABASE_CONSOLE_URL, pauseFirestoreNetwork } from '../services/firebase';
+import { db, isQuotaError, FIRESTORE_DATABASE_CONSOLE_URL, pauseFirestoreNetwork, resumeFirestoreNetwork } from '../services/firebase';
 import { collection, onSnapshot, doc, setDoc, getDocs, getDoc, deleteDoc } from 'firebase/firestore';
 import { savePhotosLocally, deletePhotosByAssessmentIdLocally } from '../utils/photoStorage';
 import { hydrateAssessmentPhotos } from '../utils/imageCompressor';
@@ -218,6 +218,21 @@ function persistDeletedAssessmentIdsBatch(ids: string[]) {
     ids.forEach((id) => current.add(id));
     localStorage.setItem(STORAGE_KEYS.DELETED_ASSESSMENTS, JSON.stringify(Array.from(current)));
   } catch {}
+}
+
+/**
+ * Strip heavy raw base64 photo URLs before sending to Cloud Firestore
+ * so the payload stays well below Firestore's 1MB document limit.
+ */
+function prepareAssessmentForFirestore(assessment: BuildingAssessment): any {
+  const clean = JSON.parse(JSON.stringify(assessment));
+  if (Array.isArray(clean.photos)) {
+    clean.photos = clean.photos.map((p: any) => ({
+      ...p,
+      url: p.url && p.url.length > 300 && !p.url.startsWith('http') ? '' : (p.url || ''),
+    }));
+  }
+  return clean;
 }
 
 export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children }) => {
@@ -431,19 +446,16 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
   });
 
   // Track Firebase Firestore Quota Exhaustion (Spark Free Tier limit protection)
-  const [isFirestoreQuotaExceeded, setIsFirestoreQuotaExceeded] = useState<boolean>(() => {
-    try {
-      return localStorage.getItem('sipandu_pupr_quota_exceeded') === 'true';
-    } catch {
-      return false;
-    }
-  });
+  const [isFirestoreQuotaExceeded, setIsFirestoreQuotaExceeded] = useState<boolean>(false);
 
   useEffect(() => {
     try {
       if (isFirestoreQuotaExceeded) {
         localStorage.setItem('sipandu_pupr_quota_exceeded', 'true');
         pauseFirestoreNetwork().catch(() => {});
+      } else {
+        localStorage.removeItem('sipandu_pupr_quota_exceeded');
+        resumeFirestoreNetwork().catch(() => {});
       }
     } catch {}
   }, [isFirestoreQuotaExceeded]);
@@ -552,36 +564,50 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
     Promise.allSettled([
       getDocs(collection(db, 'users')).then((snapshot) => {
         const deletedUserIds = getStoredDeletedUserIds();
-        if (!snapshot.empty) {
-          const remoteUsers = snapshot.docs
-            .map((d) => d.data() as UserAccount)
-            .filter((u) => u && u.id && !deletedUserIds.has(u.id));
+        const remoteUsers = snapshot.docs
+          .map((d) => d.data() as UserAccount)
+          .filter((u) => u && u.id && !deletedUserIds.has(u.id));
 
-          setUsers((prev) => {
-            const userMap = new Map<string, UserAccount>();
-            // Keep all local users (including newly registered users)
-            prev.forEach((u) => {
-              if (u && u.id && !deletedUserIds.has(u.id)) {
-                userMap.set(u.id, u);
-              }
-            });
-            // Merge remote users (overwriting / updating if exists or adding if new)
-            remoteUsers.forEach((r) => {
-              const existing = userMap.get(r.id);
-              if (!existing) {
-                userMap.set(r.id, r);
-              } else {
-                userMap.set(r.id, { ...existing, ...r });
-              }
-            });
-            const merged = Array.from(userMap.values());
-            try {
-              localStorage.setItem(STORAGE_KEYS.USERS, JSON.stringify(merged));
-            } catch {}
-
-            return merged;
+        setUsers((prev) => {
+          const userMap = new Map<string, UserAccount>();
+          // 1. Default initial users
+          INITIAL_USERS.forEach((u) => {
+            if (!deletedUserIds.has(u.id)) userMap.set(u.id, u);
           });
-        }
+          // 2. Keep local users
+          prev.forEach((u) => {
+            if (u && u.id && !deletedUserIds.has(u.id)) {
+              userMap.set(u.id, u);
+            }
+          });
+          // 3. Merge remote users
+          remoteUsers.forEach((r) => {
+            const existing = userMap.get(r.id);
+            if (!existing) {
+              userMap.set(r.id, r);
+            } else {
+              userMap.set(r.id, { ...existing, ...r });
+            }
+          });
+          const merged = Array.from(userMap.values());
+
+          // Auto-sync any local/initial users to Cloud Firestore if missing remotely
+          if (db) {
+            merged.forEach((u) => {
+              const existsRemote = remoteUsers.some((r) => r.id === u.id);
+              if (!existsRemote) {
+                const cleanU = JSON.parse(JSON.stringify(u));
+                setDoc(doc(db, 'users', cleanU.id), cleanU, { merge: true }).catch(() => {});
+              }
+            });
+          }
+
+          try {
+            localStorage.setItem(STORAGE_KEYS.USERS, JSON.stringify(merged));
+          } catch {}
+
+          return merged;
+        });
       }).catch((err) => {
         if (isQuotaError(err)) {
           setIsFirestoreQuotaExceeded(true);
@@ -591,11 +617,9 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
       }),
 
       getDocs(collection(db, 'assessments')).then(async (snapshot) => {
+        const storedDeleted = getStoredDeletedAssessmentIds();
+        const map = new Map<string, BuildingAssessment>();
         if (!snapshot.empty) {
-          const storedDeleted = getStoredDeletedAssessmentIds();
-          
-          // Filter out deleted IDs and deduplicate by id
-          const map = new Map<string, BuildingAssessment>();
           snapshot.docs.forEach((docSnap) => {
             const data = docSnap.data() as BuildingAssessment;
             if (data && data.id && !storedDeleted.has(data.id) && !storedDeleted.has(docSnap.id)) {
@@ -605,28 +629,39 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
               }
             }
           });
-
-          const uniqueRemote = Array.from(map.values());
-          const hydrated = await Promise.all(uniqueRemote.map(hydrateAssessmentPhotos));
-          setAssessments((prev) => {
-            // Merge with existing local assessments, prioritizing hydrated remote docs but keeping local non-deleted ones
-            const mergedMap = new Map<string, BuildingAssessment>();
-            prev.filter((p) => !storedDeleted.has(p.id)).forEach((p) => mergedMap.set(p.id, p));
-            hydrated.forEach((h) => mergedMap.set(h.id, h));
-            const mergedList = Array.from(mergedMap.values());
-            try {
-              const lightweight = mergedList.map((a) => ({
-                ...a,
-                photos: a.photos?.map((p) => ({
-                  ...p,
-                  url: p.url && (p.url.startsWith('http') || p.url.length < 300) ? p.url : '',
-                })) || [],
-              }));
-              localStorage.setItem(STORAGE_KEYS.ASSESSMENTS, JSON.stringify(lightweight));
-            } catch {}
-            return mergedList;
-          });
         }
+
+        const uniqueRemote = Array.from(map.values());
+        const hydrated = await Promise.all(uniqueRemote.map(hydrateAssessmentPhotos));
+        setAssessments((prev) => {
+          const mergedMap = new Map<string, BuildingAssessment>();
+          prev.filter((p) => !storedDeleted.has(p.id)).forEach((p) => mergedMap.set(p.id, p));
+          hydrated.forEach((h) => mergedMap.set(h.id, h));
+          const mergedList = Array.from(mergedMap.values());
+
+          // Auto-sync local assessments to Cloud Firestore if missing remotely
+          if (db) {
+            mergedList.forEach((ass) => {
+              const existsRemote = map.has(ass.id);
+              if (!existsRemote) {
+                const cleanA = prepareAssessmentForFirestore(ass);
+                setDoc(doc(db, 'assessments', cleanA.id), cleanA, { merge: true }).catch(() => {});
+              }
+            });
+          }
+
+          try {
+            const lightweight = mergedList.map((a) => ({
+              ...a,
+              photos: a.photos?.map((p) => ({
+                ...p,
+                url: p.url && (p.url.startsWith('http') || p.url.length < 300) ? p.url : '',
+              })) || [],
+            }));
+            localStorage.setItem(STORAGE_KEYS.ASSESSMENTS, JSON.stringify(lightweight));
+          } catch {}
+          return mergedList;
+        });
       }).catch((err) => {
         if (isQuotaError(err)) {
           setIsFirestoreQuotaExceeded(true);
@@ -696,10 +731,14 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
           // If there are remote documents in Firestore, purge any local items deleted remotely
           if (snapshot.docs.length > 0) {
             setAssessments((prev) => {
-              const cleanPrev = prev.filter((a) => !storedDeleted.has(a.id) && currentRemoteIds.has(a.id));
-              const localIds = new Set(cleanPrev.map((a) => a.id));
-              const additions = currentRemoteDocs.filter((r) => !localIds.has(r.id));
-              const result = [...additions, ...cleanPrev];
+              const cleanPrev = prev.filter((a) => !storedDeleted.has(a.id));
+              const localMap = new Map<string, BuildingAssessment>();
+              cleanPrev.forEach((a) => localMap.set(a.id, a));
+              currentRemoteDocs.forEach((r) => {
+                const existing = localMap.get(r.id);
+                localMap.set(r.id, existing ? { ...existing, ...r } : r);
+              });
+              const result = Array.from(localMap.values());
               try {
                 localStorage.setItem(STORAGE_KEYS.ASSESSMENTS, JSON.stringify(result));
               } catch {}
@@ -1127,7 +1166,7 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
       }
     } catch {}
 
-    if (db && !isFirestoreQuotaExceeded) {
+    if (db) {
       const cleanU = JSON.parse(JSON.stringify(newUser));
       setDoc(doc(db, 'users', cleanU.id), cleanU).catch((err) => {
         if (isQuotaError(err)) setIsFirestoreQuotaExceeded(true);
@@ -1178,7 +1217,7 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
     const { plainPassword, ...restData } = userData;
 
     const updatedUserObj = { ...target, ...restData };
-    if (db && !isFirestoreQuotaExceeded) {
+    if (db) {
       const cleanU = JSON.parse(JSON.stringify(updatedUserObj));
       setDoc(doc(db, 'users', id), cleanU, { merge: true }).catch((err) => {
         if (isQuotaError(err)) setIsFirestoreQuotaExceeded(true);
@@ -1612,8 +1651,8 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
 
     setAssessments((prev) => [assessmentToSave, ...prev]);
 
-    if (db && !isFirestoreQuotaExceeded) {
-      const cleanA = JSON.parse(JSON.stringify(assessmentToSave));
+    if (db) {
+      const cleanA = prepareAssessmentForFirestore(assessmentToSave);
       setDoc(doc(db, 'assessments', cleanA.id), cleanA).catch((err) => {
         if (isQuotaError(err)) setIsFirestoreQuotaExceeded(true);
         console.warn('Firebase assessment save notice:', err?.message || err);
@@ -1698,9 +1737,9 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
       )
     );
 
-    if (db && target && !isFirestoreQuotaExceeded) {
+    if (db && target) {
       const merged = { ...target, ...data, code: updatedCode, updatedAt: now };
-      const cleanA = JSON.parse(JSON.stringify(merged));
+      const cleanA = prepareAssessmentForFirestore(merged);
       setDoc(doc(db, 'assessments', id), cleanA, { merge: true }).catch((err) => {
         if (isQuotaError(err)) setIsFirestoreQuotaExceeded(true);
         console.warn('Firebase assessment update notice:', err?.message || err);

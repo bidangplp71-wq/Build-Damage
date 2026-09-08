@@ -34,11 +34,12 @@ try {
       storage = getStorage(app);
     }
 
-    // Auto-pause Firestore network if quota was already exceeded to prevent backoff retry loops
+    // Clean stale quota exceeded flag on fresh app boot so multi-device sync always attempts cloud connection
     try {
-      if (localStorage.getItem('sipandu_pupr_quota_exceeded') === 'true' && db) {
-        isFirestoreNetworkPaused = true;
-        disableNetwork(db).catch(() => {});
+      localStorage.removeItem('sipandu_pupr_quota_exceeded');
+      isFirestoreNetworkPaused = false;
+      if (db) {
+        enableNetwork(db).catch(() => {});
       }
     } catch {}
   }
