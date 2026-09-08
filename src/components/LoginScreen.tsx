@@ -124,6 +124,67 @@ export const LoginScreen: React.FC = () => {
       <div className="absolute bottom-10 right-10 w-[400px] h-[400px] bg-indigo-600/10 rounded-full blur-3xl pointer-events-none"></div>
 
       <div className="w-full max-w-md relative z-10 space-y-6 animate-in fade-in zoom-in-95 duration-300">
+        {/* Tautan Sistem Tersinkronisasi (Bisa Dicopy oleh User/Admin) */}
+        {googleSheetConfig.spreadsheetUrl && (
+          <div className="bg-slate-900/50 backdrop-blur-sm border border-slate-800 rounded-3xl shadow-xl p-5 space-y-4 animate-in fade-in">
+            <div className="flex flex-col items-center text-center space-y-1">
+              <h3 className="text-xs font-bold text-amber-500 flex items-center justify-center gap-1.5">
+                <Link2 className="w-3.5 h-3.5" />
+                <span>Informasi Tautan Sistem (Update Konfigurasi)</span>
+              </h3>
+              <p className="text-[10px] text-slate-400 leading-relaxed">
+                Jika terdapat pembaruan data sistem, salin tautan di bawah ini<br/>untuk melakukan <strong>setting ulang Link 1 dan Link 2</strong>.
+              </p>
+            </div>
+            
+            <div className="space-y-3">
+              <div>
+                <label className="block text-[10px] font-semibold text-slate-500 mb-1">Link 1: Spreadsheet URL</label>
+                <div className="relative group">
+                  <input 
+                    readOnly 
+                    value={googleSheetConfig.spreadsheetUrl}
+                    className="w-full pl-3 pr-16 py-2.5 bg-slate-950 border border-slate-800 rounded-xl text-[10px] text-slate-300 focus:outline-none"
+                  />
+                  <button 
+                    type="button"
+                    onClick={() => {
+                      navigator.clipboard.writeText(googleSheetConfig.spreadsheetUrl || '');
+                      showToast('Link 1 berhasil disalin ke clipboard!', 'success');
+                    }}
+                    className="absolute inset-y-1 right-1 px-3 flex items-center text-[10px] font-bold text-amber-500 hover:text-amber-400 bg-slate-900 hover:bg-slate-800 rounded-lg border border-slate-700 cursor-pointer transition-colors"
+                  >
+                    Salin
+                  </button>
+                </div>
+              </div>
+              
+              {googleSheetConfig.webhookUrl && (
+                <div>
+                  <label className="block text-[10px] font-semibold text-slate-500 mb-1">Link 2: Webhook URL</label>
+                  <div className="relative group">
+                    <input 
+                      readOnly 
+                      value={googleSheetConfig.webhookUrl}
+                      className="w-full pl-3 pr-16 py-2.5 bg-slate-950 border border-slate-800 rounded-xl text-[10px] text-slate-300 focus:outline-none"
+                    />
+                    <button 
+                      type="button"
+                      onClick={() => {
+                        navigator.clipboard.writeText(googleSheetConfig.webhookUrl || '');
+                        showToast('Link 2 berhasil disalin ke clipboard!', 'success');
+                      }}
+                      className="absolute inset-y-1 right-1 px-3 flex items-center text-[10px] font-bold text-amber-500 hover:text-amber-400 bg-slate-900 hover:bg-slate-800 rounded-lg border border-slate-700 cursor-pointer transition-colors"
+                    >
+                      Salin
+                    </button>
+                  </div>
+                </div>
+              )}
+            </div>
+          </div>
+        )}
+
         {/* Header Logo & Title */}
         <div className="text-center space-y-2">
           <div className="inline-flex items-center justify-center w-16 h-16 rounded-2xl bg-gradient-to-br from-amber-500 to-amber-600 text-slate-950 shadow-xl shadow-amber-500/20 mb-2">

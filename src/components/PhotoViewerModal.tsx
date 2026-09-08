@@ -1,4 +1,4 @@
-import React, { useState, useEffect, useCallback } from 'react';
+import React, { useState, useEffect, useCallback, useRef } from 'react';
 import { 
   X, 
   ZoomIn, 
@@ -10,16 +10,22 @@ import {
   Download, 
   Layers,
   RotateCcw,
-  Folder
+  Folder,
+  RefreshCw,
+  Upload,
+  AlertTriangle
 } from 'lucide-react';
 import { BuildingPhoto } from '../types';
 import { getPhotoLocally } from '../utils/photoStorage';
+import { useApp } from '../context/AppContext';
+import { compressImageFile } from '../utils/imageCompressor';
 
 interface PhotoViewerModalProps {
   photos: BuildingPhoto[];
   initialIndex?: number;
   buildingTitle?: string;
   googleDriveFolderUrl?: string;
+  assessmentId?: string;
   onClose: () => void;
 }
 
@@ -73,8 +79,10 @@ export const PhotoViewerModal: React.FC<PhotoViewerModalProps> = ({
   initialIndex = 0,
   buildingTitle,
   googleDriveFolderUrl,
+  assessmentId,
   onClose,
 }) => {
+  const { recoverAndSyncPhotos, attachPhotoToAssessment, showToast } = useApp();
   const [currentIndex, setCurrentIndex] = useState(
     Math.max(0, Math.min(initialIndex, photos.length - 1))
   );
@@ -84,6 +92,9 @@ export const PhotoViewerModal: React.FC<PhotoViewerModalProps> = ({
   const currentPhoto = photos[currentIndex];
   const [resolvedPhotoUrl, setResolvedPhotoUrl] = useState<string>(currentPhoto?.url || '');
   const [isImageError, setIsImageError] = useState(false);
+  const [isRecovering, setIsRecovering] = useState(false);
+  const [isLinking, setIsLinking] = useState(false);
+  const fileInputRef = useRef<HTMLInputElement>(null);
 
   useEffect(() => {
     if (!currentPhoto) return;
@@ -101,6 +112,56 @@ export const PhotoViewerModal: React.FC<PhotoViewerModalProps> = ({
       });
     }
   }, [currentPhoto]);
+
+  const handleManualRecover = async () => {
+    setIsRecovering(true);
+    try {
+      const res = await recoverAndSyncPhotos(assessmentId);
+      if (res.recoveredCount > 0) {
+        showToast(res.message, 'success');
+        if (currentPhoto?.id) {
+          const fresh = await getPhotoLocally(currentPhoto.id);
+          if (fresh) {
+            setResolvedPhotoUrl(fresh);
+            setIsImageError(false);
+          }
+        }
+      } else {
+        showToast('Pemeriksaan selesai. ' + res.message, 'info');
+      }
+    } catch {
+      showToast('Gagal memeriksa pemulihan foto.', 'error');
+    } finally {
+      setIsRecovering(false);
+    }
+  };
+
+  const handleFileAttach = async (e: React.ChangeEvent<HTMLInputElement>) => {
+    const file = e.target.files?.[0];
+    if (!file || !currentPhoto || !assessmentId) return;
+
+    setIsLinking(true);
+    try {
+      showToast('Memproses & menautkan file foto...', 'info');
+      const compressedUrl = await compressImageFile(file, 800, 800, 0.72);
+      if (!compressedUrl) {
+        throw new Error('Gagal mengompresi foto');
+      }
+      const success = await attachPhotoToAssessment(assessmentId, currentPhoto.id, compressedUrl);
+      if (success) {
+        setResolvedPhotoUrl(compressedUrl);
+        setIsImageError(false);
+        showToast('✓ Foto berhasil ditautkan dan tersimpan permanen di server!', 'success');
+      } else {
+        showToast('Gagal menyimpan foto ke server.', 'error');
+      }
+    } catch (err: any) {
+      showToast('Gagal menautkan foto: ' + (err.message || 'Error'), 'error');
+    } finally {
+      setIsLinking(false);
+      if (fileInputRef.current) fileInputRef.current.value = '';
+    }
+  };
 
   const handleNext = useCallback(() => {
     if (currentIndex < photos.length - 1) {
@@ -308,17 +369,72 @@ export const PhotoViewerModal: React.FC<PhotoViewerModalProps> = ({
               referrerPolicy="no-referrer"
             />
           ) : (
-            <div className="flex flex-col items-center justify-center p-8 bg-slate-900 border border-slate-800 rounded-2xl text-center max-w-md">
-              <Camera className="w-12 h-12 text-amber-500 mb-3" />
-              <h4 className="text-base font-bold text-white mb-1">
-                Foto #{currentIndex + 1}
+            <div className="flex flex-col items-center justify-center p-6 sm:p-8 bg-slate-900/95 border border-slate-700/80 rounded-2xl text-center max-w-lg shadow-2xl backdrop-blur-md">
+              <div className="w-16 h-16 rounded-full bg-amber-500/10 border border-amber-500/30 flex items-center justify-center text-amber-400 mb-3 shadow-inner">
+                <Camera className="w-8 h-8" />
+              </div>
+              <h4 className="text-lg font-bold text-white mb-1">
+                Foto #{currentIndex + 1}: {currentPhoto.damageLocation || 'Bagian Kerusakan Bangunan'}
               </h4>
-              <p className="text-sm text-slate-300 mb-2">
-                {currentPhoto.damageLocation || 'Bagian Kerusakan Bangunan'}
+              <p className="text-xs text-amber-300/90 font-medium mb-4">
+                {currentPhoto.caption || 'Foto dokumentasi survei lapangan'}
               </p>
-              <p className="text-xs text-slate-400">
-                {currentPhoto.caption || 'Foto tersimpan aman di database sistem.'}
-              </p>
+              
+              <div className="bg-slate-950/80 border border-slate-800 rounded-xl p-3.5 mb-5 text-left space-y-1.5 w-full">
+                <div className="flex items-center gap-2 text-xs font-semibold text-slate-200">
+                  <AlertTriangle className="w-4 h-4 text-amber-400 shrink-0" />
+                  <span>Foto Belum Dimuat di Browser Ini</span>
+                </div>
+                <p className="text-[11px] text-slate-400 leading-relaxed">
+                  Foto fisik diambil di perangkat surveyor dan tersimpan di cache memori lokal atau Google Drive.
+                  Anda dapat memulihkan foto secara instan tanpa perlu survei ulang:
+                </p>
+              </div>
+
+              <div className="flex flex-wrap items-center justify-center gap-2.5 w-full">
+                <button
+                  type="button"
+                  onClick={handleManualRecover}
+                  disabled={isRecovering}
+                  className="px-3.5 py-2 rounded-lg bg-amber-500 hover:bg-amber-400 text-slate-950 font-bold text-xs inline-flex items-center gap-1.5 transition-all shadow-md cursor-pointer disabled:opacity-50"
+                >
+                  <RefreshCw className={`w-3.5 h-3.5 ${isRecovering ? 'animate-spin' : ''}`} />
+                  {isRecovering ? 'Memeriksa Cache...' : 'Periksa & Sinkronkan Cache'}
+                </button>
+
+                {assessmentId && (
+                  <>
+                    <input
+                      ref={fileInputRef}
+                      type="file"
+                      accept="image/*"
+                      className="hidden"
+                      onChange={handleFileAttach}
+                    />
+                    <button
+                      type="button"
+                      onClick={() => fileInputRef.current?.click()}
+                      disabled={isLinking}
+                      className="px-3.5 py-2 rounded-lg bg-slate-800 hover:bg-slate-700 text-white font-medium text-xs border border-slate-600 inline-flex items-center gap-1.5 transition-all cursor-pointer disabled:opacity-50"
+                    >
+                      <Upload className="w-3.5 h-3.5 text-emerald-400" />
+                      {isLinking ? 'Menyimpan...' : 'Hubungkan File Foto'}
+                    </button>
+                  </>
+                )}
+
+                {googleDriveFolderUrl && (
+                  <a
+                    href={googleDriveFolderUrl}
+                    target="_blank"
+                    rel="noopener noreferrer"
+                    className="px-3.5 py-2 rounded-lg bg-blue-900/40 hover:bg-blue-800/60 text-blue-300 border border-blue-700/60 font-medium text-xs inline-flex items-center gap-1.5 transition-all cursor-pointer"
+                  >
+                    <Folder className="w-3.5 h-3.5 text-blue-400" />
+                    Buka Google Drive
+                  </a>
+                )}
+              </div>
             </div>
           )}
         </div>

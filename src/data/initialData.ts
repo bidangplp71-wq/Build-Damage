@@ -171,6 +171,8 @@ export const INITIAL_ASSESSMENTS: BuildingAssessment[] = [];
 export const DEFAULT_GOOGLE_SHEET_CONFIG: GoogleSheetConfig = {
   spreadsheetUrl: (typeof import.meta !== 'undefined' && (import.meta as any).env && (import.meta as any).env.VITE_SPREADSHEET_URL) || '',
   webhookUrl: (typeof import.meta !== 'undefined' && (import.meta as any).env && (import.meta as any).env.VITE_WEBHOOK_URL) || '',
+  driveFolderId: 'https://drive.google.com/drive/folders/1xKF8SYvNY97A9-ga0B42z3jQTbcC_Tk5?usp=sharing',
+  savePhotosToDrive: true,
   sheetName: 'Data_Penilaian_Kerusakan_PUPR',
   logSheetName: 'Log_Akses_Pengguna',
   autoSync: true,

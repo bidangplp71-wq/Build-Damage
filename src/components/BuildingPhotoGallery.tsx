@@ -9,6 +9,7 @@ interface BuildingPhotoGalleryProps {
   buildingTitle?: string;
   isEditable?: boolean;
   googleDriveFolderUrl?: string;
+  assessmentId?: string;
   onDeletePhoto?: (photoId: string) => void;
   onEditPhoto?: (photo: BuildingPhoto) => void;
 }
@@ -188,6 +189,7 @@ export const BuildingPhotoGallery: React.FC<BuildingPhotoGalleryProps> = ({
   buildingTitle,
   isEditable = false,
   googleDriveFolderUrl,
+  assessmentId,
   onDeletePhoto,
   onEditPhoto,
 }) => {
@@ -273,6 +275,8 @@ export const BuildingPhotoGallery: React.FC<BuildingPhotoGalleryProps> = ({
           photos={photos}
           initialIndex={selectedPhotoIndex}
           buildingTitle={buildingTitle}
+          googleDriveFolderUrl={googleDriveFolderUrl}
+          assessmentId={assessmentId}
           onClose={() => setSelectedPhotoIndex(null)}
         />
       )}

@@ -47,7 +47,15 @@ import {
 } from '../utils/security';
 import { db, isQuotaError, FIRESTORE_DATABASE_CONSOLE_URL, pauseFirestoreNetwork, resumeFirestoreNetwork } from '../services/firebase';
 import { collection, onSnapshot, doc, setDoc, getDocs, getDoc, deleteDoc } from 'firebase/firestore';
-import { savePhotosLocally, deletePhotosByAssessmentIdLocally } from '../utils/photoStorage';
+import { 
+  savePhotoLocally,
+  savePhotosLocally, 
+  deletePhotosByAssessmentIdLocally, 
+  getAllLocalPhotoRecords, 
+  uploadPhotoToServer, 
+  syncBatchPhotosToServer, 
+  getPhotoLocally 
+} from '../utils/photoStorage';
 import { hydrateAssessmentPhotos } from '../utils/imageCompressor';
 import { detectAllDuplicateGroups } from '../utils/duplicateDetector';
 import { generateNextRegistrationCode } from '../utils/registrationCodeGenerator';
@@ -86,6 +94,8 @@ interface AppContextType {
   syncAssessmentToSheet: (id: string) => Promise<{ success: boolean; message: string }>;
   syncAllToSheet: () => Promise<{ success: boolean; message: string; count?: number }>;
   syncFromGoogleSheet: (showToastAlert?: boolean) => Promise<{ success: boolean; message: string; count?: number }>;
+  recoverAndSyncPhotos: (targetAssessmentId?: string) => Promise<{ recoveredCount: number; success: boolean; message: string }>;
+  attachPhotoToAssessment: (assessmentId: string, photoId: string, dataUrl: string) => Promise<boolean>;
 
   // Wilayah (Kecamatan & Desa Pemekaran / Baru)
   kecamatans: Kecamatan[];
@@ -234,7 +244,9 @@ function prepareAssessmentForFirestore(assessment: BuildingAssessment): any {
   if (Array.isArray(clean.photos)) {
     clean.photos = clean.photos.map((p: any) => ({
       ...p,
-      url: p.url && p.url.length > 300 && !p.url.startsWith('http') ? '' : (p.url || ''),
+      url: p.url && (p.url.startsWith('http') || p.url.startsWith('/uploads/') || p.url.length <= 300)
+        ? p.url
+        : '',
     }));
   }
   return clean;
@@ -600,13 +612,14 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
       .then((res) => res.json())
       .then((data) => {
         if (data.success && data.config) {
-          const { spreadsheetUrl, webhookUrl } = data.config;
-          if (spreadsheetUrl || webhookUrl) {
+          const { spreadsheetUrl, webhookUrl, driveFolderId } = data.config;
+          if (spreadsheetUrl || webhookUrl || driveFolderId) {
             setGoogleSheetConfig((prev) => {
               const updated = {
                 ...prev,
                 spreadsheetUrl: spreadsheetUrl || prev.spreadsheetUrl,
                 webhookUrl: webhookUrl || prev.webhookUrl,
+                driveFolderId: driveFolderId || prev.driveFolderId,
               };
               try {
                 localStorage.setItem(STORAGE_KEYS.GOOGLE_SHEET, JSON.stringify(updated));
@@ -802,7 +815,18 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
               cleanPrev.forEach((a) => localMap.set(a.id, a));
               currentRemoteDocs.forEach((r) => {
                 const existing = localMap.get(r.id);
-                localMap.set(r.id, existing ? { ...existing, ...r } : r);
+                if (existing) {
+                  // Safely preserve working photo URLs
+                  const mergedPhotos = r.photos?.map((rp) => {
+                    if (rp.url && (rp.url.startsWith('http') || rp.url.startsWith('/uploads/'))) return rp;
+                    const existingP = existing.photos?.find((ep) => ep.id === rp.id);
+                    if (existingP?.url) return { ...rp, url: existingP.url };
+                    return rp;
+                  }) || r.photos || existing.photos;
+                  localMap.set(r.id, { ...existing, ...r, photos: mergedPhotos });
+                } else {
+                  localMap.set(r.id, r);
+                }
               });
               const result = Array.from(localMap.values());
               try {
@@ -834,7 +858,16 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
           } else if (change.type === 'modified') {
             if (docData && docData.id && !storedDeleted.has(docData.id) && !storedDeleted.has(docId)) {
               setAssessments((prev) => {
-                const next = prev.map((a) => (a.id === docData.id ? docData : a));
+                const next = prev.map((a) => {
+                  if (a.id !== docData.id) return a;
+                  const mergedPhotos = docData.photos?.map((dp) => {
+                    if (dp.url && (dp.url.startsWith('http') || dp.url.startsWith('/uploads/'))) return dp;
+                    const existingP = a.photos?.find((ep) => ep.id === dp.id);
+                    if (existingP?.url) return { ...dp, url: existingP.url };
+                    return dp;
+                  }) || docData.photos || a.photos;
+                  return { ...docData, photos: mergedPhotos };
+                });
                 try {
                   localStorage.setItem(STORAGE_KEYS.ASSESSMENTS, JSON.stringify(next));
                 } catch {}
@@ -2088,6 +2121,140 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
     };
   };
 
+  /**
+   * Automatic photo recovery engine:
+   * Scans local IndexedDB and server to restore any photos that have empty URLs in Firestore.
+   * If found, automatically syncs them to the server and updates Firestore so all users see them.
+   */
+  const recoverAndSyncPhotos = async (
+    targetAssessmentId?: string
+  ): Promise<{ recoveredCount: number; success: boolean; message: string }> => {
+    try {
+      const localRecords = await getAllLocalPhotoRecords();
+      const localRecordMap = new Map<string, string>();
+      if (localRecords && localRecords.length > 0) {
+        localRecords.forEach((r) => {
+          if (r.id && r.url) localRecordMap.set(r.id, r.url);
+        });
+      }
+
+      let totalRecovered = 0;
+      let hasAnyUpdate = false;
+
+      const updatedAssessments = await Promise.all(
+        assessments.map(async (ass) => {
+          if (targetAssessmentId && ass.id !== targetAssessmentId) {
+            return ass;
+          }
+          if (!ass.photos || ass.photos.length === 0) return ass;
+
+          let assChanged = false;
+          const updatedPhotos = await Promise.all(
+            ass.photos.map(async (p) => {
+              if (p.url && (p.url.startsWith('http://') || p.url.startsWith('https://') || p.url.startsWith('/uploads/'))) {
+                return p;
+              }
+
+              // 1. Check local IndexedDB memory
+              const localUrl = localRecordMap.get(p.id) || (await getPhotoLocally(p.id));
+              if (localUrl) {
+                let finalUrl = localUrl;
+                // Upload to server to get permanent /uploads/ URL for all devices
+                if (!localUrl.startsWith('/uploads/') && !localUrl.startsWith('http')) {
+                  const up = await uploadPhotoToServer(p.id, ass.id, localUrl);
+                  if (up.success && up.url) {
+                    finalUrl = up.url;
+                  }
+                }
+                totalRecovered++;
+                assChanged = true;
+                return { ...p, url: finalUrl };
+              }
+
+              return p;
+            })
+          );
+
+          if (assChanged) {
+            hasAnyUpdate = true;
+            const updatedAss = { ...ass, photos: updatedPhotos, updatedAt: new Date().toISOString() };
+            if (db) {
+              const clean = prepareAssessmentForFirestore(updatedAss);
+              setDoc(doc(db, 'assessments', clean.id), clean, { merge: true }).catch(() => {});
+            }
+            return updatedAss;
+          }
+
+          return ass;
+        })
+      );
+
+      if (hasAnyUpdate && totalRecovered > 0) {
+        setAssessments(updatedAssessments);
+        try {
+          localStorage.setItem(STORAGE_KEYS.ASSESSMENTS, JSON.stringify(updatedAssessments));
+        } catch {}
+        return {
+          recoveredCount: totalRecovered,
+          success: true,
+          message: `Berhasil memulihkan ${totalRecovered} foto kerusakan ke server & tersinkron ke semua perangkat!`,
+        };
+      }
+
+      return {
+        recoveredCount: 0,
+        success: false,
+        message: 'Foto fisik belum ditemukan di browser ini. Data tersimpan di perangkat surveyor (HP Anton) atau Google Drive.',
+      };
+    } catch (err: any) {
+      return { recoveredCount: 0, success: false, message: 'Gagal memulihkan foto: ' + err.message };
+    }
+  };
+
+  const attachPhotoToAssessment = async (assessmentId: string, photoId: string, dataUrl: string): Promise<boolean> => {
+    try {
+      const up = await uploadPhotoToServer(photoId, assessmentId, dataUrl);
+      const publicUrl = up.success && up.url ? up.url : dataUrl;
+      savePhotoLocally(photoId, assessmentId, publicUrl).catch(() => {});
+
+      setAssessments((prev) => {
+        const next = prev.map((a) => {
+          if (a.id !== assessmentId) return a;
+          const newPhotos = (a.photos || []).map((p) => (p.id === photoId ? { ...p, url: publicUrl } : p));
+          const updated = { ...a, photos: newPhotos, updatedAt: new Date().toISOString() };
+          if (db) {
+            const clean = prepareAssessmentForFirestore(updated);
+            setDoc(doc(db, 'assessments', clean.id), clean, { merge: true }).catch(() => {});
+          }
+          return updated;
+        });
+        try {
+          localStorage.setItem(STORAGE_KEYS.ASSESSMENTS, JSON.stringify(next));
+        } catch {}
+        return next;
+      });
+
+      return true;
+    } catch {
+      return false;
+    }
+  };
+
+  // Auto-trigger recovery once when assessments are populated
+  const hasAutoRecoveredRef = useRef(false);
+  useEffect(() => {
+    if (hasAutoRecoveredRef.current || assessments.length === 0) return;
+    const hasMissingPhotos = assessments.some((a) => a.photos?.some((p) => !p.url || p.url.trim() === ''));
+    if (hasMissingPhotos) {
+      hasAutoRecoveredRef.current = true;
+      recoverAndSyncPhotos().then((res) => {
+        if (res.success && res.recoveredCount > 0) {
+          showToast(`✓ Auto-Recovery: ${res.recoveredCount} foto kerusakan berhasil dipulihkan & disinkronkan ke server!`, 'success');
+        }
+      });
+    }
+  }, [assessments.length]);
+
   const verifyAssessment = async (id: string, status: VerificationStatus, notes: string) => {
     if (currentUser.role !== 'super_admin' && currentUser.role !== 'admin_verifikator') {
       return {
@@ -2587,13 +2754,14 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
       const updated = { ...prev, ...config };
       
       // Save to server-side JSON config endpoint for robust fallback across all devices
-      if (updated.spreadsheetUrl || updated.webhookUrl) {
+      if (updated.spreadsheetUrl || updated.webhookUrl || updated.driveFolderId) {
         fetch('/api/config', {
           method: 'POST',
           headers: { 'Content-Type': 'application/json' },
           body: JSON.stringify({
             spreadsheetUrl: updated.spreadsheetUrl,
             webhookUrl: updated.webhookUrl,
+            driveFolderId: updated.driveFolderId,
           }),
         }).catch((err) => console.warn('Server config save failed:', err));
       }
@@ -2685,6 +2853,8 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
         syncAssessmentToSheet,
         syncAllToSheet,
         syncFromGoogleSheet,
+        recoverAndSyncPhotos,
+        attachPhotoToAssessment,
 
         kecamatans,
         desas,

@@ -42,6 +42,9 @@ import {
   ZoomIn,
   Copy,
   Folder,
+  MessageSquare,
+  Edit3,
+  Sparkles,
 } from 'lucide-react';
 import { PhotoViewerModal } from './PhotoViewerModal';
 import { DuplicateAuditModal } from './DuplicateAuditModal';
@@ -135,6 +138,12 @@ export const AssessmentTable: React.FC = () => {
   const pendingVerificationCount = useMemo(() => {
     return assessments.filter((a) => a.verificationStatus === 'Menunggu Verifikasi').length;
   }, [assessments]);
+
+  const needsRevisionCount = useMemo(() => {
+    return assessments.filter((a) => a.verificationStatus === 'Perlu Revisi').length;
+  }, [assessments]);
+
+  const [itemToViewNotes, setItemToViewNotes] = useState<BuildingAssessment | null>(null);
 
   // Desas filtered by selected Kecamatan
   const availableDesas = useMemo(() => {
@@ -310,9 +319,9 @@ export const AssessmentTable: React.FC = () => {
       case 'Menunggu Verifikasi':
         return 'bg-amber-50 text-amber-700 border-amber-300';
       case 'Perlu Revisi':
-        return 'bg-blue-50 text-blue-700 border-blue-300';
+        return 'bg-rose-100 text-rose-800 border-rose-300 font-extrabold';
       case 'Ditolak':
-        return 'bg-rose-50 text-rose-700 border-rose-300';
+        return 'bg-slate-100 text-slate-700 border-slate-300';
       default:
         return 'bg-slate-50 text-slate-700 border-slate-300';
     }
@@ -320,6 +329,50 @@ export const AssessmentTable: React.FC = () => {
 
   return (
     <div className="space-y-4">
+      {/* Surveyor / Admin Revision Notification Banner */}
+      {needsRevisionCount > 0 && (
+        <div className="bg-rose-50 border-2 border-rose-300 rounded-2xl p-4 flex flex-col sm:flex-row items-start sm:items-center justify-between gap-3 text-xs shadow-xs">
+          <div className="flex items-center gap-3">
+            <div className="w-10 h-10 rounded-xl bg-rose-600 text-white flex items-center justify-center shrink-0 font-bold shadow-xs">
+              <AlertCircle className="w-5 h-5 animate-pulse" />
+            </div>
+            <div>
+              <div className="flex items-center gap-2">
+                <span className="font-extrabold text-sm text-rose-950">
+                  {currentUser.role === 'admin_user' 
+                    ? `Perhatian Surveyor: ${needsRevisionCount} Data Penilaian Memerlukan Perbaikan / Revisi` 
+                    : `Informasi Verifikasi: ${needsRevisionCount} Data Survei Berstatus 'Perlu Revisi Lapangan'`}
+                </span>
+                <span className="px-2 py-0.5 rounded-full bg-rose-200 text-rose-900 font-extrabold text-[10px]">
+                  Tindakan Diperlukan
+                </span>
+              </div>
+              <p className="text-rose-800 text-[11px] mt-0.5 leading-relaxed">
+                {currentUser.role === 'admin_user'
+                  ? 'Admin Verifikator telah memeriksa dan menyematkan catatan perbaikan teknis. Silakan buka data bertanda "Perlu Revisi" dan perbaiki sesuai instruksi.'
+                  : 'Surveyor dapat melihat catatan teknis yang diberikan untuk mengedit dan mengirimkan kembali data survei.'}
+              </p>
+            </div>
+          </div>
+          <button
+            onClick={() => {
+              setSelectedVerification(selectedVerification === 'Perlu Revisi' ? '' : 'Perlu Revisi');
+              setCurrentPage(1);
+            }}
+            className={`px-4 py-2 rounded-xl text-xs font-bold shrink-0 flex items-center gap-1.5 cursor-pointer shadow-xs transition-colors ${
+              selectedVerification === 'Perlu Revisi'
+                ? 'bg-slate-900 text-white'
+                : 'bg-rose-600 hover:bg-rose-700 text-white'
+            }`}
+          >
+            <Filter className="w-3.5 h-3.5" />
+            <span>
+              {selectedVerification === 'Perlu Revisi' ? 'Tampilkan Semua Data' : `Filter Perlu Revisi (${needsRevisionCount})`}
+            </span>
+          </button>
+        </div>
+      )}
+
       {/* Role-Specific Context Banner */}
       {currentUser.role === 'admin_verifikator' && (
         <div className="bg-amber-50 border border-amber-300 rounded-2xl p-3.5 flex items-center justify-between gap-3 text-xs shadow-xs">
@@ -819,6 +872,48 @@ export const AssessmentTable: React.FC = () => {
                           </strong>
                         </span>
                       </div>
+
+                      {/* Catatan Perbaikan Admin Box if Status is Perlu Revisi */}
+                      {item.verificationStatus === 'Perlu Revisi' && (
+                        <div className="mt-2 p-2.5 rounded-xl bg-rose-50 border border-rose-300 text-rose-950 text-left shadow-2xs space-y-1">
+                          <div className="flex items-center justify-between gap-1">
+                            <span className="flex items-center gap-1.5 text-[11px] font-extrabold text-rose-800">
+                              <AlertCircle className="w-3.5 h-3.5 text-rose-600 shrink-0 animate-pulse" />
+                              Catatan Perbaikan Verifikator:
+                            </span>
+                            {item.verifiedBy && (
+                              <span className="text-[10px] text-rose-700 font-semibold bg-rose-100/80 px-1.5 py-0.5 rounded">
+                                Oleh: {item.verifiedBy.split(' ')[0]}
+                              </span>
+                            )}
+                          </div>
+                          <p className="text-[11px] font-medium text-rose-900 leading-snug whitespace-pre-wrap">
+                            "{item.verificationNotes || 'Mohon periksa kembali isian komponen kerusakan, luas lantai, atau dokumentasi foto visual.'}"
+                          </p>
+                          <div className="flex items-center gap-2 pt-1 border-t border-rose-200/80">
+                            {canEdit && (
+                              <button
+                                type="button"
+                                onClick={() => {
+                                  setSelectedAssessmentForEdit(item);
+                                  setActiveTab('input_baru');
+                                }}
+                                className="inline-flex items-center gap-1 px-2.5 py-1 rounded-lg bg-rose-600 hover:bg-rose-700 text-white font-bold text-[10px] shadow-xs cursor-pointer transition-colors"
+                              >
+                                <Edit3 className="w-3 h-3" />
+                                <span>Periksa & Edit Data Sekarang &rarr;</span>
+                              </button>
+                            )}
+                            <button
+                              type="button"
+                              onClick={() => setItemToViewNotes(item)}
+                              className="text-[10px] font-bold text-rose-700 hover:underline cursor-pointer"
+                            >
+                              Detail Catatan
+                            </button>
+                          </div>
+                        </div>
+                      )}
                     </td>
 
                     {/* Disaster Type */}
@@ -886,6 +981,17 @@ export const AssessmentTable: React.FC = () => {
                         <div className="text-[10px] text-slate-400 truncate max-w-[90px] mx-auto mt-0.5">
                           oleh {item.verifiedBy.split(' ')[0]}
                         </div>
+                      )}
+                      {item.verificationNotes && (
+                        <button
+                          type="button"
+                          onClick={() => setItemToViewNotes(item)}
+                          className="mt-1 inline-flex items-center gap-1 px-1.5 py-0.5 rounded-md bg-rose-50 hover:bg-rose-100 text-rose-700 border border-rose-200 text-[9px] font-bold transition-colors cursor-pointer"
+                          title="Lihat Catatan Verifikator"
+                        >
+                          <MessageSquare className="w-2.5 h-2.5 text-rose-600" />
+                          <span>Catatan</span>
+                        </button>
                       )}
                     </td>
 
@@ -973,10 +1079,19 @@ export const AssessmentTable: React.FC = () => {
                               setSelectedAssessmentForEdit(item);
                               setActiveTab('input_baru');
                             }}
-                            title="Edit Penilaian"
-                            className="p-1.5 rounded-lg bg-slate-100 hover:bg-slate-200 text-slate-700 border border-slate-200 transition-colors cursor-pointer"
+                            title={
+                              item.verificationStatus === 'Perlu Revisi'
+                                ? 'PERLU REVISI: Klik untuk memeriksa catatan dan memperbaiki data survei ini'
+                                : 'Edit Penilaian'
+                            }
+                            className={`p-1.5 rounded-lg transition-all cursor-pointer flex items-center gap-1 ${
+                              item.verificationStatus === 'Perlu Revisi'
+                                ? 'bg-rose-600 hover:bg-rose-700 text-white font-bold ring-2 ring-rose-300 ring-offset-1 text-[10px] shadow-xs'
+                                : 'bg-slate-100 hover:bg-slate-200 text-slate-700 border border-slate-200'
+                            }`}
                           >
-                            <Edit className="w-3.5 h-3.5" />
+                            <Edit3 className="w-3.5 h-3.5" />
+                            {item.verificationStatus === 'Perlu Revisi' && <span>Perbaiki</span>}
                           </button>
                         )}
 
@@ -1169,10 +1284,52 @@ export const AssessmentTable: React.FC = () => {
                   rows={3}
                   value={verifyNotesInput}
                   onChange={(e) => setVerifyNotesInput(e.target.value)}
-                  placeholder="Contoh: Perhitungan kerusakan komponen kolom dan gording telah sesuai. Disetujui untuk pengajuan rehabilitasi TA 2026."
+                  placeholder={
+                    verifyStatusChoice === 'Perlu Revisi'
+                      ? 'Tuliskan catatan detail bagian apa yang perlu diperiksa atau diperbaiki oleh surveyor...'
+                      : 'Contoh: Perhitungan kerusakan komponen kolom dan gording telah sesuai. Disetujui untuk pengajuan rehabilitasi TA 2026.'
+                  }
                   className="w-full p-2.5 rounded-xl border border-slate-200 text-xs focus:outline-none focus:ring-2 focus:ring-amber-500"
                 ></textarea>
               </div>
+
+              {/* Quick Preset Feedback Templates for Perlu Revisi */}
+              {verifyStatusChoice === 'Perlu Revisi' && (
+                <div className="space-y-1.5 bg-rose-50/70 border border-rose-200 p-3 rounded-xl">
+                  <div className="flex items-center justify-between text-[11px] font-bold text-rose-900">
+                    <span className="flex items-center gap-1">
+                      <Sparkles className="w-3.5 h-3.5 text-rose-600" />
+                      Pilih Cepat Petunjuk Perbaikan untuk Surveyor:
+                    </span>
+                    <span className="text-[10px] text-rose-600 font-normal">Klik untuk menyisipkan</span>
+                  </div>
+                  <div className="flex flex-wrap gap-1.5 pt-1">
+                    {[
+                      'Foto visual kerusakan belum jelas / kurang lengkap, mohon ambil foto sudut pandang lain.',
+                      'Periksa kembali persentase kerusakan komponen struktur (kolom, balok, atau pondasi).',
+                      'Periksa kembali kesesuaian luas total lantai (m²) dan jumlah lantai gedung.',
+                      'Lengkapi data NIK / No. KK / identitas pemilik bangunan.',
+                      'Sesuaikan klasifikasi tingkat kerusakan dan perkiraan HSBGN yang dipilih.',
+                    ].map((tpl) => (
+                      <button
+                        key={tpl}
+                        type="button"
+                        onClick={() => {
+                          setVerifyNotesInput((prev) =>
+                            prev ? `${prev.trim()}\n• ${tpl}` : `• ${tpl}`
+                          );
+                        }}
+                        className="text-[10px] bg-white hover:bg-rose-100 text-rose-800 px-2 py-1 rounded-md border border-rose-200 font-medium transition-colors text-left shadow-2xs cursor-pointer"
+                      >
+                        + {tpl.slice(0, 48)}...
+                      </button>
+                    ))}
+                  </div>
+                  <p className="text-[10px] text-rose-800 mt-1 italic">
+                    Catatan ini akan langsung ditampilkan ke surveyor di halaman tabel dan formulir edit mereka.
+                  </p>
+                </div>
+              )}
             </div>
 
             <div className="mt-6 flex items-center justify-end gap-2 pt-3 border-t border-slate-100">
@@ -1193,12 +1350,109 @@ export const AssessmentTable: React.FC = () => {
         </div>
       )}
 
+      {/* Modal: View Revision / Verification Notes Dialog */}
+      {itemToViewNotes && (
+        <div className="fixed inset-0 z-50 flex items-center justify-center bg-slate-900/60 backdrop-blur-xs p-4 animate-in fade-in duration-150">
+          <div className="bg-white rounded-2xl max-w-lg w-full p-6 shadow-2xl border border-slate-200">
+            <div className="flex items-center justify-between pb-3 border-b border-slate-100">
+              <h3 className="text-base font-bold text-slate-900 flex items-center gap-2">
+                <MessageSquare className="w-5 h-5 text-rose-600" />
+                <span>Catatan Verifikasi & Instruksi Perbaikan</span>
+              </h3>
+              <button
+                onClick={() => setItemToViewNotes(null)}
+                className="text-slate-400 hover:text-slate-600"
+              >
+                <X className="w-5 h-5" />
+              </button>
+            </div>
+
+            <div className="mt-4 space-y-3.5 text-xs">
+              <div className="bg-slate-50 p-3 rounded-xl border border-slate-200">
+                <div className="font-bold text-slate-900 text-sm">{itemToViewNotes.buildingName}</div>
+                <div className="text-slate-500 mt-0.5 flex flex-wrap items-center gap-1.5">
+                  <span className="font-semibold text-slate-700">{itemToViewNotes.code || 'Tanpa Kode'}</span>
+                  <span>&bull;</span>
+                  <span>Kec. {itemToViewNotes.kecamatanName}, {itemToViewNotes.desaName}</span>
+                </div>
+              </div>
+
+              <div className="flex items-center justify-between p-2.5 rounded-xl bg-slate-100/80 border border-slate-200">
+                <div>
+                  <span className="text-[10px] text-slate-500 block uppercase font-bold tracking-wider">Status Validasi</span>
+                  <span className={`inline-block px-2.5 py-0.5 rounded-full text-xs font-bold border mt-0.5 ${getVerificationBadge(itemToViewNotes.verificationStatus)}`}>
+                    {itemToViewNotes.verificationStatus}
+                  </span>
+                </div>
+                {itemToViewNotes.verifiedBy && (
+                  <div className="text-right">
+                    <span className="text-[10px] text-slate-500 block uppercase font-bold tracking-wider">Verifikator</span>
+                    <span className="font-bold text-slate-800 text-xs">{itemToViewNotes.verifiedBy}</span>
+                    {itemToViewNotes.verifiedAt && (
+                      <div className="text-[10px] text-slate-400 font-mono">
+                        {new Date(itemToViewNotes.verifiedAt).toLocaleDateString('id-ID', { day: 'numeric', month: 'short', year: 'numeric', hour: '2-digit', minute: '2-digit' })}
+                      </div>
+                    )}
+                  </div>
+                )}
+              </div>
+
+              <div className="space-y-1.5">
+                <label className="block font-bold text-slate-800">
+                  Isi Catatan / Petunjuk Perbaikan dari Verifikator:
+                </label>
+                <div className="p-4 rounded-xl bg-rose-50/70 border border-rose-200 text-slate-900 whitespace-pre-wrap leading-relaxed font-medium">
+                  {itemToViewNotes.verificationNotes || 'Tidak ada catatan teks yang disertakan.'}
+                </div>
+              </div>
+
+              {itemToViewNotes.verificationStatus === 'Perlu Revisi' && (
+                <div className="p-3 bg-amber-50 border border-amber-200 rounded-xl text-amber-950 space-y-1">
+                  <span className="font-bold block flex items-center gap-1">
+                    <CheckCircle className="w-3.5 h-3.5 text-amber-700" />
+                    <span>Langkah Perbaikan untuk Petugas Surveyor:</span>
+                  </span>
+                  <p className="text-[11px] leading-relaxed text-amber-900">
+                    Buka tombol perbaiki di bawah, sesuaikan isian formulir sesuai catatan di atas, lalu simpan formulir agar data otomatis diajukan kembali ke antrean verifikasi.
+                  </p>
+                </div>
+              )}
+            </div>
+
+            <div className="mt-6 flex items-center justify-end gap-2 pt-3 border-t border-slate-100">
+              <button
+                onClick={() => setItemToViewNotes(null)}
+                className="px-4 py-2 text-xs font-semibold text-slate-700 bg-slate-100 hover:bg-slate-200 rounded-xl transition-colors cursor-pointer"
+              >
+                Tutup
+              </button>
+              {(currentUser.role === 'super_admin' || currentUser.role === 'admin' || currentUser.role === 'admin_user') && (
+                <button
+                  onClick={() => {
+                    const item = itemToViewNotes;
+                    setItemToViewNotes(null);
+                    setSelectedAssessmentForEdit(item);
+                    setActiveTab('input_baru');
+                  }}
+                  className="px-4 py-2 text-xs font-bold text-white bg-rose-600 hover:bg-rose-700 rounded-xl transition-colors flex items-center gap-1.5 shadow-sm cursor-pointer"
+                >
+                  <Edit3 className="w-3.5 h-3.5" />
+                  <span>Buka Formulir untuk Memperbaiki Data</span>
+                </button>
+              )}
+            </div>
+          </div>
+        </div>
+      )}
+
       {/* Fullscreen Zoomable Photo Lightbox Viewer */}
       {photoViewerAssessment && photoViewerAssessment.photos && photoViewerAssessment.photos.length > 0 && (
         <PhotoViewerModal
           photos={photoViewerAssessment.photos}
           initialIndex={photoViewerInitialIndex}
           buildingTitle={`${photoViewerAssessment.buildingName} (${photoViewerAssessment.code || 'Tanpa No. Reg'})`}
+          googleDriveFolderUrl={photoViewerAssessment.googleDriveFolderUrl}
+          assessmentId={photoViewerAssessment.id}
           onClose={() => setPhotoViewerAssessment(null)}
         />
       )}

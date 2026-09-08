@@ -8,6 +8,7 @@ import {
   extractDriveFolderId,
   getDriveFolderUrl,
   testDrivePhotoUpload,
+  syncAssessmentPhotosToDrive,
   groupAssessmentsByKecamatan,
 } from '../services/googleSheetsService';
 import {
@@ -75,9 +76,14 @@ export const GoogleSheetIntegration: React.FC = () => {
 
   const [isTesting, setIsTesting] = useState(false);
   const [isTestingDrive, setIsTestingDrive] = useState(false);
+  const [isSyncingPhotosToDrive, setIsSyncingPhotosToDrive] = useState(false);
+  const [syncPhotoProgress, setSyncPhotoProgress] = useState<{ current: number; total: number; buildingName: string } | null>(null);
   const [testDriveResult, setTestDriveResult] = useState<{ success: boolean; message: string; folderUrl?: string } | null>(null);
   const [isSyncingAll, setIsSyncingAll] = useState(false);
   const [copiedScript, setCopiedScript] = useState(false);
+
+  const assessmentsWithPhotos = assessments.filter((a) => a.photos && a.photos.length > 0);
+  const totalPhotosCount = assessmentsWithPhotos.reduce((sum, a) => sum + (a.photos?.length || 0), 0);
 
   const scriptTemplate = getGoogleAppsScriptTemplate();
   const groupedData = groupAssessmentsByKecamatan(assessments);
@@ -196,6 +202,46 @@ export const GoogleSheetIntegration: React.FC = () => {
       showToast(msg, 'error');
     } finally {
       setIsTestingDrive(false);
+    }
+  };
+
+  const handleSyncAllPhotosToDrive = async () => {
+    const hookUrl = webhookUrlInput.trim() || googleSheetConfig.webhookUrl;
+    if (!hookUrl) {
+      showToast('Masukkan URL Webhook Google Apps Script terlebih dahulu', 'error');
+      return;
+    }
+    if (assessmentsWithPhotos.length === 0) {
+      showToast('Belum ada data gedung yang memiliki dokumentasi foto untuk diunggah.', 'info');
+      return;
+    }
+
+    setIsSyncingPhotosToDrive(true);
+    let successCount = 0;
+    try {
+      for (let i = 0; i < assessmentsWithPhotos.length; i++) {
+        const item = assessmentsWithPhotos[i];
+        setSyncPhotoProgress({
+          current: i + 1,
+          total: assessmentsWithPhotos.length,
+          buildingName: item.buildingName || item.code || `Gedung ${i + 1}`,
+        });
+        const res = await syncAssessmentPhotosToDrive(item, {
+          ...googleSheetConfig,
+          webhookUrl: hookUrl,
+          driveFolderId: driveFolderIdInput.trim() || googleSheetConfig.driveFolderId,
+          savePhotosToDrive: true,
+        });
+        if (res.success) {
+          successCount++;
+        }
+      }
+      showToast(`Selesai! Berhasil mengirim foto ${successCount} dari ${assessmentsWithPhotos.length} gedung ke Google Drive.`, 'success');
+    } catch (err: any) {
+      showToast(`Gagal mengirim foto: ${err?.message || 'Error koneksi'}`, 'error');
+    } finally {
+      setIsSyncingPhotosToDrive(false);
+      setSyncPhotoProgress(null);
     }
   };
 
@@ -834,22 +880,55 @@ export const GoogleSheetIntegration: React.FC = () => {
                 </div>
               </div>
 
-              {/* Uji Unggah Foto Google Drive */}
+              {/* Uji & Unggah Foto Google Drive */}
               <div className="pt-2 border-t border-indigo-200/60 flex flex-wrap items-center justify-between gap-2">
-                <button
-                  type="button"
-                  onClick={handleTestDriveUpload}
-                  disabled={isTestingDrive}
-                  className="inline-flex items-center gap-1.5 px-3 py-1.5 bg-indigo-600 hover:bg-indigo-700 text-white rounded-lg text-xs font-bold transition-colors cursor-pointer shadow-xs disabled:opacity-50"
-                >
-                  <UploadCloud className={`w-3.5 h-3.5 ${isTestingDrive ? 'animate-spin' : ''}`} />
-                  <span>{isTestingDrive ? 'Mengirim Foto Contoh ke Drive...' : 'Uji Kirim 1 Foto Contoh ke Google Drive'}</span>
-                </button>
+                <div className="flex flex-wrap items-center gap-2">
+                  <button
+                    type="button"
+                    onClick={handleTestDriveUpload}
+                    disabled={isTestingDrive || isSyncingPhotosToDrive}
+                    className="inline-flex items-center gap-1.5 px-3 py-1.5 bg-indigo-600 hover:bg-indigo-700 text-white rounded-lg text-xs font-bold transition-colors cursor-pointer shadow-xs disabled:opacity-50"
+                  >
+                    <UploadCloud className={`w-3.5 h-3.5 ${isTestingDrive ? 'animate-spin' : ''}`} />
+                    <span>{isTestingDrive ? 'Mengirim Foto Uji Coba...' : 'Uji Kirim 1 Foto Contoh'}</span>
+                  </button>
+
+                  <button
+                    type="button"
+                    onClick={handleSyncAllPhotosToDrive}
+                    disabled={isSyncingPhotosToDrive || isTestingDrive || assessmentsWithPhotos.length === 0}
+                    className="inline-flex items-center gap-1.5 px-3 py-1.5 bg-emerald-700 hover:bg-emerald-800 text-white rounded-lg text-xs font-bold transition-colors cursor-pointer shadow-xs disabled:opacity-50"
+                    title="Unggah seluruh foto penilaian gedung yang ada ke folder Google Drive"
+                  >
+                    <UploadCloud className={`w-3.5 h-3.5 ${isSyncingPhotosToDrive ? 'animate-spin' : ''}`} />
+                    <span>
+                      {isSyncingPhotosToDrive
+                        ? `Mengunggah (${syncPhotoProgress?.current || 0}/${syncPhotoProgress?.total || 0})...`
+                        : `Kirim Semua Foto Survei ke Google Drive (${totalPhotosCount} Foto)`}
+                    </span>
+                  </button>
+                </div>
 
                 <span className="text-[11px] text-indigo-800">
-                  Menguji apakah webhook Anda sudah memiliki izin & skrip penyimpan foto ke Drive.
+                  {assessmentsWithPhotos.length > 0
+                    ? `Terdapat ${totalPhotosCount} foto dari ${assessmentsWithPhotos.length} gedung siap diunggah ke Google Drive.`
+                    : 'Belum ada foto survei untuk diunggah.'}
                 </span>
               </div>
+
+              {syncPhotoProgress && (
+                <div className="p-3 bg-indigo-100/90 rounded-xl border border-indigo-200 text-xs text-indigo-950 flex flex-col sm:flex-row items-start sm:items-center justify-between gap-2">
+                  <div className="flex items-center gap-2">
+                    <RefreshCw className="w-3.5 h-3.5 text-indigo-600 animate-spin shrink-0" />
+                    <span>
+                      Sedang memproses gedung <strong>{syncPhotoProgress.buildingName}</strong> ({syncPhotoProgress.current} dari {syncPhotoProgress.total} gedung)...
+                    </span>
+                  </div>
+                  <span className="text-[11px] font-mono font-bold text-indigo-700 bg-white px-2 py-0.5 rounded-md border border-indigo-200">
+                    {Math.round((syncPhotoProgress.current / syncPhotoProgress.total) * 100)}% Selesai
+                  </span>
+                </div>
+              )}
 
               {testDriveResult && (
                 <div className={`p-3 rounded-xl border text-xs ${testDriveResult.success ? 'bg-emerald-50 border-emerald-300 text-emerald-950' : 'bg-rose-50 border-rose-300 text-rose-950'}`}>

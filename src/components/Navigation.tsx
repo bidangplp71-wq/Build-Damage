@@ -52,6 +52,10 @@ export const Navigation: React.FC<NavigationProps> = ({ mobileOpen, onCloseMobil
     (a) => a.createdBy === currentUser.id
   ).length;
 
+  const myNeedsRevisionCount = assessments.filter(
+    (a) => (currentUser.role === 'admin_user' ? a.createdBy === currentUser.id : true) && a.verificationStatus === 'Perlu Revisi'
+  ).length;
+
   const roleCounts = getUserCountsByRole();
   const currentRoleConfig = ROLE_LIMITS[currentUser.role];
   const navConfig = ROLE_NAV_CONFIGS[currentUser.role];
@@ -73,10 +77,11 @@ export const Navigation: React.FC<NavigationProps> = ({ mobileOpen, onCloseMobil
           {
             id: 'penilaian',
             label: 'Riwayat Survei Saya',
-            desc: 'Daftar data yang telah Anda kirim',
+            desc: myNeedsRevisionCount > 0 ? `⚠️ ${myNeedsRevisionCount} data perlu perbaikan` : 'Daftar data yang telah Anda kirim',
             icon: ClipboardList,
-            badge: myAssessmentsCount || assessments.length,
+            badge: myNeedsRevisionCount > 0 ? `${myNeedsRevisionCount} Perlu Revisi` : (myAssessmentsCount || assessments.length),
             badgeLabel: 'gedung',
+            badgeAlert: myNeedsRevisionCount > 0,
           },
           {
             id: 'google_sheet',
@@ -388,9 +393,11 @@ export const Navigation: React.FC<NavigationProps> = ({ mobileOpen, onCloseMobil
               {tab.badge !== null && tab.badge !== undefined && (
                 <span
                   className={`ml-2 px-2 py-0.5 text-[10px] font-bold rounded-full shrink-0 ${
-                    isActive
-                      ? 'bg-slate-950 text-amber-300'
-                      : 'bg-slate-800 text-slate-300 border border-slate-700'
+                    (tab as any).badgeAlert
+                      ? 'bg-rose-500 text-white animate-pulse shadow-xs border border-rose-400'
+                      : isActive
+                        ? 'bg-slate-950 text-amber-300'
+                        : 'bg-slate-800 text-slate-300 border border-slate-700'
                   }`}
                 >
                   {tab.badge}

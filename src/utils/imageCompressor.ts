@@ -185,13 +185,13 @@ export async function hydrateAssessmentPhotos(assessment: BuildingAssessment): P
 
   const hydratedPhotos = await Promise.all(
     assessment.photos.map(async (p) => {
-      if (p.url && (p.url.startsWith('http://') || p.url.startsWith('https://') || p.url.startsWith('data:'))) {
+      if (p.url && (p.url.startsWith('http://') || p.url.startsWith('https://') || p.url.startsWith('/uploads/') || p.url.startsWith('data:'))) {
         // Save to IndexedDB in background
         savePhotoLocally(p.id, assessment.id, p.url).catch(() => {});
         return p;
       }
 
-      // If empty or missing, lookup IndexedDB
+      // If empty or missing, lookup IndexedDB / Server
       const localUrl = await getPhotoLocally(p.id);
       if (localUrl) {
         return { ...p, url: localUrl };

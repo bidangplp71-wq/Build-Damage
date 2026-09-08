@@ -25,6 +25,7 @@ import {
 import { compressImageFile, calculatePhotosPayloadSize } from '../utils/imageCompressor';
 import { savePhotoLocally } from '../utils/photoStorage';
 import { uploadPhotoToFirebaseStorage } from '../services/firebase';
+import { uploadPhotoToServer } from '../utils/photoStorage';
 import { checkDuplicateBeforeSave, DuplicateMatchInfo } from '../utils/duplicateDetector';
 import { generateNextRegistrationCode, isRegistrationCodeUnique } from '../utils/registrationCodeGenerator';
 import { BuildingPhotoGallery } from './BuildingPhotoGallery';
@@ -77,6 +78,8 @@ import {
   ImageIcon,
   Database,
   RefreshCw,
+  AlertCircle,
+  MessageSquare,
 } from 'lucide-react';
 
 export const AssessmentForm: React.FC = () => {
@@ -779,16 +782,16 @@ export const AssessmentForm: React.FC = () => {
       setNewPhotoCaption('');
       showToast(`✓ Berhasil menambahkan ${validPhotos.length} foto kerusakan (${photos.length + validPhotos.length}/${MAX_BUILDING_PHOTOS})`, 'success');
 
-      // 3. Asynchronous background upload to Firebase Cloud Storage (does not block user interaction)
+      // 3. Asynchronous background upload to Central Server (does not block user interaction)
       validPhotos.forEach((p) => {
-        uploadPhotoToFirebaseStorage(p.url, targetAssId, p.id).then((uploadRes) => {
-          if (uploadRes.isCloudStorage && uploadRes.url) {
+        uploadPhotoToServer(p.id, targetAssId, p.url).then((uploadRes) => {
+          if (uploadRes.success && uploadRes.url) {
             setPhotos((currList) =>
               currList.map((item) => (item.id === p.id ? { ...item, url: uploadRes.url } : item))
             );
           }
         }).catch((err) => {
-          console.warn('Background sync fallback to local compressed image:', err);
+          console.warn('Background server sync notice:', err);
         });
       });
     } catch (err) {
@@ -919,13 +922,13 @@ export const AssessmentForm: React.FC = () => {
       ? selectedAssessmentForEdit!.id
       : (finalCode.startsWith('REG-') ? finalCode : `REG-${finalCode}`);
 
-    // Parallel sync to Firebase Cloud Storage for any photo still in base64
+    // Parallel sync to Server Storage for any photo still in base64
     const syncedPhotos: BuildingPhoto[] = await Promise.all(
       photos.map(async (p) => {
-        if (p.url && !p.url.startsWith('http://') && !p.url.startsWith('https://')) {
+        if (p.url && !p.url.startsWith('http://') && !p.url.startsWith('https://') && !p.url.startsWith('/uploads/')) {
           try {
-            const up = await uploadPhotoToFirebaseStorage(p.url, targetAssId, p.id);
-            if (up.isCloudStorage && up.url) {
+            const up = await uploadPhotoToServer(p.id, targetAssId, p.url);
+            if (up.success && up.url) {
               return { ...p, url: up.url };
             }
           } catch {
@@ -988,8 +991,17 @@ export const AssessmentForm: React.FC = () => {
       analysisTeam,
 
       verificationStatus: isEditMode
-        ? selectedAssessmentForEdit!.verificationStatus
+        ? (selectedAssessmentForEdit!.verificationStatus === 'Perlu Revisi'
+            ? 'Menunggu Verifikasi'
+            : selectedAssessmentForEdit!.verificationStatus)
         : 'Menunggu Verifikasi',
+      verificationNotes: isEditMode
+        ? (selectedAssessmentForEdit!.verificationStatus === 'Perlu Revisi'
+            ? `[Revisi Surveyor ${currentUser.name} - ${new Date().toLocaleDateString('id-ID', { day: 'numeric', month: 'short', year: 'numeric', hour: '2-digit', minute: '2-digit' })}]: Data telah diperiksa & diperbaiki.\n(Catatan sebelumnya: ${selectedAssessmentForEdit!.verificationNotes || '-'})`
+            : (selectedAssessmentForEdit!.verificationNotes || ''))
+        : '',
+      verifiedBy: selectedAssessmentForEdit?.verifiedBy,
+      verifiedAt: selectedAssessmentForEdit?.verifiedAt,
       googleSheetSynced: false,
       createdBy: currentUser.id,
       createdByName: currentUser.name,
@@ -1009,8 +1021,16 @@ export const AssessmentForm: React.FC = () => {
 
   const executeSaveAssessment = async (payload: BuildingAssessment) => {
     if (isEditMode) {
+      const isRevision = selectedAssessmentForEdit?.verificationStatus === 'Perlu Revisi';
       const res = await updateAssessment(selectedAssessmentForEdit!.id, payload);
-      showToast(res.message, res.success ? 'success' : 'error');
+      if (res.success && isRevision) {
+        showToast(
+          '✓ Data berhasil diperbaiki dan status dikembalikan ke "Menunggu Verifikasi" untuk diverifikasi ulang oleh Admin!',
+          'success'
+        );
+      } else {
+        showToast(res.message, res.success ? 'success' : 'error');
+      }
     } else {
       const res = await addAssessment(payload);
       showToast(res.message, res.success ? 'success' : 'error');
@@ -1091,10 +1111,73 @@ export const AssessmentForm: React.FC = () => {
             className="flex items-center gap-1.5 px-4 py-2 text-xs font-bold text-slate-950 bg-amber-500 hover:bg-amber-400 rounded-xl shadow-xs transition-colors cursor-pointer"
           >
             <Save className="w-4 h-4" />
-            <span>{isEditMode ? 'Simpan Perubahan' : 'Simpan & Hitung'}</span>
+            <span>
+              {isEditMode
+                ? (selectedAssessmentForEdit?.verificationStatus === 'Perlu Revisi'
+                    ? 'Simpan & Kirim Ulang ke Verifikator'
+                    : 'Simpan Perubahan')
+                : 'Simpan & Hitung'}
+            </span>
           </button>
         </div>
       </div>
+
+      {/* REVISION INSTRUCTION BANNER FROM ADMIN/VERIFIKATOR */}
+      {isEditMode && selectedAssessmentForEdit?.verificationNotes && (
+        <div className="bg-gradient-to-r from-rose-50 via-amber-50/50 to-rose-50 border-2 border-rose-400 rounded-2xl p-5 shadow-sm space-y-3">
+          <div className="flex items-start justify-between gap-4">
+            <div className="flex items-start gap-3">
+              <div className="w-11 h-11 rounded-xl bg-rose-600 text-white flex items-center justify-center shrink-0 shadow-xs mt-0.5">
+                <AlertCircle className="w-6 h-6 animate-pulse" />
+              </div>
+              <div>
+                <div className="flex flex-wrap items-center gap-2">
+                  <h3 className="text-base font-extrabold text-rose-950">
+                    CATATAN PERBAIKAN DARI ADMIN / VERIFIKATOR TEKNIS
+                  </h3>
+                  <span className={`px-2.5 py-0.5 rounded-full text-xs font-bold border ${
+                    selectedAssessmentForEdit.verificationStatus === 'Perlu Revisi'
+                      ? 'bg-rose-100 text-rose-800 border-rose-300'
+                      : 'bg-amber-100 text-amber-800 border-amber-300'
+                  }`}>
+                    Status: {selectedAssessmentForEdit.verificationStatus}
+                  </span>
+                </div>
+                <p className="text-xs text-rose-800 mt-0.5">
+                  Diberikan oleh verifikator <strong>{selectedAssessmentForEdit.verifiedBy || 'Tim Ahli PUPR'}</strong>
+                  {selectedAssessmentForEdit.verifiedAt && (
+                    <span> pada {new Date(selectedAssessmentForEdit.verifiedAt).toLocaleDateString('id-ID', { day: 'numeric', month: 'long', year: 'numeric', hour: '2-digit', minute: '2-digit' })}</span>
+                  )}
+                </p>
+              </div>
+            </div>
+          </div>
+
+          {/* Actual Notes Body */}
+          <div className="bg-white/95 border border-rose-300 rounded-xl p-4 text-xs shadow-xs space-y-1.5">
+            <div className="text-[11px] font-bold uppercase tracking-wider text-rose-800 flex items-center gap-1.5">
+              <MessageSquare className="w-3.5 h-3.5 text-rose-600" />
+              <span>Instruksi yang Perlu Diperiksa & Diperbaiki:</span>
+            </div>
+            <p className="text-sm font-semibold text-slate-800 whitespace-pre-wrap leading-relaxed">
+              {selectedAssessmentForEdit.verificationNotes}
+            </p>
+          </div>
+
+          {/* Action guidance list */}
+          <div className="bg-amber-50/90 border border-amber-200 rounded-xl p-3 text-xs text-amber-950 space-y-1">
+            <p className="font-bold flex items-center gap-1.5 text-amber-900">
+              <CheckCircle2 className="w-4 h-4 text-amber-700" />
+              <span>Petunjuk Langkah untuk Petugas Surveyor:</span>
+            </p>
+            <ul className="list-disc list-inside space-y-0.5 text-[11px] text-amber-900 ml-1">
+              <li>Periksa kembali data komponen gedung, luas lantai, identitas pemilik, atau foto yang disebutkan pada catatan di atas.</li>
+              <li>Lakukan perbaikan data pada bagian formulir di bawah ini.</li>
+              <li>Setelah perbaikan selesai, klik tombol <strong>"Simpan & Kirim Ulang ke Verifikator"</strong> di kanan atas atau bawah. Status survei akan otomatis diperbarui menjadi <em>Menunggu Verifikasi</em> agar dapat diperiksa ulang oleh Admin.</li>
+            </ul>
+          </div>
+        </div>
+      )}
 
       {/* Direct Google Sheet Saving Status Banner */}
       <div className="bg-gradient-to-r from-emerald-50 via-teal-50 to-emerald-50 border border-emerald-200 rounded-2xl p-4 flex flex-col sm:flex-row sm:items-center justify-between gap-3 text-xs shadow-xs">
@@ -3068,7 +3151,13 @@ export const AssessmentForm: React.FC = () => {
           className="flex items-center gap-2 px-6 py-2.5 text-xs font-bold text-slate-950 bg-amber-500 hover:bg-amber-400 rounded-xl shadow-md shadow-amber-500/20 transition-all cursor-pointer"
         >
           <Save className="w-4 h-4" />
-          <span>{isEditMode ? 'Simpan Perubahan Penilaian' : 'Simpan & Sinkronkan Data'}</span>
+          <span>
+            {isEditMode
+              ? (selectedAssessmentForEdit?.verificationStatus === 'Perlu Revisi'
+                  ? 'Simpan & Kirim Ulang ke Verifikator'
+                  : 'Simpan Perubahan Penilaian')
+              : 'Simpan & Sinkronkan Data'}
+          </span>
         </button>
       </div>
       </form>

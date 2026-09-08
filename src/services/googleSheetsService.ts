@@ -1,6 +1,7 @@
 import * as XLSX from 'xlsx';
 import { BuildingAssessment, GoogleSheetConfig, Kecamatan, UserActivityLog, UserAccount } from '../types';
 import { formatRupiah, getInitialSubComponents } from '../utils/puprCalculations';
+import { hydrateAssessmentPhotos } from '../utils/imageCompressor';
 
 export interface GoogleSheetRowPayload {
   action: 'insert' | 'update' | 'delete' | 'sync_all' | 'ping' | 'sync_activity_logs' | 'log_user_access' | 'test_drive';
@@ -193,9 +194,11 @@ export async function directSaveToGoogleSheet(
     };
   }
 
-  const rowData = formatAssessmentForGoogleSheet(assessment);
+  // Ensure photos are hydrated from local storage if needed before sending to Google Apps Script
+  const hydratedAssessment = await hydrateAssessmentPhotos(assessment);
+  const rowData = formatAssessmentForGoogleSheet(hydratedAssessment);
   const spreadsheetId = extractSpreadsheetId(config.spreadsheetUrl);
-  const kecSheetName = sanitizeSheetName(`Kec. ${assessment.kecamatanName || 'Lainnya'}`);
+  const kecSheetName = sanitizeSheetName(`Kec. ${hydratedAssessment.kecamatanName || 'Lainnya'}`);
   const cleanFolderId = extractDriveFolderId(config.driveFolderId);
 
   const payload: GoogleSheetRowPayload = {
@@ -206,18 +209,18 @@ export async function directSaveToGoogleSheet(
     includeMasterSummary: config.includeMasterSummarySheet !== false,
     spreadsheetUrl: config.spreadsheetUrl,
     spreadsheetId: spreadsheetId || undefined,
-    registrationCode: assessment.code || assessment.id,
-    previousRegistrationCode: previousCode || assessment.id,
+    registrationCode: hydratedAssessment.code || hydratedAssessment.id,
+    previousRegistrationCode: previousCode || hydratedAssessment.id,
     data: rowData,
-    photos: assessment.photos ? assessment.photos.map((p, idx) => ({
+    photos: hydratedAssessment.photos ? hydratedAssessment.photos.map((p, idx) => ({
       id: p.id || `photo_${idx}`,
       caption: p.caption || '',
       damageLocation: p.damageLocation || `Foto ${idx + 1}`,
       url: p.url,
-      dataBase64: p.url && p.url.startsWith('data:') ? p.url : undefined,
+      dataBase64: (p as any).dataBase64 || (p.url && p.url.startsWith('data:') ? p.url : undefined),
     })) : [],
     savePhotosToDrive: config.savePhotosToDrive !== false,
-    driveFolderId: (config.driveFolderId || '').trim() || undefined,
+    driveFolderId: cleanFolderId || (config.driveFolderId || '').trim() || undefined,
     timestamp: new Date().toISOString(),
   };
 
@@ -974,69 +977,92 @@ function savePhotosToGoogleDrive(photos, regCode, buildingName, parentFolderInpu
     // Buat / dapatkan subfolder khusus untuk gedung terkait
     var safeBuilding = (buildingName || "Gedung").replace(/[^a-zA-Z0-9 _-]/g, "_").trim();
     var folderName = safeBuilding + (regCode ? (" - " + regCode) : "");
-    var subFolders = parentFolder.getFoldersByName(folderName);
-    var targetFolder = subFolders.hasNext() ? subFolders.next() : parentFolder.createFolder(folderName);
-    try { targetFolder.setSharing(DriveApp.Access.ANYONE_WITH_LINK, DriveApp.Permission.VIEW); } catch(eSub) {}
-    
-    for (var i = 0; i < photos.length; i++) {
-      var p = photos[i];
-      var base64Data = p.dataBase64 || p.url || "";
-      var decoded = null;
-      var contentType = "image/jpeg";
-      
-      if (base64Data.indexOf("data:") === 0) {
-        var parts = base64Data.split(",");
-        if (parts.length > 1) {
-          contentType = parts[0].split(":")[1].split(";")[0] || "image/jpeg";
-          decoded = Utilities.base64Decode(parts[1]);
-        }
-      } else if (base64Data.indexOf("http") === 0) {
-        try {
-          var resp = UrlFetchApp.fetch(base64Data, { muteHttpExceptions: true });
-          if (resp.getResponseCode() === 200) {
-            decoded = resp.getBlob().getBytes();
-            contentType = resp.getBlob().getContentType() || "image/jpeg";
-          }
-        } catch(eFetch) {}
-      } else if (base64Data.length > 50 && !/^\s*http/.test(base64Data)) {
-        try {
-          decoded = Utilities.base64Decode(base64Data);
-        } catch(eDec) {}
-      }
-      
-      if (decoded && decoded.length > 0) {
-        var safeLoc = (p.damageLocation || ("Foto_" + (i + 1))).replace(/[^a-zA-Z0-9 _-]/g, "_");
-        
-        // Tentukan ekstensi file secara dinamis sesuai tipe MIME gambar
-        var ext = "jpg";
-        var lowerType = (contentType || "").toLowerCase();
-        if (lowerType.indexOf("png") !== -1) ext = "png";
-        else if (lowerType.indexOf("webp") !== -1) ext = "webp";
-        else if (lowerType.indexOf("gif") !== -1) ext = "gif";
-        else if (lowerType.indexOf("bmp") !== -1) ext = "bmp";
-        else if (lowerType.indexOf("svg") !== -1) ext = "svg";
-        else if (lowerType.indexOf("avif") !== -1) ext = "avif";
-        else if (lowerType.indexOf("tiff") !== -1 || lowerType.indexOf("tif") !== -1) ext = "tif";
-        else if (lowerType.indexOf("heic") !== -1) ext = "heic";
-        else if (lowerType.indexOf("heif") !== -1) ext = "heif";
-        
-        var fileName = ("0" + (i + 1)).slice(-2) + "_" + safeLoc + "." + ext;
-        
-        // Hapus file lama jika ada agar diperbarui dengan file baru
-        var existingFiles = targetFolder.getFilesByName(fileName);
-        while (existingFiles.hasNext()) {
-          try {
-            existingFiles.next().setTrashed(true);
-          } catch(eTrash) {}
-        }
-        
-        // Buat file baru dari binary blob
-        var blob = Utilities.newBlob(decoded, contentType, fileName);
-        var newFile = targetFolder.createFile(blob);
-        try { newFile.setSharing(DriveApp.Access.ANYONE_WITH_LINK, DriveApp.Permission.VIEW); } catch(e) {}
+    var targetFolder = null;
+
+    try {
+      var subFolders = parentFolder.getFoldersByName(folderName);
+      targetFolder = subFolders.hasNext() ? subFolders.next() : parentFolder.createFolder(folderName);
+      try { targetFolder.setSharing(DriveApp.Access.ANYONE_WITH_LINK, DriveApp.Permission.VIEW); } catch(eSub) {}
+    } catch(eSubFolder) {
+      Logger.log("Gagal membuat subfolder pada folder induk: " + eSubFolder + ", menggunakan fallback root...");
+      try {
+        var fallbackRootName = "SIM-PKBG PUPR - Dokumentasi Foto Kerusakan";
+        var fRoots = DriveApp.getFoldersByName(fallbackRootName);
+        var fRoot = fRoots.hasNext() ? fRoots.next() : DriveApp.createFolder(fallbackRootName);
+        var fSubs = fRoot.getFoldersByName(folderName);
+        targetFolder = fSubs.hasNext() ? fSubs.next() : fRoot.createFolder(folderName);
+        try { targetFolder.setSharing(DriveApp.Access.ANYONE_WITH_LINK, DriveApp.Permission.VIEW); } catch(eFb) {}
+      } catch(eFbTotal) {
+        targetFolder = parentFolder;
       }
     }
-    return targetFolder.getUrl();
+    if (!targetFolder) targetFolder = parentFolder;
+    
+    for (var i = 0; i < photos.length; i++) {
+      try {
+        var p = photos[i];
+        var base64Data = p.dataBase64 || p.url || "";
+        var decoded = null;
+        var contentType = "image/jpeg";
+        
+        if (base64Data.indexOf("data:") === 0) {
+          var parts = base64Data.split(",");
+          if (parts.length > 1) {
+            contentType = parts[0].split(":")[1].split(";")[0] || "image/jpeg";
+            decoded = Utilities.base64Decode(parts[1]);
+          }
+        } else if (base64Data.indexOf("http") === 0) {
+          try {
+            var resp = UrlFetchApp.fetch(base64Data, { muteHttpExceptions: true });
+            if (resp.getResponseCode() === 200) {
+              decoded = resp.getBlob().getBytes();
+              contentType = resp.getBlob().getContentType() || "image/jpeg";
+            }
+          } catch(eFetch) {}
+        } else if (base64Data.length > 50 && !/^\s*http/.test(base64Data)) {
+          try {
+            decoded = Utilities.base64Decode(base64Data);
+          } catch(eDec) {}
+        }
+        
+        if (decoded && decoded.length > 0) {
+          var safeLoc = (p.damageLocation || ("Foto_" + (i + 1))).replace(/[^a-zA-Z0-9 _-]/g, "_");
+          
+          // Tentukan ekstensi file secara dinamis sesuai tipe MIME gambar
+          var ext = "jpg";
+          var lowerType = (contentType || "").toLowerCase();
+          if (lowerType.indexOf("png") !== -1) ext = "png";
+          else if (lowerType.indexOf("webp") !== -1) ext = "webp";
+          else if (lowerType.indexOf("gif") !== -1) ext = "gif";
+          else if (lowerType.indexOf("bmp") !== -1) ext = "bmp";
+          else if (lowerType.indexOf("svg") !== -1) ext = "svg";
+          else if (lowerType.indexOf("avif") !== -1) ext = "avif";
+          else if (lowerType.indexOf("tiff") !== -1 || lowerType.indexOf("tif") !== -1) ext = "tif";
+          else if (lowerType.indexOf("heic") !== -1) ext = "heic";
+          else if (lowerType.indexOf("heif") !== -1) ext = "heif";
+          
+          var fileName = ("0" + (i + 1)).slice(-2) + "_" + safeLoc + "." + ext;
+          
+          // Hapus file lama jika ada agar diperbarui dengan file baru
+          try {
+            var existingFiles = targetFolder.getFilesByName(fileName);
+            while (existingFiles.hasNext()) {
+              try {
+                existingFiles.next().setTrashed(true);
+              } catch(eTrash) {}
+            }
+          } catch(eScanFiles) {}
+          
+          // Buat file baru dari binary blob
+          var blob = Utilities.newBlob(decoded, contentType, fileName);
+          var newFile = targetFolder.createFile(blob);
+          try { newFile.setSharing(DriveApp.Access.ANYONE_WITH_LINK, DriveApp.Permission.VIEW); } catch(e) {}
+        }
+      } catch(ePhotoItem) {
+        Logger.log("Gagal menyimpan foto ke-" + (i + 1) + ": " + ePhotoItem);
+      }
+    }
+    return targetFolder ? targetFolder.getUrl() : "";
   } catch (err) {
     Logger.log("Error saving photos to Drive: " + err);
     return "";
