@@ -18,6 +18,8 @@ import {
   Loader2,
   Settings,
   X,
+  Bell,
+  Sparkles,
 } from 'lucide-react';
 
 export const LoginScreen: React.FC = () => {
@@ -199,6 +201,29 @@ export const LoginScreen: React.FC = () => {
           <div className="inline-flex items-center gap-1.5 px-3 py-1 rounded-full bg-slate-900 border border-slate-800 text-[11px] text-amber-400 font-medium">
             <ShieldCheck className="w-3.5 h-3.5" />
             <span>Permen PUPR No. 22/PRT/M/2018 &bull; Kabupaten Nagekeo</span>
+          </div>
+        </div>
+
+        {/* Informasi Pembaruan Sistem (Release Notes) */}
+        <div className="bg-gradient-to-r from-emerald-500/10 via-emerald-400/10 to-emerald-500/10 border border-emerald-500/30 rounded-2xl p-4 animate-in fade-in slide-in-from-top-4 duration-500 shadow-lg shadow-emerald-900/20">
+          <div className="flex items-start gap-3">
+            <div className="p-2 bg-emerald-500/20 rounded-xl text-emerald-400 shrink-0 shadow-inner mt-0.5">
+              <Sparkles className="w-5 h-5 animate-pulse" />
+            </div>
+            <div className="space-y-2">
+              <h3 className="text-xs font-bold text-emerald-400 uppercase tracking-wide">Informasi Pembaruan Sistem</h3>
+              <p className="text-[11px] text-slate-300 leading-relaxed">
+                Aplikasi telah diperbarui dengan sistem sinkronisasi terbaru. Jika sesi Anda berakhir atau telah <strong>log out</strong>, silakan login kembali.
+              </p>
+              <div className="p-2.5 bg-slate-900/60 rounded-xl border border-emerald-500/20">
+                <p className="text-[11px] font-bold text-amber-400 mb-1">Bagi Pengguna Baru & Update Konfigurasi Tautan:</p>
+                <ul className="text-[10.5px] text-slate-300 leading-relaxed list-disc list-inside space-y-0.5 ml-0.5">
+                  <li>Salin <strong>Link 1 (Spreadsheet)</strong> & <strong>Link 2 (Webhook)</strong> pada bagian informasi di atas.</li>
+                  <li>Klik <strong>ikon gerigi (pengaturan)</strong> di sudut kanan atas pada kotak form login di bawah.</li>
+                  <li>Tempelkan (paste) link yang telah disalin untuk menyetel ulang sinkronisasi sistem ke database.</li>
+                </ul>
+              </div>
+            </div>
           </div>
         </div>
 
