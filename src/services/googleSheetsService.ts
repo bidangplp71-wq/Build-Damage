@@ -137,6 +137,7 @@ export function formatAssessmentForGoogleSheet(item: BuildingAssessment) {
     'Ajuan Biaya Rehab (Rp)': item.roundedRehabCost,
     'Format Rupiah': formatRupiah(item.roundedRehabCost),
     'Terbilang': item.costTerbilang,
+    'Link Folder G-Drive (Backup Foto)': item.backupDriveUrl || '-',
     'Status Verifikasi': item.verificationStatus,
     'Diverifikasi Oleh': item.verifiedBy || '-',
     'Tanggal Verifikasi': item.verifiedAt ? new Date(item.verifiedAt).toLocaleDateString('id-ID') : '-',
@@ -1687,6 +1688,9 @@ export function parseExtractedRowsToAssessments(
     const verificationNotes = verificationNotesRaw && verificationNotesRaw !== '-' ? String(verificationNotesRaw) : undefined;
     const driveFolderRaw = getVal(rowObj, ['Link Folder Foto Google Drive', 'Link Drive', 'Folder Foto']);
     const googleDriveFolderUrl = driveFolderRaw && driveFolderRaw !== '-' ? String(driveFolderRaw) : undefined;
+    
+    const backupDriveUrlRaw = getVal(rowObj, ['Link Folder G-Drive (Backup Foto)', 'Link Folder G-Drive']);
+    const backupDriveUrl = backupDriveUrlRaw && backupDriveUrlRaw !== '-' ? String(backupDriveUrlRaw) : undefined;
 
     const disasterDate = parseExcelDate(getVal(rowObj, ['Tanggal Bencana', 'Tgl Bencana']));
     const assessmentDate = parseExcelDate(getVal(rowObj, ['Tanggal Penilaian', 'Tanggal Survei', 'Tgl Penilaian']));
@@ -1788,6 +1792,7 @@ export function parseExtractedRowsToAssessments(
       verificationStatus,
       verifiedBy,
       verificationNotes,
+      backupDriveUrl,
       googleSheetSynced: true,
       googleSheetSyncedAt: new Date().toISOString(),
       googleDriveFolderUrl,

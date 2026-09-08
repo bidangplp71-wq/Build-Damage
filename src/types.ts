@@ -400,6 +400,8 @@ export interface BuildingAssessment {
   totalDamagePercent: number; // Sum of calculated scores
   damageClassification: DamageClassification;
   
+  backupDriveUrl?: string; // Tautan ke folder Google Drive untuk foto-foto assessment ini
+
   // Cost estimation (RAB PUPR)
   hsbgnPerM2: number; // Harga Satuan Tertinggi Bangunan Gedung Negara
   treatmentCostPerM2: number; // Nilai Perawatan = totalDamagePercent * HSBGN
