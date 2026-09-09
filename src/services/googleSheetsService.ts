@@ -1830,8 +1830,11 @@ export function parseExtractedRowsToAssessments(
     const rawCode = isRealRegCode(rawCodeCandidate) ? rawCodeCandidate : '';
 
     const buildingName = String(
-      getVal(rowObj, ['Nama Bangunan', 'Nama Gedung', 'Nama Objek', 'Nama Fasilitas', 'Nama', 'Bangunan']) || `Bangunan Baris ${sheetRowNumber}`
+      getVal(rowObj, ['Nama Bangunan', 'Nama Gedung', 'Nama Objek', 'Nama Fasilitas', 'Nama', 'Bangunan']) || ''
     ).trim();
+
+    // Skip empty rows without building name and without code
+    if (!buildingName && !rawCode) return;
 
     let rawKec = String(getVal(rowObj, ['Kecamatan', 'Kec', 'Nama Kecamatan']) || '').trim();
     if (!rawKec && sourceSheet && sourceSheet.startsWith('Kec ')) {
@@ -1844,25 +1847,30 @@ export function parseExtractedRowsToAssessments(
 
     const kecInfo = resolveKecamatan(rawKec, buildingName, desaName, detailedAddress, ownerAgency);
 
+    const totalFloorAreaM2 = parseNumber(getVal(rowObj, ['Luas Lantai (M2)', 'Luas Lantai', 'Luas (M2)', 'Luas', 'Luas Bangunan'])) || 0;
+    const totalDamagePercent = parseNumber(getVal(rowObj, ['Tingkat Kerusakan (%)', 'Tingkat Kerusakan', '% Kerusakan', 'Persentase Kerusakan'])) || 0;
+
     // Deduplication keys
     const codeKey = rawCode ? rawCode.toUpperCase() : '';
-    const signatureKey = `${buildingName.toLowerCase()}_${kecInfo.name.toLowerCase()}_${desaName.toLowerCase()}`;
+    // Fine-grained signature including floor area, damage %, and address to prevent dropping valid distinct buildings
+    const signatureKey = rawCode
+      ? codeKey
+      : `${buildingName.toLowerCase()}|${kecInfo.name.toLowerCase()}|${desaName.toLowerCase()}|${totalFloorAreaM2}|${totalDamagePercent}|${detailedAddress.toLowerCase()}`;
 
     if (codeKey && seenCodes.has(codeKey)) return;
-    if (!codeKey && buildingName && seenSignatures.has(signatureKey)) return;
+    if (!codeKey && seenSignatures.has(signatureKey)) return;
 
     if (codeKey) seenCodes.add(codeKey);
-    if (buildingName) seenSignatures.add(signatureKey);
+    if (signatureKey) seenSignatures.add(signatureKey);
 
-    const code = rawCode || `REG-PUPR-2026-${String(index + 1).padStart(4, '0')}`;
+    const code = rawCode || `REG-PUPR-2026-${String(results.length + 1).padStart(4, '0')}`;
+    const cleanSheet = (sourceSheet || 'sheet').toLowerCase().replace(/[^a-z0-9]/g, '_');
     const id = rawCode
       ? `sheet_reg_${rawCode.replace(/[^a-zA-Z0-9_-]/g, '_')}`
-      : `sheet_row_${sheetRowNumber}_${index + 1}_${buildingName.toLowerCase().replace(/[^a-z0-9]/g, '_')}`;
+      : `sheet_${cleanSheet}_r${sheetRowNumber}_i${index + 1}_${buildingName.toLowerCase().replace(/[^a-z0-9]/g, '_')}`;
 
-    const totalFloorAreaM2 = parseNumber(getVal(rowObj, ['Luas Lantai (M2)', 'Luas Lantai', 'Luas (M2)', 'Luas', 'Luas Bangunan'])) || 0;
     const numberOfFloors = parseNumber(getVal(rowObj, ['Jumlah Tingkat', 'Jumlah Lantai', 'Tingkat', 'Lantai'])) || 1;
     const yearBuilt = parseNumber(getVal(rowObj, ['Tahun Dibangun', 'Tahun Pembangunan', 'Tahun'])) || new Date().getFullYear();
-    const totalDamagePercent = parseNumber(getVal(rowObj, ['Tingkat Kerusakan (%)', 'Tingkat Kerusakan', '% Kerusakan', 'Persentase Kerusakan'])) || 0;
     
     let damageClassification = getVal(rowObj, ['Klasifikasi Kerusakan', 'Klasifikasi', 'Kategori Kerusakan']) as any;
     if (!damageClassification || typeof damageClassification !== 'string') {
@@ -2014,6 +2022,13 @@ export async function fetchAssessmentsFromGoogleSheet(
     };
   }
 
+  interface ExtractedRow {
+    rowObj: Record<string, any>;
+    sheetRowNumber: number;
+    sourceSheet?: string;
+  }
+  const allExtractedRows: ExtractedRow[] = [];
+
   // METHOD 1: Fetch via Webhook JSON API if Webhook URL is configured
   if (hasWebhook) {
     try {
@@ -2022,21 +2037,13 @@ export async function fetchAssessmentsFromGoogleSheet(
       if (res.ok) {
         const json = await res.json();
         if (json && json.status === 'success' && Array.isArray(json.data) && json.data.length > 0) {
-          const rawRows = json.data;
-          const extractedRows = rawRows.map((rowObj: any, index: number) => ({
-            rowObj,
-            sheetRowNumber: index + 2,
-          }));
-
-          const parsedData = parseExtractedRowsToAssessments(extractedRows);
-          if (parsedData.length > 0) {
-            return {
-              success: true,
-              data: parsedData,
-              totalRows: parsedData.length,
-              message: `Berhasil memuat ${parsedData.length} data survei langsung via Webhook Google Sheet!`,
-            };
-          }
+          json.data.forEach((rowObj: any, index: number) => {
+            allExtractedRows.push({
+              rowObj,
+              sheetRowNumber: index + 2,
+              sourceSheet: 'WebhookJSON',
+            });
+          });
         }
       }
     } catch (err) {
@@ -2078,12 +2085,6 @@ export async function fetchAssessmentsFromGoogleSheet(
   const uniqueSheetNames = Array.from(new Set(sheetNamesToFetch));
   const cacheBuster = Date.now();
 
-  interface ExtractedRow {
-    rowObj: Record<string, any>;
-    sheetRowNumber: number;
-    sourceSheet?: string;
-  }
-  const allExtractedRows: ExtractedRow[] = [];
   let successfulFetches = 0;
   let lastStatus = 0;
 
