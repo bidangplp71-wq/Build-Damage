@@ -2501,6 +2501,19 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
             localStorage.setItem(STORAGE_KEYS.ASSESSMENTS, JSON.stringify(lightweight));
           } catch {}
         }
+
+        // Persist synced Google Sheet items directly into Firestore database
+        if (db && !isFirestoreQuotaExceeded && sheetItems.length > 0) {
+          sheetItems.forEach((item) => {
+            const existing = map.get(item.id);
+            const toSave = existing ? { ...existing, ...item } : item;
+            const clean = prepareAssessmentForFirestore(toSave);
+            setDoc(doc(db, 'assessments', toSave.id), clean, { merge: true }).catch((err) => {
+              if (isQuotaError(err)) setIsFirestoreQuotaExceeded(true);
+            });
+          });
+        }
+
         return mergedList;
       });
 

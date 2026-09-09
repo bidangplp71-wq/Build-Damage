@@ -1641,16 +1641,74 @@ export function parseExtractedRowsToAssessments(
     return isNaN(parsed) ? 0 : parsed;
   };
 
-  const resolveKecamatan = (rawKec: string): { id: string; name: string } => {
-    const lower = rawKec.toLowerCase().trim();
-    if (lower.includes('selatan') || lower.includes('aesesa selatan')) return { id: 'kec_2', name: 'Aesesa Selatan' };
-    if (lower.includes('aesesa')) return { id: 'kec_1', name: 'Aesesa' };
-    if (lower.includes('boawae')) return { id: 'kec_3', name: 'Boawae' };
-    if (lower.includes('mauponggo')) return { id: 'kec_4', name: 'Mauponggo' };
-    if (lower.includes('nangaroro')) return { id: 'kec_5', name: 'Nangaroro' };
-    if (lower.includes('keo') || lower.includes('tengah')) return { id: 'kec_6', name: 'Keo Tengah' };
-    if (lower.includes('wolowae')) return { id: 'kec_7', name: 'Wolowae' };
-    return { id: `kec_${lower.replace(/[^a-z0-9]/g, '_') || '1'}`, name: rawKec || 'Nangaroro' };
+  const resolveKecamatan = (
+    rawKec: string,
+    buildingName = '',
+    desaName = '',
+    address = '',
+    ownerAgency = ''
+  ): { id: string; name: string } => {
+    const cleanRaw = rawKec.trim();
+    const combined = `${cleanRaw} ${buildingName} ${desaName} ${address} ${ownerAgency}`.toLowerCase();
+
+    if (combined.includes('aesesa selatan') || (combined.includes('aesesa') && combined.includes('selatan'))) {
+      return { id: 'kec_2', name: 'Aesesa Selatan' };
+    }
+    if (combined.includes('aesesa')) {
+      return { id: 'kec_1', name: 'Aesesa' };
+    }
+    if (
+      combined.includes('boawae') ||
+      combined.includes('leguderu') ||
+      combined.includes('pustu solo') ||
+      combined.includes('raja') ||
+      combined.includes('dhereisa') ||
+      combined.includes('mulakoli') ||
+      combined.includes('roga') ||
+      combined.includes('kelewae') ||
+      combined.includes('olakile')
+    ) {
+      return { id: 'kec_3', name: 'Boawae' };
+    }
+    if (
+      combined.includes('mauponggo') ||
+      combined.includes('lokalaba') ||
+      combined.includes('sawu') ||
+      combined.includes('aelapu') ||
+      combined.includes('wutu')
+    ) {
+      return { id: 'kec_4', name: 'Mauponggo' };
+    }
+    if (
+      combined.includes('nangaroro') ||
+      combined.includes('degasau') ||
+      combined.includes('woewoa') ||
+      combined.includes('tonggorambang')
+    ) {
+      return { id: 'kec_5', name: 'Nangaroro' };
+    }
+    if (
+      combined.includes('keo tengah') ||
+      combined.includes('maundai') ||
+      combined.includes('kotagana') ||
+      combined.includes('kotawuji')
+    ) {
+      return { id: 'kec_6', name: 'Keo Tengah' };
+    }
+    if (
+      combined.includes('wolowae') ||
+      combined.includes('tendatoto') ||
+      combined.includes('anakoli') ||
+      combined.includes('dorenga')
+    ) {
+      return { id: 'kec_7', name: 'Wolowae' };
+    }
+
+    if (cleanRaw && cleanRaw.length > 1) {
+      return { id: `kec_${cleanRaw.toLowerCase().replace(/[^a-z0-9]/g, '_')}`, name: cleanRaw };
+    }
+
+    return { id: 'kec_3', name: 'Boawae' };
   };
 
   return extractedRows.map(({ rowObj, sheetRowNumber }, index) => {
@@ -1706,12 +1764,13 @@ export function parseExtractedRowsToAssessments(
       }
     }
 
-    const rawKec = String(getVal(rowObj, ['Kecamatan', 'Kec', 'Nama Kecamatan']) || 'Nangaroro').trim();
-    const kecInfo = resolveKecamatan(rawKec);
+    const rawKec = String(getVal(rowObj, ['Kecamatan', 'Kec', 'Nama Kecamatan']) || '').trim();
     const desaName = String(getVal(rowObj, ['Desa / Kelurahan', 'Desa', 'Kelurahan', 'Nama Desa']) || '').trim();
     const desaId = `desa_${desaName.toLowerCase().replace(/\s+/g, '_') || 'umum'}`;
-
+    const detailedAddress = String(getVal(rowObj, ['Alamat Lengkap', 'Alamat', 'Lokasi']) || '').trim();
     const ownerAgency = String(getVal(rowObj, ['Pengguna / Pemilik', 'Pemilik', 'Pengguna', 'Instansi', 'Pemilik / Pengelola']) || '');
+
+    const kecInfo = resolveKecamatan(rawKec, buildingName, desaName, detailedAddress, ownerAgency);
     const namaPemilikRumah = String(getVal(rowObj, ['Nama Pemilik Rumah', 'Pemilik Rumah']) || '');
     const namaPemilikGedung = String(getVal(rowObj, ['Nama Pemilik Gedung', 'Pemilik Gedung']) || '');
     const nikPemilik = String(getVal(rowObj, ['NIK Pemilik', 'NIK', 'NIK 16 Digit']) || '0');
