@@ -782,7 +782,12 @@ export const AssessmentForm: React.FC = () => {
       setNewPhotoCaption('');
       showToast(`✓ Berhasil menambahkan ${validPhotos.length} foto kerusakan (${photos.length + validPhotos.length}/${MAX_BUILDING_PHOTOS})`, 'success');
 
-      // 3. (Removed background upload to ephemeral server. Photos remain in base64 state)
+      // 3. Background server disk upload for multi-device & cloud access
+      validPhotos.forEach((p) => {
+        if (p.id && p.url) {
+          uploadPhotoToServer(p.id, targetAssId, p.url).catch(() => {});
+        }
+      });
     } catch (err) {
       console.error('Gagal proses foto:', err);
       showToast('Gagal memproses file foto!', 'error');

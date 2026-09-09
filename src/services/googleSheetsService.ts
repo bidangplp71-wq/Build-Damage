@@ -2,6 +2,47 @@ import * as XLSX from 'xlsx';
 import { BuildingAssessment, GoogleSheetConfig, Kecamatan, UserActivityLog, UserAccount } from '../types';
 import { formatRupiah, getInitialSubComponents } from '../utils/puprCalculations';
 import { hydrateAssessmentPhotos } from '../utils/imageCompressor';
+import { getPhotoLocally } from '../utils/photoStorage';
+
+/**
+ * Guarantees a valid Data URL / Base64 string for any photo record regardless of where it is cached
+ */
+export async function ensurePhotoDataBase64(photo: any): Promise<string> {
+  if (!photo) return '';
+  if (photo.dataBase64 && typeof photo.dataBase64 === 'string' && photo.dataBase64.startsWith('data:')) {
+    return photo.dataBase64;
+  }
+  if (photo.url && typeof photo.url === 'string' && photo.url.startsWith('data:')) {
+    return photo.url;
+  }
+  if (photo.id) {
+    try {
+      const local = await getPhotoLocally(photo.id);
+      if (local && local.startsWith('data:')) {
+        return local;
+      }
+    } catch {}
+  }
+  if (photo.url && typeof photo.url === 'string' && (photo.url.startsWith('/uploads/') || photo.url.startsWith('http'))) {
+    try {
+      const res = await fetch(photo.url);
+      if (res.ok) {
+        const blob = await res.blob();
+        return new Promise<string>((resolve) => {
+          const reader = new FileReader();
+          reader.onloadend = () => {
+            resolve(typeof reader.result === 'string' ? reader.result : '');
+          };
+          reader.onerror = () => resolve('');
+          reader.readAsDataURL(blob);
+        });
+      }
+    } catch {
+      return '';
+    }
+  }
+  return '';
+}
 
 export interface GoogleSheetRowPayload {
   action: 'insert' | 'update' | 'delete' | 'sync_all' | 'ping' | 'sync_activity_logs' | 'log_user_access' | 'test_drive';
@@ -202,6 +243,21 @@ export async function directSaveToGoogleSheet(
   const kecSheetName = sanitizeSheetName(`Kec. ${hydratedAssessment.kecamatanName || 'Lainnya'}`);
   const cleanFolderId = extractDriveFolderId(config.driveFolderId);
 
+  const preparedPhotos = hydratedAssessment.photos
+    ? await Promise.all(
+        hydratedAssessment.photos.map(async (p, idx) => {
+          const b64 = await ensurePhotoDataBase64(p);
+          return {
+            id: p.id || `photo_${idx}`,
+            caption: p.caption || '',
+            damageLocation: p.damageLocation || `Foto ${idx + 1}`,
+            url: p.url,
+            dataBase64: b64 || undefined,
+          };
+        })
+      )
+    : [];
+
   const payload: GoogleSheetRowPayload = {
     action,
     sheetName: config.sheetName || 'Data_Kerusakan_PUPR',
@@ -213,13 +269,7 @@ export async function directSaveToGoogleSheet(
     registrationCode: hydratedAssessment.code || hydratedAssessment.id,
     previousRegistrationCode: previousCode || hydratedAssessment.id,
     data: rowData,
-    photos: hydratedAssessment.photos ? hydratedAssessment.photos.map((p, idx) => ({
-      id: p.id || `photo_${idx}`,
-      caption: p.caption || '',
-      damageLocation: p.damageLocation || `Foto ${idx + 1}`,
-      url: p.url,
-      dataBase64: (p as any).dataBase64 || (p.url && p.url.startsWith('data:') ? p.url : undefined),
-    })) : [],
+    photos: preparedPhotos,
     savePhotosToDrive: config.savePhotosToDrive !== false,
     driveFolderId: cleanFolderId || (config.driveFolderId || '').trim() || undefined,
     timestamp: new Date().toISOString(),
@@ -1010,7 +1060,8 @@ function savePhotosToGoogleDrive(photos, regCode, buildingName, parentFolderInpu
           var parts = base64Data.split(",");
           if (parts.length > 1) {
             contentType = parts[0].split(":")[1].split(";")[0] || "image/jpeg";
-            decoded = Utilities.base64Decode(parts[1]);
+            var cleanB64 = parts[1].replace(/[\s\r\n]+/g, "").trim();
+            decoded = Utilities.base64Decode(cleanB64);
           }
         } else if (base64Data.indexOf("http") === 0) {
           try {
