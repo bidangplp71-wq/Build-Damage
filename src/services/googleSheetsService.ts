@@ -506,7 +506,7 @@ function doPost(e) {
     var json = JSON.parse(e.postData.contents);
     var action = json.action || 'insert';
     var splitByKecamatan = json.splitByKecamatan !== false; // Default true (Multi-Sheet per Kecamatan)
-    var masterSheetName = json.sheetName || "REKAP_SEMUA_KECAMATAN";
+    var masterSheetName = json.sheetName || "Data_Penilaian_Kerusakan_PUPR";
     
     var ss;
     if (json.spreadsheetId) {
@@ -687,9 +687,14 @@ function doPost(e) {
       saveOrUpdateRow(targetKecSheet, rowData, regCode, prevRegCode, action, "#1e3a8a");
     }
     
-    // B. Tulis juga ke Master Sheet Rekap Semua
-    var targetMasterSheet = getOrCreateSheet(ss, masterSheetName);
-    saveOrUpdateRow(targetMasterSheet, rowData, regCode, prevRegCode, action, "#0f172a");
+    // B. Tulis ke Master Sheet Rekap Semua (Data_Penilaian_Kerusakan_PUPR & REKAP_SEMUA_KECAMATAN)
+    var primaryMasterSheet = getOrCreateSheet(ss, "Data_Penilaian_Kerusakan_PUPR");
+    saveOrUpdateRow(primaryMasterSheet, rowData, regCode, prevRegCode, action, "#0f172a");
+
+    if (masterSheetName && masterSheetName !== "Data_Penilaian_Kerusakan_PUPR") {
+      var secondaryMasterSheet = getOrCreateSheet(ss, masterSheetName);
+      saveOrUpdateRow(secondaryMasterSheet, rowData, regCode, prevRegCode, action, "#0f172a");
+    }
     
     return ContentService.createTextOutput(JSON.stringify({
       status: "success",
@@ -1156,8 +1161,14 @@ function doGet(e) {
   // Fetch all building assessments (Data Penilaian Kerusakan)
   if (action === 'fetch_assessments' || action === 'fetch_all' || action === 'data' || !action) {
     try {
-      var targetSheet = ss.getSheetByName("REKAP_SEMUA_KECAMATAN") || ss.getActiveSheet();
+      var targetSheet = ss.getSheetByName("Data_Penilaian_Kerusakan_PUPR") 
+                     || ss.getSheetByName("REKAP_SEMUA_KECAMATAN")
+                     || ss.getSheetByName("Data_Kerusakan_PUPR")
+                     || ss.getSheetByName("Master_Rekapitulasi");
+      
       var dataList = [];
+      var seenCodes = {};
+
       if (targetSheet && targetSheet.getLastRow() > 1) {
         var rawData = targetSheet.getDataRange().getValues();
         var headers = rawData[0];
@@ -1171,9 +1182,44 @@ function doGet(e) {
           }
           if (hasVal) {
             dataList.push(obj);
+            var codeKey = (obj['No Registrasi'] || obj['ID'] || "").toString().trim();
+            if (codeKey) seenCodes[codeKey] = true;
           }
         }
       }
+
+      // Collect rows from any individual kecamatan tabs that might not be in the master sheet yet
+      var allSheets = ss.getSheets();
+      var excludedNames = ["Daftar_Pengguna", "Log_Akses_Pengguna", "00_RINGKASAN_KECAMATAN"];
+      
+      for (var sIdx = 0; sIdx < allSheets.length; sIdx++) {
+        var curSheet = allSheets[sIdx];
+        var sName = curSheet.getName();
+        if (excludedNames.indexOf(sName) !== -1) continue;
+        if (targetSheet && sName === targetSheet.getName()) continue;
+        
+        if (curSheet.getLastRow() > 1) {
+          var sData = curSheet.getDataRange().getValues();
+          var sHeaders = sData[0];
+          for (var rIdx = 1; rIdx < sData.length; rIdx++) {
+            var sObj = {};
+            var sHasVal = false;
+            for (var cIdx = 0; cIdx < sHeaders.length; cIdx++) {
+              var sVal = sData[rIdx][cIdx];
+              if (sVal !== undefined && sVal !== null && sVal !== "") sHasVal = true;
+              sObj[sHeaders[cIdx]] = sData[rIdx][cIdx];
+            }
+            if (sHasVal) {
+              var regCodeKey = (sObj['No Registrasi'] || sObj['ID'] || "").toString().trim();
+              if (!regCodeKey || !seenCodes[regCodeKey]) {
+                dataList.push(sObj);
+                if (regCodeKey) seenCodes[regCodeKey] = true;
+              }
+            }
+          }
+        }
+      }
+
       return ContentService.createTextOutput(JSON.stringify({
         status: "success",
         data: dataList,
@@ -1976,7 +2022,7 @@ export async function fetchAssessmentsFromGoogleSheet(
   const gidMatch = config.spreadsheetUrl.match(/[?#&]gid=([0-9]+)/);
   const gid = gidMatch ? gidMatch[1] : '';
 
-  const masterSheetName = config.sheetName || 'REKAP_SEMUA_KECAMATAN';
+  const masterSheetName = config.sheetName || 'Data_Penilaian_Kerusakan_PUPR';
 
   // Multiple export endpoints for maximum compatibility across multi-tab sheets
   const candidateUrls: string[] = [];
