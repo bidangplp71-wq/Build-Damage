@@ -1812,15 +1812,32 @@ export function parseExtractedRowsToAssessments(
   const seenCodes = new Set<string>();
   const seenSignatures = new Set<string>();
 
-  extractedRows.forEach(({ rowObj, sheetRowNumber }, index) => {
-    const rawCode = String(
-      getVal(rowObj, ['No Registrasi', 'No.', 'Nomor Registrasi', 'No Reg', 'Kode Registrasi', 'Kode', 'No', 'Nomor']) || ''
+  const isRealRegCode = (str: string): boolean => {
+    const clean = str.trim();
+    if (!clean) return false;
+    const lower = clean.toLowerCase();
+    if (['-', '--', '0', 'n/a', 'na', 'none', 'null', 'undefined', 'invalid'].includes(lower)) return false;
+    // Simple row numbers (1, 2, 3... 9999) are row serial numbers, not registration codes
+    if (/^\d{1,4}$/.test(clean)) return false;
+    return true;
+  };
+
+  extractedRows.forEach(({ rowObj, sheetRowNumber, sourceSheet }, index) => {
+    const rawCodeCandidate = String(
+      getVal(rowObj, ['No Registrasi', 'Nomor Registrasi', 'No Reg', 'Kode Registrasi', 'ID Registrasi']) || ''
     ).trim();
+
+    const rawCode = isRealRegCode(rawCodeCandidate) ? rawCodeCandidate : '';
+
     const buildingName = String(
       getVal(rowObj, ['Nama Bangunan', 'Nama Gedung', 'Nama Objek', 'Nama Fasilitas', 'Nama', 'Bangunan']) || `Bangunan Baris ${sheetRowNumber}`
     ).trim();
 
-    const rawKec = String(getVal(rowObj, ['Kecamatan', 'Kec', 'Nama Kecamatan']) || '').trim();
+    let rawKec = String(getVal(rowObj, ['Kecamatan', 'Kec', 'Nama Kecamatan']) || '').trim();
+    if (!rawKec && sourceSheet && sourceSheet.startsWith('Kec ')) {
+      rawKec = sourceSheet.replace(/^Kec\s+/i, '');
+    }
+
     const desaName = String(getVal(rowObj, ['Desa / Kelurahan', 'Desa', 'Kelurahan', 'Nama Desa']) || '').trim();
     const detailedAddress = String(getVal(rowObj, ['Alamat Lengkap', 'Alamat', 'Lokasi']) || '').trim();
     const ownerAgency = String(getVal(rowObj, ['Pengguna / Pemilik', 'Pemilik', 'Pengguna', 'Instansi', 'Pemilik / Pengelola']) || '');
@@ -1838,7 +1855,9 @@ export function parseExtractedRowsToAssessments(
     if (buildingName) seenSignatures.add(signatureKey);
 
     const code = rawCode || `REG-PUPR-2026-${String(index + 1).padStart(4, '0')}`;
-    const id = rawCode ? `sheet_reg_${rawCode.replace(/[^a-zA-Z0-9_-]/g, '_')}` : `sheet_row_${sheetRowNumber}_${code}`;
+    const id = rawCode
+      ? `sheet_reg_${rawCode.replace(/[^a-zA-Z0-9_-]/g, '_')}`
+      : `sheet_row_${sheetRowNumber}_${index + 1}_${buildingName.toLowerCase().replace(/[^a-z0-9]/g, '_')}`;
 
     const totalFloorAreaM2 = parseNumber(getVal(rowObj, ['Luas Lantai (M2)', 'Luas Lantai', 'Luas (M2)', 'Luas', 'Luas Bangunan'])) || 0;
     const numberOfFloors = parseNumber(getVal(rowObj, ['Jumlah Tingkat', 'Jumlah Lantai', 'Tingkat', 'Lantai'])) || 1;
