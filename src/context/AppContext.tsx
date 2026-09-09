@@ -244,7 +244,7 @@ function prepareAssessmentForFirestore(assessment: BuildingAssessment): any {
   if (Array.isArray(clean.photos)) {
     clean.photos = clean.photos.map((p: any) => ({
       ...p,
-      url: p.url && (p.url.startsWith('http') || p.url.startsWith('/uploads/') || p.url.length <= 300)
+      url: p.url && (p.url.startsWith('http') || p.url.startsWith('/uploads/') || p.url.startsWith('data:') || p.url.length <= 300)
         ? p.url
         : '',
     }));
@@ -731,15 +731,19 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
           const mergedList = Array.from(mergedMap.values());
 
           try {
-            const lightweight = mergedList.map((a) => ({
-              ...a,
-              photos: a.photos?.map((p) => ({
-                ...p,
-                url: p.url && (p.url.startsWith('http') || p.url.length < 300) ? p.url : '',
-              })) || [],
-            }));
-            localStorage.setItem(STORAGE_KEYS.ASSESSMENTS, JSON.stringify(lightweight));
-          } catch {}
+            localStorage.setItem(STORAGE_KEYS.ASSESSMENTS, JSON.stringify(mergedList));
+          } catch (e) {
+            try {
+              const lightweight = mergedList.map((a) => ({
+                ...a,
+                photos: a.photos?.map((p) => ({
+                  ...p,
+                  url: p.url && (p.url.startsWith('http') || p.url.startsWith('/uploads/') || p.url.startsWith('data:') || p.url.length < 300) ? p.url : '',
+                })) || [],
+              }));
+              localStorage.setItem(STORAGE_KEYS.ASSESSMENTS, JSON.stringify(lightweight));
+            } catch {}
+          }
           return mergedList;
         });
       }).catch((err) => {
@@ -818,7 +822,7 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
                 if (existing) {
                   // Safely preserve working photo URLs
                   const mergedPhotos = r.photos?.map((rp) => {
-                    if (rp.url && (rp.url.startsWith('http') || rp.url.startsWith('/uploads/'))) return rp;
+                    if (rp.url && (rp.url.startsWith('http') || rp.url.startsWith('/uploads/') || rp.url.startsWith('data:'))) return rp;
                     const existingP = existing.photos?.find((ep) => ep.id === rp.id);
                     if (existingP?.url) return { ...rp, url: existingP.url };
                     return rp;
@@ -861,7 +865,7 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
                 const next = prev.map((a) => {
                   if (a.id !== docData.id) return a;
                   const mergedPhotos = docData.photos?.map((dp) => {
-                    if (dp.url && (dp.url.startsWith('http') || dp.url.startsWith('/uploads/'))) return dp;
+                    if (dp.url && (dp.url.startsWith('http') || dp.url.startsWith('/uploads/') || dp.url.startsWith('data:'))) return dp;
                     const existingP = a.photos?.find((ep) => ep.id === dp.id);
                     if (existingP?.url) return { ...dp, url: existingP.url };
                     return dp;
@@ -1103,6 +1107,29 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
     }
   }, [users]);
 
+  // On mount, hydrate any missing photo URLs from IndexedDB for initial assessments
+  useEffect(() => {
+    let isMounted = true;
+    if (assessments.some((a) => a.photos?.some((p) => !p.url))) {
+      Promise.all(assessments.map(hydrateAssessmentPhotos)).then((hydrated) => {
+        if (!isMounted) return;
+        let changed = false;
+        hydrated.forEach((h, idx) => {
+          const orig = assessments[idx];
+          if (orig && JSON.stringify(h.photos) !== JSON.stringify(orig.photos)) {
+            changed = true;
+          }
+        });
+        if (changed) {
+          setAssessments(hydrated);
+        }
+      });
+    }
+    return () => {
+      isMounted = false;
+    };
+  }, []);
+
   useEffect(() => {
     // Persist photos to IndexedDB cache
     assessments.forEach((a) => {
@@ -1112,18 +1139,18 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
     });
 
     try {
-      // ALWAYS save lightweight assessments to localStorage to prevent filling up the 5MB quota
-      // which would block other critical saves like Users and Activity Logs.
-      const lightweight = assessments.map((a) => ({
-        ...a,
-        photos: a.photos.map((p) => ({
-          ...p,
-          url: p.url && (p.url.startsWith('http') || p.url.length < 300) ? p.url : '',
-        })),
-      }));
-      localStorage.setItem(STORAGE_KEYS.ASSESSMENTS, JSON.stringify(lightweight));
+      localStorage.setItem(STORAGE_KEYS.ASSESSMENTS, JSON.stringify(assessments));
     } catch (e) {
-      console.warn('LocalStorage lightweight assessments save notice:', e);
+      try {
+        const lightweight = assessments.map((a) => ({
+          ...a,
+          photos: a.photos.map((p) => ({
+            ...p,
+            url: p.url && (p.url.startsWith('http') || p.url.startsWith('/uploads/') || p.url.startsWith('data:') || p.url.length < 300) ? p.url : '',
+          })),
+        }));
+        localStorage.setItem(STORAGE_KEYS.ASSESSMENTS, JSON.stringify(lightweight));
+      } catch {}
     }
   }, [assessments]);
 
@@ -2151,7 +2178,7 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
           let assChanged = false;
           const updatedPhotos = await Promise.all(
             ass.photos.map(async (p) => {
-              if (p.url && (p.url.startsWith('http://') || p.url.startsWith('https://') || p.url.startsWith('/uploads/'))) {
+              if (p.url && (p.url.startsWith('http://') || p.url.startsWith('https://') || p.url.startsWith('/uploads/') || p.url.startsWith('data:'))) {
                 return p;
               }
 
@@ -2461,15 +2488,19 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
 
         const mergedList = Array.from(map.values());
         try {
-          const lightweight = mergedList.map((a) => ({
-            ...a,
-            photos: a.photos?.map((p) => ({
-              ...p,
-              url: p.url && (p.url.startsWith('http') || p.url.length < 300) ? p.url : '',
-            })) || [],
-          }));
-          localStorage.setItem(STORAGE_KEYS.ASSESSMENTS, JSON.stringify(lightweight));
-        } catch {}
+          localStorage.setItem(STORAGE_KEYS.ASSESSMENTS, JSON.stringify(mergedList));
+        } catch {
+          try {
+            const lightweight = mergedList.map((a) => ({
+              ...a,
+              photos: a.photos?.map((p) => ({
+                ...p,
+                url: p.url && (p.url.startsWith('http') || p.url.startsWith('/uploads/') || p.url.startsWith('data:') || p.url.length < 300) ? p.url : '',
+              })) || [],
+            }));
+            localStorage.setItem(STORAGE_KEYS.ASSESSMENTS, JSON.stringify(lightweight));
+          } catch {}
+        }
         return mergedList;
       });
 
