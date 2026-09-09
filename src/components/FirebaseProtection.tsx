@@ -15,10 +15,12 @@ import {
   RefreshCw,
   ExternalLink,
   Info,
+  HardDrive,
+  FileSpreadsheet,
 } from 'lucide-react';
 
 export const FirebaseProtection: React.FC = () => {
-  const { showToast, isFirestoreQuotaExceeded, firestoreConsoleUrl } = useApp();
+  const { showToast, isFirestoreQuotaExceeded, firestoreConsoleUrl, setActiveTab, googleSheetConfig } = useApp();
   const [copied, setCopied] = useState(false);
   const [copiedConfig, setCopiedConfig] = useState(false);
   const [testingConnection, setTestingConnection] = useState(false);
@@ -168,35 +170,48 @@ service cloud.firestore {
             <div className="bg-white/80 p-3 rounded-xl border border-amber-200 space-y-1">
               <span className="font-bold text-slate-800 flex items-center gap-1.5">
                 <CheckCircle2 className="w-4 h-4 text-emerald-600" />
-                <span>Aplikasi Tetap Berfungsi 100%</span>
+                <span>Aplikasi Tetap Berfungsi 100% via Google Cloud</span>
               </span>
               <p className="text-[11px] text-slate-600">
-                Data input, edit, dan verifikasi otomatis disimpan aman di Browser Cache (IndexedDB & Local Storage) serta tersinkronisasi langsung ke Google Sheet Webhook tanpa hambatan.
+                Data input, edit, dan verifikasi otomatis disimpan aman di Browser Cache (IndexedDB & Local Storage) serta tersinkronisasi langsung ke Google Sheet & Google Drive.
               </p>
             </div>
 
             <div className="bg-white/80 p-3 rounded-xl border border-amber-200 space-y-1">
               <span className="font-bold text-slate-800 flex items-center gap-1.5">
-                <RefreshCw className="w-4 h-4 text-indigo-600" />
-                <span>Reset Otomatis Harian</span>
+                <HardDrive className="w-4 h-4 text-indigo-600" />
+                <span>Penyimpanan Foto di Google Drive Active</span>
               </span>
               <p className="text-[11px] text-slate-600">
-                Kuota gratis Firestore direset secara otomatis oleh Google Cloud setiap tengah malam waktu Pasifik (PST) / pk 14:00-15:00 WIB.
+                Seluruh file foto gedung dan dokumen pendukung dapat disimpan, dibuka, dan dibagikan melalui Folder Google Drive Gedung.
               </p>
             </div>
           </div>
 
           <div className="flex flex-wrap items-center justify-between gap-2 pt-2 border-t border-amber-200">
-            <span className="text-[11px] text-amber-800">
-              Ingin menaikkan batas kuota tanpa batas atau mengaktifkan paket Blaze (Pay-as-you-go)?
-            </span>
+            <div className="flex flex-wrap items-center gap-2">
+              <button
+                onClick={() => setActiveTab('drive_directory')}
+                className="inline-flex items-center gap-1.5 px-3 py-1.5 rounded-xl bg-indigo-600 hover:bg-indigo-700 text-white text-xs font-bold transition-colors cursor-pointer"
+              >
+                <HardDrive className="w-3.5 h-3.5" />
+                <span>Buka Direktori Google Drive</span>
+              </button>
+              <button
+                onClick={() => setActiveTab('google_sheet')}
+                className="inline-flex items-center gap-1.5 px-3 py-1.5 rounded-xl bg-emerald-600 hover:bg-emerald-700 text-white text-xs font-bold transition-colors cursor-pointer"
+              >
+                <FileSpreadsheet className="w-3.5 h-3.5" />
+                <span>Buka Integrasi Google Sheet</span>
+              </button>
+            </div>
             <a
               href={firestoreConsoleUrl}
               target="_blank"
               rel="noopener noreferrer"
               className="inline-flex items-center gap-1.5 px-3 py-1.5 rounded-xl bg-amber-600 hover:bg-amber-700 text-white text-xs font-bold transition-colors cursor-pointer"
             >
-              <span>Buka Firebase Console Database</span>
+              <span>Buka Firebase Console</span>
               <ExternalLink className="w-3.5 h-3.5" />
             </a>
           </div>

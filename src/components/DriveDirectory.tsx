@@ -141,28 +141,28 @@ export const DriveDirectory: React.FC = () => {
         <div>
           <h2 className="text-2xl font-bold text-slate-800 flex items-center gap-2">
             <HardDrive className="w-7 h-7 text-indigo-600" />
-            Direktori Drive Backup Gedung (OPSIONAL)
+            Direktori Penyimpanan & Tautan Google Drive Gedung
           </h2>
           <p className="text-sm text-slate-500 mt-1">
-            Gunakan fitur ini <strong>HANYA</strong> jika Anda gagal mengupload foto ke dalam sistem (misal file terlalu besar) atau terdapat foto error.
+            Gunakan fitur ini untuk menautkan folder Google Drive foto gedung agar data foto mudah dibuka, disimpan, dan dibagikan ke seluruh tim.
           </p>
         </div>
       </div>
 
       <div className="bg-white rounded-2xl shadow-sm border border-slate-200 overflow-hidden relative">
-        <div className="absolute top-0 left-0 w-1 h-full bg-amber-500"></div>
+        <div className="absolute top-0 left-0 w-1 h-full bg-indigo-500"></div>
         <div className="p-6">
           <div className="flex items-start gap-4">
-            <div className="p-3 bg-amber-50 rounded-xl shrink-0">
-              <CheckCircle2 className="w-6 h-6 text-amber-600" />
+            <div className="p-3 bg-indigo-50 rounded-xl shrink-0">
+              <CheckCircle2 className="w-6 h-6 text-indigo-600" />
             </div>
             <div className="flex-1 space-y-2">
-              <h3 className="text-lg font-bold text-slate-800">Penting: Fitur Ini Tidak Wajib Diisi!</h3>
+              <h3 className="text-lg font-bold text-slate-800">Penyimpanan Utama & Cadangan Google Drive</h3>
               <p className="text-sm text-slate-600 leading-relaxed">
-                Jika Anda sudah mengupload foto-foto gedung secara langsung melalui menu <strong>Data Gedung</strong> dan tidak ada error, maka foto tersebut <strong>sudah bisa dilihat oleh semua pengguna dan admin</strong>. Anda <strong>TIDAK PERLU</strong> memasukkan link Google Drive di halaman ini lagi.
+                Foto-foto yang Anda upload disimpan secara otomatis di database aplikasi dan browser cache. Apabila kuota Firestore tercapai atau Anda memiliki dokumentasi foto resolusi tinggi, tautkan link Folder Google Drive di bawah ini agar semua foto gedung dapat langsung dibuka dan diakses dengan cepat.
               </p>
-              <p className="text-sm text-slate-600 leading-relaxed font-semibold text-rose-700">
-                Namun, jika ada peringatan "Foto Error / Kosong" (karena gagal upload di lapangan), maka mohon hubungkan link folder Google Drive foto gedung tersebut di sini.
+              <p className="text-sm text-slate-600 leading-relaxed font-semibold text-indigo-700">
+                Tautan Google Drive yang Anda masukkan di sini akan otomatis muncul pada laporan cetak dan dapat diklik oleh semua pengguna/admin.
               </p>
             </div>
           </div>
