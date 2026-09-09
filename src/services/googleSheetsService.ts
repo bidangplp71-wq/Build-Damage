@@ -1060,7 +1060,7 @@ function savePhotosToGoogleDrive(photos, regCode, buildingName, parentFolderInpu
           var parts = base64Data.split(",");
           if (parts.length > 1) {
             contentType = parts[0].split(":")[1].split(";")[0] || "image/jpeg";
-            var cleanB64 = parts[1].replace(/[\s\r\n]+/g, "").trim();
+            var cleanB64 = parts[1].replace(/[\\s\\r\\n]+/g, "").trim();
             decoded = Utilities.base64Decode(cleanB64);
           }
         } else if (base64Data.indexOf("http") === 0) {
@@ -1071,7 +1071,7 @@ function savePhotosToGoogleDrive(photos, regCode, buildingName, parentFolderInpu
               contentType = resp.getBlob().getContentType() || "image/jpeg";
             }
           } catch(eFetch) {}
-        } else if (base64Data.length > 50 && !/^\s*http/.test(base64Data)) {
+        } else if (base64Data.length > 50 && !/^\\s*http/.test(base64Data)) {
           try {
             decoded = Utilities.base64Decode(base64Data);
           } catch(eDec) {}
