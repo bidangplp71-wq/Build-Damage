@@ -16,9 +16,9 @@ import { savePhotoLocally, getPhotoLocally, savePhotosLocally } from './photoSto
  */
 export async function compressImageFile(
   rawFile: File,
-  maxWidth = 750,
-  maxHeight = 750,
-  quality = 0.68
+  maxWidth = 600,
+  maxHeight = 600,
+  quality = 0.55
 ): Promise<string> {
   if (!rawFile) return '';
 

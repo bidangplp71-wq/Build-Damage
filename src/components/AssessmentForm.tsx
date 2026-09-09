@@ -782,18 +782,7 @@ export const AssessmentForm: React.FC = () => {
       setNewPhotoCaption('');
       showToast(`✓ Berhasil menambahkan ${validPhotos.length} foto kerusakan (${photos.length + validPhotos.length}/${MAX_BUILDING_PHOTOS})`, 'success');
 
-      // 3. Asynchronous background upload to Central Server (does not block user interaction)
-      validPhotos.forEach((p) => {
-        uploadPhotoToServer(p.id, targetAssId, p.url).then((uploadRes) => {
-          if (uploadRes.success && uploadRes.url) {
-            setPhotos((currList) =>
-              currList.map((item) => (item.id === p.id ? { ...item, url: uploadRes.url } : item))
-            );
-          }
-        }).catch((err) => {
-          console.warn('Background server sync notice:', err);
-        });
-      });
+      // 3. (Removed background upload to ephemeral server. Photos remain in base64 state)
     } catch (err) {
       console.error('Gagal proses foto:', err);
       showToast('Gagal memproses file foto!', 'error');
@@ -922,22 +911,8 @@ export const AssessmentForm: React.FC = () => {
       ? selectedAssessmentForEdit!.id
       : (finalCode.startsWith('REG-') ? finalCode : `REG-${finalCode}`);
 
-    // Parallel sync to Server Storage for any photo still in base64
-    const syncedPhotos: BuildingPhoto[] = await Promise.all(
-      photos.map(async (p) => {
-        if (p.url && !p.url.startsWith('http://') && !p.url.startsWith('https://') && !p.url.startsWith('/uploads/')) {
-          try {
-            const up = await uploadPhotoToServer(p.id, targetAssId, p.url);
-            if (up.success && up.url) {
-              return { ...p, url: up.url };
-            }
-          } catch {
-            // fallback to base64
-          }
-        }
-        return p;
-      })
-    );
+    // Ensure photos remain as compressed Base64 to be saved permanently in Firestore
+    const syncedPhotos: BuildingPhoto[] = photos;
 
     const assessmentPayload: BuildingAssessment = {
       id: targetAssId,
