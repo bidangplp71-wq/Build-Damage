@@ -2570,6 +2570,13 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
     if (hasSpreadsheet || hasWebhook) {
       syncFromGoogleSheet(false);
       fetchUsersFromSheet();
+
+      // Periodic background sync every 45 seconds to automatically fetch any new data entered in Google Sheets
+      const intervalId = setInterval(() => {
+        syncFromGoogleSheet(false);
+      }, 45000);
+
+      return () => clearInterval(intervalId);
     }
   }, [googleSheetConfig.spreadsheetUrl, googleSheetConfig.webhookUrl]);
 
