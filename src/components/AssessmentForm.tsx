@@ -143,6 +143,7 @@ export const AssessmentForm: React.FC = () => {
   const [kecamatanId, setKecamatanId] = useState(kecamatans[0]?.id || '');
   const [desaId, setDesaId] = useState('');
   const [detailedAddress, setDetailedAddress] = useState('');
+  const [targetSheetName, setTargetSheetName] = useState<string>('Kec. Aesesa');
   const [latitude, setLatitude] = useState<number | undefined>(-8.6754);
   const [longitude, setLongitude] = useState<number | undefined>(121.3021);
 
@@ -237,6 +238,8 @@ export const AssessmentForm: React.FC = () => {
       desaId,
       desaName: currentDesa?.name || 'Desa',
       detailedAddress: detailedAddress.trim(),
+      targetSheetName: targetSheetName.trim() || `Kec. ${currentKec?.name || 'Aesesa'}`,
+      sourceSheet: targetSheetName.trim() || `Kec. ${currentKec?.name || 'Aesesa'}`,
       latitude,
       longitude,
 
@@ -352,6 +355,7 @@ export const AssessmentForm: React.FC = () => {
       setDesaId(matchedDesaId);
 
       setDetailedAddress(a.detailedAddress || '');
+      setTargetSheetName(a.targetSheetName || a.sourceSheet || (a.kecamatanName ? `Kec. ${a.kecamatanName}` : 'Kec. Aesesa'));
       setLatitude(a.latitude ?? -8.6754);
       setLongitude(a.longitude ?? 121.3021);
       setHsbgnPerM2(a.hsbgnPerM2 && a.hsbgnPerM2 > 0 ? a.hsbgnPerM2 : getCategoryConfig(cat).defaultHsbgn);
@@ -389,7 +393,13 @@ export const AssessmentForm: React.FC = () => {
     if (!selectedAssessmentForEdit && availableDesas.length > 0 && (!desaId || !availableDesas.some((d) => d.id === desaId))) {
       setDesaId(availableDesas[0].id);
     }
-  }, [kecamatanId, availableDesas, desaId, selectedAssessmentForEdit]);
+    if (!selectedAssessmentForEdit) {
+      const curKec = kecamatans.find((k) => k.id === kecamatanId);
+      if (curKec) {
+        setTargetSheetName(`Kec. ${curKec.name}`);
+      }
+    }
+  }, [kecamatanId, availableDesas, desaId, selectedAssessmentForEdit, kecamatans]);
 
   // Dukcapil search results
   const dukcapilSearchResults = React.useMemo(() => {
@@ -943,6 +953,8 @@ export const AssessmentForm: React.FC = () => {
       desaId,
       desaName: currentDesa?.name || 'Desa',
       detailedAddress: detailedAddress.trim(),
+      targetSheetName: targetSheetName.trim() || `Kec. ${currentKec?.name || 'Aesesa'}`,
+      sourceSheet: targetSheetName.trim() || `Kec. ${currentKec?.name || 'Aesesa'}`,
       latitude,
       longitude,
 
@@ -990,13 +1002,7 @@ export const AssessmentForm: React.FC = () => {
       updatedAt: new Date().toISOString(),
     };
 
-    // If new entry and identical or high-confidence duplicate found, request surveyor confirmation first
-    if (!isEditMode && liveDuplicateCheck.isDuplicate) {
-      setPendingSubmitPayload(assessmentPayload);
-      setShowDuplicateConfirmModal(true);
-      return;
-    }
-
+    // Save directly into target sheet without blocking or deleting old data
     await executeSaveAssessment(assessmentPayload);
   };
 
@@ -2110,7 +2116,7 @@ export const AssessmentForm: React.FC = () => {
           </button>
         </div>
 
-        <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-4 text-xs">
+        <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-4 text-xs">
           {/* Kecamatan */}
           <div>
             <div className="flex items-center justify-between mb-1">
@@ -2195,6 +2201,47 @@ export const AssessmentForm: React.FC = () => {
                 + Belum terdaftar?
               </button>
             </div>
+          </div>
+
+          {/* Sheet Tujuan Google Sheet (Direct Placement) */}
+          <div>
+            <div className="flex items-center justify-between mb-1">
+              <label className="font-semibold text-slate-700 flex items-center gap-1">
+                <FileSpreadsheet className="w-3.5 h-3.5 text-emerald-600" />
+                <span>Sheet Google Tujuan</span>
+                <span className="text-emerald-700 bg-emerald-50 text-[10px] px-1 py-0.5 rounded font-bold border border-emerald-200">
+                  Langsung Masuk
+                </span>
+              </label>
+            </div>
+            <select
+              value={targetSheetName}
+              onChange={(e) => setTargetSheetName(e.target.value)}
+              className="w-full px-3 py-2 rounded-xl border border-emerald-300 bg-emerald-50/40 font-bold text-slate-800 focus:ring-2 focus:ring-emerald-500"
+            >
+              <option value="Kec. Aesesa">Kec. Aesesa</option>
+              <option value="Kec. Aesesa Selatan">Kec. Aesesa Selatan</option>
+              <option value="Kec. Boawae">Kec. Boawae</option>
+              <option value="Kec. Keo Tengah">Kec. Keo Tengah</option>
+              <option value="Kec. Mauponggo">Kec. Mauponggo</option>
+              <option value="Kec. Nangaroro">Kec. Nangaroro</option>
+              <option value="Kec. Wolowae">Kec. Wolowae</option>
+              {targetSheetName &&
+                ![
+                  'Kec. Aesesa',
+                  'Kec. Aesesa Selatan',
+                  'Kec. Boawae',
+                  'Kec. Keo Tengah',
+                  'Kec. Mauponggo',
+                  'Kec. Nangaroro',
+                  'Kec. Wolowae',
+                ].includes(targetSheetName) && (
+                  <option value={targetSheetName}>{targetSheetName}</option>
+                )}
+            </select>
+            <p className="text-[10px] text-slate-500 mt-1">
+              Masuk langsung ke tab ini di Google Sheet tanpa menimpa data lama.
+            </p>
           </div>
 
           {/* Alamat Lengkap */}

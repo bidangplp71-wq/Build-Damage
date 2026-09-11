@@ -882,7 +882,9 @@ export const AssessmentTable: React.FC = () => {
                     currentUser.id === item.createdBy);
                 const canDelete =
                   !isVerified &&
-                  (currentUser.role === 'super_admin' || currentUser.role === 'admin');
+                  (currentUser.role === 'super_admin' ||
+                    currentUser.role === 'admin' ||
+                    currentUser.role === 'admin_verifikator');
                 const canVerify =
                   currentUser.role === 'super_admin' ||
                   currentUser.role === 'admin' ||
@@ -1319,7 +1321,7 @@ export const AssessmentTable: React.FC = () => {
             <h3 className="text-base font-bold text-slate-900">Konfirmasi Hapus Penilaian</h3>
             <p className="text-xs text-slate-600 mt-2">
               Apakah Anda yakin ingin menghapus data penilaian gedung{' '}
-              <strong className="text-slate-900">"{itemToDelete.buildingName}"</strong> ({itemToDelete.code})? Tindakan ini tidak dapat dibatalkan.
+              <strong className="text-slate-900">"{itemToDelete.buildingName}"</strong> ({itemToDelete.code})? Data ini akan dihapus permanen dari web dan baris Google Sheet ({itemToDelete.sourceSheet || itemToDelete.targetSheetName || `Kec. ${itemToDelete.kecamatanName}`}). Tindakan ini tidak dapat dibatalkan.
             </p>
             <div className="mt-6 flex items-center justify-end gap-2">
               <button

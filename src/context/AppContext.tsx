@@ -2001,7 +2001,13 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
 
     // Save directly to Google Sheet without needing manual synchronization
     if (hasGSheet) {
-      directSaveToGoogleSheet(assessmentToSave, googleSheetConfig, 'insert')
+      directSaveToGoogleSheet(
+        assessmentToSave,
+        googleSheetConfig,
+        'insert',
+        undefined,
+        assessmentToSave.targetSheetName || assessmentToSave.sourceSheet
+      )
         .then((res) => {
           if (res.success) {
             setAssessments((prev) =>
@@ -2017,13 +2023,13 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
 
       return {
         success: true,
-        message: `Penilaian gedung "${data.buildingName}" tersimpan & langsung tercatat di Google Sheet!`,
+        message: `Penilaian gedung "${data.buildingName}" tersimpan & langsung masuk ke Google Sheet (${assessmentToSave.targetSheetName || `Kec. ${assessmentToSave.kecamatanName}`})!`,
       };
     }
 
     return {
       success: true,
-      message: `Penilaian gedung "${data.buildingName}" berhasil disimpan! (Masukkan link Google Sheet untuk penyimpanan cloud langsung)`,
+      message: `Penilaian gedung "${data.buildingName}" berhasil disimpan!`,
     };
   };
 
@@ -2100,11 +2106,15 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
   };
 
   const deleteAssessment = (id: string) => {
-    // Only super_admin or admin can delete
-    if (currentUser.role !== 'super_admin' && currentUser.role !== 'admin') {
+    // Super Admin, Admin, and Verifikator are authorized to delete (including duplicates)
+    if (
+      currentUser.role !== 'super_admin' &&
+      currentUser.role !== 'admin' &&
+      currentUser.role !== 'admin_verifikator'
+    ) {
       return {
         success: false,
-        message: 'Akses ditolak: Hanya Super Admin dan Admin yang berhak menghapus data penilaian.',
+        message: 'Akses ditolak: Hanya Super Admin, Admin, dan Verifikator yang berhak menghapus data penilaian.',
       };
     }
 
@@ -2125,10 +2135,20 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
       `Dihapus oleh ${currentUser.name} (${ROLE_LIMITS[currentUser.role]?.title})`
     );
 
-    if (target && googleSheetConfig.webhookUrl && googleSheetConfig.webhookUrl.startsWith('http')) {
-      directSaveToGoogleSheet(target, googleSheetConfig, 'delete').catch((e) =>
-        console.error('Direct Google Sheet delete error:', e)
-      );
+    if (target) {
+      if (googleSheetConfig.webhookUrl && googleSheetConfig.webhookUrl.startsWith('http')) {
+        directSaveToGoogleSheet(
+          target,
+          googleSheetConfig,
+          'delete',
+          undefined,
+          target.targetSheetName || target.sourceSheet
+        ).catch((e) => console.error('Direct Google Sheet delete error:', e));
+      }
+      if (target.code) {
+        deletedAssessmentIds.current.add(target.code);
+        persistDeletedAssessmentId(target.code);
+      }
     }
 
     // Persist deleted ID immediately so it can NEVER be resurrected on page refresh / link re-entry
@@ -2161,7 +2181,7 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
 
     return {
       success: true,
-      message: 'Data penilaian gedung berhasil dihapus permanen di semua akun & perangkat.',
+      message: `Data penilaian gedung "${target?.buildingName || id}" berhasil dihapus permanen dari sistem & baris Google Sheet.`,
     };
   };
 
@@ -2542,9 +2562,16 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
 
       setAssessments((prev) => {
         const map = new Map<string, BuildingAssessment>();
-        // 1. Preserve only true unsynced local drafts created directly on the app's assessment form
+        // 1. Preserve newly inputted entries created directly on the app's assessment form
         prev.forEach((p) => {
-          if (p && p.id && !p.id.startsWith('sheet_') && !p.id.startsWith('bldg_') && !p.id.startsWith('dampup_') && (p as any).isLocalDraft) {
+          if (
+            p &&
+            p.id &&
+            !p.id.startsWith('sheet_') &&
+            !storedDeleted.has(p.id) &&
+            !deletedAssessmentIds.current.has(p.id) &&
+            (!p.code || (!storedDeleted.has(p.code) && !deletedAssessmentIds.current.has(p.code)))
+          ) {
             map.set(p.id, p);
           }
         });
