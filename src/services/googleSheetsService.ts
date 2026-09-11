@@ -2030,6 +2030,19 @@ export function parseExtractedRowsToAssessments(
 
     const totalFloorAreaM2 = parseNumber(getVal(rowObj, ['Luas Lantai (M2)', 'Luas Lantai', 'Luas (M2)', 'Luas', 'Luas Bangunan'])) || 0;
     const totalDamagePercent = parseNumber(getVal(rowObj, ['Tingkat Kerusakan (%)', 'Tingkat Kerusakan', '% Kerusakan', 'Persentase Kerusakan'])) || 0;
+    const roundedRehabCost = parseNumber(getVal(rowObj, ['Ajuan Biaya Rehab (Rp)', 'Ajuan Biaya', 'Total Biaya', 'Estimasi Biaya', 'RAB'])) || 0;
+
+    // Cross-tab duplication prevention:
+    // If the exact same physical record appears in both Rekap and individual Kecamatan tabs:
+    const rowSignature = rawCode 
+      ? `code:${rawCode.toUpperCase().trim()}`
+      : `sig:${kecInfo.id}:${desaName.toLowerCase().trim()}:${(namaPemilikRumah || namaPemilikGedung || buildingName).toLowerCase().trim()}:${detailedAddress.toLowerCase().trim()}:${totalFloorAreaM2}:${totalDamagePercent}:${roundedRehabCost}`;
+    
+    if (seenSignatures.has(rowSignature)) {
+      // Mirrored identical row in another sheet tab, skip duplicate injection
+      return;
+    }
+    seenSignatures.add(rowSignature);
 
     // Unique registration code and ID generation (Never drop survey rows)
     let code = rawCode;
@@ -2058,7 +2071,6 @@ export function parseExtractedRowsToAssessments(
     const treatmentCostPerM2 = parseNumber(getVal(rowObj, ['Biaya Perawatan / M2 (Rp)', 'Biaya Perawatan'])) || 0;
     const demolitionCostPerM2 = parseNumber(getVal(rowObj, ['Biaya Bongkaran / M2 (Rp)', 'Biaya Bongkaran'])) || 0;
     const totalCostPerM2 = parseNumber(getVal(rowObj, ['Total Biaya / M2 (Rp)', 'Total Biaya / M2'])) || 0;
-    const roundedRehabCost = parseNumber(getVal(rowObj, ['Ajuan Biaya Rehab (Rp)', 'Ajuan Biaya', 'Total Biaya', 'Estimasi Biaya', 'RAB'])) || 0;
     const costTerbilang = String(getVal(rowObj, ['Terbilang']) || '');
 
     const verificationStatus = (getVal(rowObj, ['Status Verifikasi', 'Status']) as any) || 'Menunggu Verifikasi';
@@ -2333,32 +2345,18 @@ export async function fetchAssessmentsFromGoogleSheet(
 
   const masterSheetName = config.sheetName || 'REKAP_SEMUA_KECAMATAN';
 
-  // List of sheet tabs to fetch & aggregate (Master rekap + Form responses + default sheets + 7 individual kecamatan tabs)
+  // List of canonical sheet tabs: 7 Kecamatan tabs + Master Rekap
   const sheetNamesToFetch = [
     masterSheetName,
     'REKAP_SEMUA_KECAMATAN',
-    'Data_Penilaian_Kerusakan_PUPR',
-    'Sheet1',
-    'Sheet 1',
-    'Lembar1',
-    'Lembar 1',
+    'Kec. Aesesa',
+    'Kec. Aesesa Selatan',
+    'Kec. Boawae',
+    'Kec. Mauponggo',
+    'Kec. Nangaroro',
+    'Kec. Keo Tengah',
+    'Kec. Wolowae',
     'Form Responses 1',
-    'Jawaban Formulir 1',
-    'Form Responses',
-    'Responses 1',
-    'Data',
-    'Database',
-    'Survei Lapangan',
-    'Survei',
-    'Input Data',
-    // 7 Kecamatan Variations
-    'Kec. Aesesa', 'Kec Aesesa', 'Aesesa', 'Kecamatan Aesesa', 'AESESA', 'KEC. AESESA', 'KECAMATAN AESESA',
-    'Kec. Aesesa Selatan', 'Kec Aesesa Selatan', 'Aesesa Selatan', 'Kecamatan Aesesa Selatan', 'AESESA SELATAN', 'KEC. AESESA SELATAN', 'KECAMATAN AESESA SELATAN',
-    'Kec. Boawae', 'Kec Boawae', 'Boawae', 'Kecamatan Boawae', 'BOAWAE', 'KEC. BOAWAE', 'KECAMATAN BOAWAE',
-    'Kec. Mauponggo', 'Kec Mauponggo', 'Mauponggo', 'Kecamatan Mauponggo', 'MAUPONGGO', 'KEC. MAUPONGGO', 'KECAMATAN MAUPONGGO',
-    'Kec. Nangaroro', 'Kec Nangaroro', 'Nangaroro', 'Kecamatan Nangaroro', 'NANGARORO', 'KEC. NANGARORO', 'KECAMATAN NANGARORO',
-    'Kec. Keo Tengah', 'Kec Keo Tengah', 'Keo Tengah', 'Kecamatan Keo Tengah', 'KEO TENGAH', 'KEC. KEO TENGAH', 'KECAMATAN KEO TENGAH',
-    'Kec. Wolowae', 'Kec Wolowae', 'Wolowae', 'Kecamatan Wolowae', 'WOLOWAE', 'KEC. WOLOWAE', 'KECAMATAN WOLOWAE',
   ];
 
   // Remove duplicates from sheetNamesToFetch
@@ -2375,7 +2373,7 @@ export async function fetchAssessmentsFromGoogleSheet(
       const match = rawText.match(/google\.visualization\.Query\.setResponse\(([\s\S]+)\);?/);
       if (!match || !match[1]) return [];
       const json = JSON.parse(match[1]);
-      if (!json || !json.table) return [];
+      if (!json || json.status === 'error' || !json.table) return [];
 
       const cols = json.table.cols || [];
       const headers = cols.map((col: any, idx: number) => {
@@ -2413,7 +2411,6 @@ export async function fetchAssessmentsFromGoogleSheet(
 
       return extracted;
     } catch (e) {
-      console.warn('gviz JSON parse err:', e);
       return [];
     }
   };
@@ -2477,52 +2474,43 @@ export async function fetchAssessmentsFromGoogleSheet(
   };
 
   try {
-    // 1. Always fetch default active sheet tab or gid
-    const primaryUrls: string[] = [];
-    if (gid) {
-      primaryUrls.push(`https://docs.google.com/spreadsheets/d/${spreadsheetId}/gviz/tq?tqx=out:csv&gid=${gid}&_t=${cacheBuster}`);
-      primaryUrls.push(`https://docs.google.com/spreadsheets/d/${spreadsheetId}/export?format=csv&gid=${gid}&_t=${cacheBuster}`);
-    }
-    primaryUrls.push(`https://docs.google.com/spreadsheets/d/${spreadsheetId}/gviz/tq?tqx=out:csv&_t=${cacheBuster}`);
-    primaryUrls.push(`https://docs.google.com/spreadsheets/d/${spreadsheetId}/export?format=csv&_t=${cacheBuster}`);
-
-    for (const url of primaryUrls) {
+    // 1. Fetch via GViz JSON for each named sheet tab (GViz JSON returns status="error" if tab not found, preventing duplicates!)
+    for (const sheetName of uniqueSheetNames) {
+      const gvizUrl = `https://docs.google.com/spreadsheets/d/${spreadsheetId}/gviz/tq?sheet=${encodeURIComponent(sheetName)}&_t=${cacheBuster}`;
       try {
-        const res = await fetch(url, { cache: 'no-store' });
+        const res = await fetch(gvizUrl, { cache: 'no-store' });
         lastStatus = res.status;
         if (res.ok) {
           const text = await res.text();
-          if (text && !text.trim().startsWith('<!DOCTYPE') && !text.includes('<html')) {
-            const parsedRows = parseCsvTextToRows(text, 'LembarUtama');
+          if (text && text.includes('google.visualization.Query.setResponse')) {
+            const parsedRows = parseGvizResponseToRows(text, sheetName);
             if (parsedRows.length > 0) {
               allExtractedRows.push(...parsedRows);
               successfulFetches++;
-              break;
             }
           }
         }
       } catch {}
     }
 
-    // 2. Fetch CSV for each named target sheet tab
-    for (const sheetName of uniqueSheetNames) {
-      const url = `https://docs.google.com/spreadsheets/d/${spreadsheetId}/gviz/tq?tqx=out:csv&sheet=${encodeURIComponent(sheetName)}&_t=${cacheBuster}`;
+    // 2. If GViz JSON returned nothing (e.g. sheet not public for JSON), fallback to CSV export
+    if (allExtractedRows.length === 0) {
+      const defaultUrl = gid
+        ? `https://docs.google.com/spreadsheets/d/${spreadsheetId}/export?format=csv&gid=${gid}&_t=${cacheBuster}`
+        : `https://docs.google.com/spreadsheets/d/${spreadsheetId}/export?format=csv&_t=${cacheBuster}`;
       try {
-        const res = await fetch(url, { cache: 'no-store' });
-        lastStatus = res.status;
+        const res = await fetch(defaultUrl, { cache: 'no-store' });
         if (res.ok) {
           const text = await res.text();
           if (text && !text.trim().startsWith('<!DOCTYPE') && !text.includes('<html')) {
-            const parsedRows = parseCsvTextToRows(text, sheetName);
-            if (parsedRows.length > 0) {
-              allExtractedRows.push(...parsedRows);
+            const parsed = parseCsvTextToRows(text, 'SheetUtama');
+            if (parsed.length > 0) {
+              allExtractedRows.push(...parsed);
               successfulFetches++;
             }
           }
         }
-      } catch {
-        // Skip inaccessible tab
-      }
+      } catch {}
     }
 
     // 2. If specific gid is in URL or no tabs were parsed, try gid / default sheet

@@ -140,9 +140,19 @@ app.post('/api/assessments', (req, res) => {
 // POST /api/assessments/sync-batch - Batch sync / merge assessments
 app.post('/api/assessments/sync-batch', (req, res) => {
   try {
-    const { assessments: incomingList } = req.body;
+    const { assessments: incomingList, replace } = req.body;
     if (!Array.isArray(incomingList)) {
       return res.status(400).json({ success: false, message: 'Array assessments diperlukan' });
+    }
+
+    if (replace) {
+      saveStoredAssessments(incomingList);
+      return res.json({
+        success: true,
+        count: incomingList.length,
+        assessments: incomingList,
+        message: `${incomingList.length} data penilaian berhasil diperbarui bersih di server!`,
+      });
     }
 
     const currentList = getStoredAssessments();

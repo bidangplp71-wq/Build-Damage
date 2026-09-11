@@ -2542,36 +2542,20 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
 
       setAssessments((prev) => {
         const map = new Map<string, BuildingAssessment>();
-        // Preserve all existing local assessments without discarding any
+        // 1. Preserve manual local assessments (surveys added via app form)
         prev.forEach((p) => {
-          if (p && p.id) {
+          if (p && p.id && !p.id.startsWith('sheet_')) {
             map.set(p.id, p);
           }
         });
 
-        // Set of keys already claimed by a sheet item to prevent duplicate assignment
-        const claimedKeys = new Set<string>();
-
-        // Overlay Google Sheet records: every row from Google Sheet is preserved without collapsing
+        // 2. Set all canonical Google Sheet records from the 7 Kecamatan sheets
         sheetItems.forEach((s) => {
-          const existing = map.get(s.id);
-          if (existing) {
-            map.set(s.id, {
-              ...existing,
-              ...s,
-              id: existing.id,
-              photos: existing.photos && existing.photos.length > 0 ? existing.photos : s.photos,
-              components: existing.components && existing.components.length > 0 ? existing.components : s.components,
-              googleSheetSynced: true,
-              googleSheetSyncedAt: new Date().toISOString(),
-            });
-          } else {
-            map.set(s.id, {
-              ...s,
-              googleSheetSynced: true,
-              googleSheetSyncedAt: new Date().toISOString(),
-            });
-          }
+          map.set(s.id, {
+            ...s,
+            googleSheetSynced: true,
+            googleSheetSyncedAt: new Date().toISOString(),
+          });
         });
 
         const mergedList = Array.from(map.values());
@@ -2590,11 +2574,11 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
           } catch {}
         }
 
-        // Persist merged dataset to Express server for zero-quota persistence & multi-user visibility
+        // Persist merged dataset to Express server with replace: true to purge ghost duplicate records
         fetch('/api/assessments/sync-batch', {
           method: 'POST',
           headers: { 'Content-Type': 'application/json' },
-          body: JSON.stringify({ assessments: mergedList }),
+          body: JSON.stringify({ assessments: mergedList, replace: true }),
         }).catch((err) => console.warn('Server sync-batch notice:', err));
 
         // Persist synced Google Sheet items directly into Firestore database
