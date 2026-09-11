@@ -2472,12 +2472,21 @@ export async function consolidateSheetsInGoogleSheet(
   };
 }
 
+interface SheetAssessmentsCache {
+  spreadsheetId: string;
+  data: BuildingAssessment[];
+  timestamp: number;
+}
+let memoryAssessmentsCache: SheetAssessmentsCache | null = null;
+const CACHE_TTL_MS = 25000; // 25 seconds fast in-memory cache
+
 /**
  * Reads all assessment data directly from Google Sheet starting from row A2 (the first data row).
- * Supports Webhook JSON API & direct CSV export of multi-tab sheets.
+ * Supports parallel multi-stream fetch & direct CSV export of multi-tab sheets.
  */
 export async function fetchAssessmentsFromGoogleSheet(
-  config: GoogleSheetConfig
+  config: GoogleSheetConfig,
+  forceRefresh = false
 ): Promise<{ success: boolean; data: BuildingAssessment[]; message: string; totalRows?: number }> {
   const hasSpreadsheet = Boolean(config.spreadsheetUrl && isConfiguredSheetUrl(config.spreadsheetUrl));
   const hasWebhook = Boolean(config.webhookUrl && config.webhookUrl.startsWith('http'));
@@ -2490,14 +2499,6 @@ export async function fetchAssessmentsFromGoogleSheet(
     };
   }
 
-  interface ExtractedRow {
-    rowObj: Record<string, any>;
-    sheetRowNumber: number;
-    sourceSheet?: string;
-  }
-  const allExtractedRows: ExtractedRow[] = [];
-
-  // METHOD 1: Direct multi-tab scan for the 7 Kecamatan tabs (Primary source of truth: 98 survey rows)
   const spreadsheetId = extractSpreadsheetId(config.spreadsheetUrl);
   if (!spreadsheetId) {
     return {
@@ -2506,6 +2507,26 @@ export async function fetchAssessmentsFromGoogleSheet(
       message: 'ID Spreadsheet Google Sheet tidak dapat ditemukan dari tautan.',
     };
   }
+
+  // Fast In-Memory Cache Check: Return immediately if fetched within last 25s and not force-refreshing
+  if (!forceRefresh && memoryAssessmentsCache && memoryAssessmentsCache.spreadsheetId === spreadsheetId) {
+    const age = Date.now() - memoryAssessmentsCache.timestamp;
+    if (age < CACHE_TTL_MS && memoryAssessmentsCache.data.length > 0) {
+      return {
+        success: true,
+        data: memoryAssessmentsCache.data,
+        totalRows: memoryAssessmentsCache.data.length,
+        message: `Memuat instan ${memoryAssessmentsCache.data.length} data penilaian dari cache performa tinggi.`,
+      };
+    }
+  }
+
+  interface ExtractedRow {
+    rowObj: Record<string, any>;
+    sheetRowNumber: number;
+    sourceSheet?: string;
+  }
+  const allExtractedRows: ExtractedRow[] = [];
 
   // Check if gid is present in URL
   const gidMatch = config.spreadsheetUrl.match(/[?#&]gid=([0-9]+)/);
@@ -2704,50 +2725,66 @@ export async function fetchAssessmentsFromGoogleSheet(
   ];
 
   try {
-    // 1. Scan across the 7 Kecamatan tab groups (stops at first matching alias per kecamatan)
-    for (const group of kecamatanTabGroups) {
-      let foundForKecamatan = false;
-      for (const alias of group.aliases) {
-        const gvizUrl = `https://docs.google.com/spreadsheets/d/${spreadsheetId}/gviz/tq?sheet=${encodeURIComponent(alias)}&_t=${cacheBuster}`;
-        try {
-          const res = await fetch(gvizUrl, { cache: 'no-store' });
-          lastStatus = res.status;
-          if (res.ok) {
-            const text = await res.text();
-            if (text && text.includes('google.visualization.Query.setResponse')) {
-              const parsedRows = parseGvizResponseToRows(text, alias);
-              if (parsedRows.length > 0) {
-                // Detect whether GViz defaulted to the multi-kecamatan Master Rekap tab
-                // (In a Rekap sheet, rows are mixed from 3 or more completely distinct kecamatans)
-                const distinctKecs = new Set<string>();
-                parsedRows.forEach((r) => {
-                  const val = String(
-                    getVal(r.rowObj, ['Kecamatan', 'Kec', 'Wilayah Kecamatan', 'Nama Kecamatan']) || ''
-                  ).toLowerCase().trim();
-                  if (val) {
-                    for (const g of kecamatanTabGroups) {
-                      if (val.includes(g.name.toLowerCase())) {
-                        distinctKecs.add(g.name.toLowerCase());
-                        break;
+    // 1. Parallel Multi-stream Scan across all 7 Kecamatan tab groups (instant concurrent fetch)
+    const kecamatanResults = await Promise.all(
+      kecamatanTabGroups.map(async (group) => {
+        // Priority 1: standard formatted name 'Kec. ' + group.name
+        // Priority 2: plain name group.name
+        // Priority 3: other alternative aliases only if needed
+        const prioritizedAliases = [
+          `Kec. ${group.name}`,
+          group.name,
+          ...group.aliases.filter((a) => a !== `Kec. ${group.name}` && a !== group.name),
+        ];
+
+        for (const alias of prioritizedAliases) {
+          const gvizUrl = `https://docs.google.com/spreadsheets/d/${spreadsheetId}/gviz/tq?sheet=${encodeURIComponent(alias)}&_t=${cacheBuster}`;
+          try {
+            const controller = new AbortController();
+            const timeoutId = setTimeout(() => controller.abort(), 6000);
+            const res = await fetch(gvizUrl, { signal: controller.signal });
+            clearTimeout(timeoutId);
+            lastStatus = res.status;
+            if (res.ok) {
+              const text = await res.text();
+              if (text && text.includes('google.visualization.Query.setResponse')) {
+                const parsedRows = parseGvizResponseToRows(text, alias);
+                if (parsedRows.length > 0) {
+                  // Detect whether GViz defaulted to the multi-kecamatan Master Rekap tab
+                  const distinctKecs = new Set<string>();
+                  parsedRows.forEach((r) => {
+                    const val = String(
+                      getVal(r.rowObj, ['Kecamatan', 'Kec', 'Wilayah Kecamatan', 'Nama Kecamatan']) || ''
+                    ).toLowerCase().trim();
+                    if (val) {
+                      for (const g of kecamatanTabGroups) {
+                        if (val.includes(g.name.toLowerCase())) {
+                          distinctKecs.add(g.name.toLowerCase());
+                          break;
+                        }
                       }
                     }
+                  });
+
+                  const isFallbackRekap = distinctKecs.size >= 3;
+                  if (!isFallbackRekap) {
+                    return { success: true, rows: parsedRows };
                   }
-                });
-
-                const isFallbackRekap = distinctKecs.size >= 3;
-
-                if (!isFallbackRekap) {
-                  allExtractedRows.push(...parsedRows);
-                  successfulFetches++;
-                  foundForKecamatan = true;
-                  break; // Found the specific kecamatan tab!
                 }
               }
             }
-          }
-        } catch {}
+          } catch {}
+        }
+        return { success: false, rows: [] };
+      })
+    );
+
+    kecamatanResults.forEach((res) => {
+      if (res.success && res.rows.length > 0) {
+        allExtractedRows.push(...res.rows);
+        successfulFetches++;
       }
-    }
+    });
 
     // 2. If 0 rows were found from the 7 kecamatan tabs, check single-tab survey sheets (never rekap)
     if (allExtractedRows.length === 0) {
@@ -2761,7 +2798,10 @@ export async function fetchAssessmentsFromGoogleSheet(
       for (const sheetName of Array.from(new Set(fallbackSheetNames))) {
         const gvizUrl = `https://docs.google.com/spreadsheets/d/${spreadsheetId}/gviz/tq?sheet=${encodeURIComponent(sheetName)}&_t=${cacheBuster}`;
         try {
-          const res = await fetch(gvizUrl, { cache: 'no-store' });
+          const controller = new AbortController();
+          const timeoutId = setTimeout(() => controller.abort(), 5000);
+          const res = await fetch(gvizUrl, { signal: controller.signal });
+          clearTimeout(timeoutId);
           if (res.ok) {
             const text = await res.text();
             if (text && text.includes('google.visualization.Query.setResponse')) {
@@ -2783,7 +2823,10 @@ export async function fetchAssessmentsFromGoogleSheet(
         ? `https://docs.google.com/spreadsheets/d/${spreadsheetId}/export?format=csv&gid=${gid}&_t=${cacheBuster}`
         : `https://docs.google.com/spreadsheets/d/${spreadsheetId}/export?format=csv&_t=${cacheBuster}`;
       try {
-        const res = await fetch(defaultUrl, { cache: 'no-store' });
+        const controller = new AbortController();
+        const timeoutId = setTimeout(() => controller.abort(), 5000);
+        const res = await fetch(defaultUrl, { signal: controller.signal });
+        clearTimeout(timeoutId);
         if (res.ok) {
           const text = await res.text();
           if (text && !text.trim().startsWith('<!DOCTYPE') && !text.includes('<html')) {
@@ -2797,7 +2840,7 @@ export async function fetchAssessmentsFromGoogleSheet(
       } catch {}
     }
 
-    // 2. If specific gid is in URL or no tabs were parsed, try gid / default sheet
+    // 4. If specific gid is in URL or no tabs were parsed, try gid / default sheet
     if (allExtractedRows.length === 0) {
       const fallbackUrls: string[] = [];
       if (gid) {
@@ -2809,7 +2852,10 @@ export async function fetchAssessmentsFromGoogleSheet(
 
       for (const url of fallbackUrls) {
         try {
-          const res = await fetch(url, { cache: 'no-store' });
+          const controller = new AbortController();
+          const timeoutId = setTimeout(() => controller.abort(), 5000);
+          const res = await fetch(url, { signal: controller.signal });
+          clearTimeout(timeoutId);
           lastStatus = res.status;
           if (res.ok) {
             const text = await res.text();
@@ -2849,11 +2895,18 @@ export async function fetchAssessmentsFromGoogleSheet(
     // Deduplicate and parse all aggregated rows
     const parsedData = parseExtractedRowsToAssessments(allExtractedRows);
 
+    // Save to high-speed in-memory cache
+    memoryAssessmentsCache = {
+      spreadsheetId,
+      data: parsedData,
+      timestamp: Date.now(),
+    };
+
     return {
       success: true,
       data: parsedData,
       totalRows: parsedData.length,
-      message: `Berhasil memuat seluruh ${parsedData.length} data penilaian gedung dari seluruh sheet Google Sheet!`,
+      message: `Berhasil memuat seluruh ${parsedData.length} data penilaian gedung secara cepat dari seluruh sheet Google Sheet!`,
     };
   } catch (err: any) {
     console.warn('fetchAssessmentsFromGoogleSheet notice:', err?.message || err);

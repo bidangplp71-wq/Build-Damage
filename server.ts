@@ -1,6 +1,7 @@
 import express from 'express';
 import path from 'path';
 import fs from 'fs';
+import { spawn } from 'child_process';
 import { createServer as createViteServer } from 'vite';
 import dotenv from 'dotenv';
 
@@ -399,6 +400,69 @@ app.post('/api/config', (req, res) => {
     res.status(500).json({
       success: false,
       message: 'Gagal menyimpan konfigurasi di server: ' + (err?.message || 'Error internal'),
+    });
+  }
+});
+
+// ==========================================
+// PYTHON FAST ANALYTICS API (Permen PUPR)
+// ==========================================
+app.post('/api/analytics/python', (req, res) => {
+  try {
+    const { assessments } = req.body;
+    const inputList = Array.isArray(assessments) && assessments.length > 0
+      ? assessments
+      : getStoredAssessments();
+
+    const scriptPath = path.join(process.cwd(), 'scripts', 'data_analyzer.py');
+
+    if (!fs.existsSync(scriptPath)) {
+      return res.status(404).json({
+        success: false,
+        message: 'Modul Python scripts/data_analyzer.py tidak ditemukan di server.',
+      });
+    }
+
+    const pyProcess = spawn('python3', [scriptPath]);
+    let stdoutData = '';
+    let stderrData = '';
+
+    pyProcess.stdout.on('data', (chunk) => {
+      stdoutData += chunk.toString();
+    });
+
+    pyProcess.stderr.on('data', (chunk) => {
+      stderrData += chunk.toString();
+    });
+
+    pyProcess.on('close', (code) => {
+      if (code !== 0) {
+        console.error('Python process failed with exit code:', code, stderrData);
+        return res.status(500).json({
+          success: false,
+          message: 'Eksekusi analisis data Python gagal: ' + (stderrData || `Code ${code}`),
+        });
+      }
+
+      try {
+        const parsed = JSON.parse(stdoutData);
+        return res.json(parsed);
+      } catch (parseErr: any) {
+        return res.status(500).json({
+          success: false,
+          message: 'Gagal mem-parsing output JSON dari Python: ' + parseErr.message,
+          rawOutput: stdoutData.substring(0, 500),
+        });
+      }
+    });
+
+    pyProcess.stdin.write(JSON.stringify(inputList));
+    pyProcess.stdin.end();
+  } catch (err: any) {
+    console.error('Error invoking Python analytics:', err);
+    return res.status(500).json({
+      success: false,
+      message: 'Gagal memanggil Python engine: ' + (err?.message || 'Internal Error'),
     });
   }
 });

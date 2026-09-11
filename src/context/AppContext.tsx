@@ -94,7 +94,7 @@ interface AppContextType {
   verifyAssessment: (id: string, status: VerificationStatus, notes: string) => Promise<{ success: boolean; message: string }>;
   syncAssessmentToSheet: (id: string) => Promise<{ success: boolean; message: string }>;
   syncAllToSheet: () => Promise<{ success: boolean; message: string; count?: number }>;
-  syncFromGoogleSheet: (showToastAlert?: boolean) => Promise<{ success: boolean; message: string; count?: number }>;
+  syncFromGoogleSheet: (showToastAlert?: boolean, forceRefresh?: boolean) => Promise<{ success: boolean; message: string; count?: number }>;
   consolidateAndSyncSheets: () => Promise<{ success: boolean; message: string; count?: number }>;
   recoverAndSyncPhotos: (targetAssessmentId?: string) => Promise<{ recoveredCount: number; success: boolean; message: string }>;
   attachPhotoToAssessment: (assessmentId: string, photoId: string, dataUrl: string) => Promise<boolean>;
@@ -2523,7 +2523,7 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
    * Pull and synchronize all assessment rows directly from Google Sheet (starting from row A2 downwards)
    * Ensures that whatever exists in the Google Sheet is fully displayed in the web app
    */
-  const syncFromGoogleSheet = async (showToastAlert = false): Promise<{ success: boolean; message: string; count?: number }> => {
+  const syncFromGoogleSheet = async (showToastAlert = false, forceRefresh?: boolean): Promise<{ success: boolean; message: string; count?: number }> => {
     if (!googleSheetConfig.spreadsheetUrl || !isConfiguredSheetUrl(googleSheetConfig.spreadsheetUrl)) {
       const msg = 'Tautan Google Sheet belum diatur atau masih menggunakan template contoh.';
       if (showToastAlert) showToast(msg, 'info');
@@ -2531,7 +2531,9 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
     }
 
     try {
-      const result = await fetchAssessmentsFromGoogleSheet(googleSheetConfig);
+      // If user clicked manual sync, always force fresh download
+      const shouldForce = forceRefresh !== undefined ? forceRefresh : Boolean(showToastAlert);
+      const result = await fetchAssessmentsFromGoogleSheet(googleSheetConfig, shouldForce);
       if (!result.success || !result.data) {
         if (showToastAlert) showToast(result.message, 'info');
         return { success: false, message: result.message, count: 0 };

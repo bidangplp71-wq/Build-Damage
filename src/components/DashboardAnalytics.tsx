@@ -1,4 +1,4 @@
-import React, { useMemo } from 'react';
+import React, { useMemo, useState } from 'react';
 import { useApp } from '../context/AppContext';
 import { formatRupiah } from '../utils/puprCalculations';
 import { BuildingCategory, BUILDING_CATEGORY_CONFIGS } from '../types';
@@ -28,6 +28,13 @@ import {
   ShoppingCart,
   Landmark,
   Copy,
+  Zap,
+  Terminal,
+  RefreshCw,
+  X,
+  ShieldAlert,
+  ChevronRight,
+  Sparkles,
 } from 'lucide-react';
 
 export const DashboardAnalytics: React.FC = () => {
@@ -45,6 +52,39 @@ export const DashboardAnalytics: React.FC = () => {
 
   const totalBuildings = assessments.length;
   const totalCost = assessments.reduce((acc, curr) => acc + curr.roundedRehabCost, 0);
+
+  // Python Fast Analytics Engine State
+  const [isPythonLoading, setIsPythonLoading] = useState(false);
+  const [pythonResult, setPythonResult] = useState<any | null>(null);
+
+  const runPythonAnalytics = async () => {
+    if (assessments.length === 0) {
+      showToast('Belum ada data gedung untuk dianalisis oleh Python Engine.', 'info');
+      return;
+    }
+    setIsPythonLoading(true);
+    try {
+      const res = await fetch('/api/analytics/python', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ assessments }),
+      });
+      if (!res.ok) {
+        throw new Error(`Server returned HTTP ${res.status}`);
+      }
+      const data = await res.json();
+      if (data.success) {
+        setPythonResult(data);
+        showToast(`⚡ Analisis data Python selesai dalam ${data.executionTimeMs} ms!`, 'success');
+      } else {
+        showToast('Gagal memproses analisis: ' + (data.message || 'Error internal'), 'error');
+      }
+    } catch (err: any) {
+      showToast('Gagal menghubungi Python Engine di server: ' + err.message, 'error');
+    } finally {
+      setIsPythonLoading(false);
+    }
+  };
 
   // Duplicates detection
   const duplicateGroups = useMemo(() => {
@@ -130,6 +170,15 @@ export const DashboardAnalytics: React.FC = () => {
           </div>
 
           <div className="flex flex-wrap items-center gap-3">
+            <button
+              onClick={runPythonAnalytics}
+              disabled={isPythonLoading || assessments.length === 0}
+              className="flex items-center gap-2 px-4 py-2.5 rounded-xl bg-gradient-to-r from-emerald-600 to-teal-700 hover:from-emerald-500 hover:to-teal-600 text-white font-bold text-sm shadow-lg shadow-teal-900/30 transition-all transform active:scale-95 cursor-pointer disabled:opacity-50"
+              title="Eksekusi analisis data statistik & pemodelan kerentanan komponen struktur dengan Python Engine"
+            >
+              <Zap className={`w-4 h-4 text-amber-300 ${isPythonLoading ? 'animate-spin' : ''}`} />
+              <span>{isPythonLoading ? 'Memproses Python...' : 'Analisis Cepat Python'}</span>
+            </button>
             <button
               onClick={() => setActiveTab('input_baru')}
               className="flex items-center gap-2 px-4 py-2.5 rounded-xl bg-amber-500 hover:bg-amber-400 text-slate-950 font-bold text-sm shadow-lg shadow-amber-500/25 transition-all transform active:scale-95 cursor-pointer"
@@ -284,6 +333,205 @@ export const DashboardAnalytics: React.FC = () => {
             </button>
           </div>
         </div>
+      </div>
+
+      {/* PYTHON HIGH-SPEED ANALYTICS ENGINE BANNER & INSIGHTS */}
+      <div className="bg-gradient-to-br from-slate-900 via-slate-800 to-emerald-950 rounded-2xl p-6 text-white border border-emerald-500/30 shadow-xl relative overflow-hidden">
+        <div className="absolute right-0 top-0 w-80 h-80 bg-emerald-500/10 rounded-full blur-3xl pointer-events-none"></div>
+        <div className="flex flex-col lg:flex-row lg:items-center justify-between gap-4 border-b border-slate-700/60 pb-5">
+          <div className="flex items-start gap-3.5">
+            <div className="w-12 h-12 rounded-xl bg-gradient-to-tr from-emerald-500 to-teal-400 text-slate-950 flex items-center justify-center font-black shrink-0 shadow-lg shadow-emerald-500/20">
+              <Terminal className="w-6 h-6" />
+            </div>
+            <div>
+              <div className="flex items-center gap-2 flex-wrap">
+                <span className="px-2.5 py-0.5 rounded-full text-[11px] font-bold bg-emerald-500/20 text-emerald-300 border border-emerald-500/30 flex items-center gap-1">
+                  <Zap className="w-3 h-3 text-amber-300" />
+                  Python 3.10 Fast Engine
+                </span>
+                {pythonResult && (
+                  <span className="px-2.5 py-0.5 rounded-full text-[11px] font-bold bg-amber-400/20 text-amber-300 border border-amber-400/30">
+                    ⚡ Waktu Komputasi: {pythonResult.executionTimeMs} ms
+                  </span>
+                )}
+                <span className="px-2.5 py-0.5 rounded-full text-[11px] font-bold bg-blue-400/20 text-blue-300 border border-blue-400/30">
+                  Permen PUPR No. 22/2018
+                </span>
+              </div>
+              <h3 className="text-xl font-black tracking-tight text-white mt-1">
+                Mesin Analisis Data Berkecepatan Tinggi (Python Engine)
+              </h3>
+              <p className="text-xs text-slate-300 max-w-2xl mt-0.5">
+                Mengolah seluruh data survei gedung secara instan menggunakan komputasi statistik Python untuk menghitung indeks kerentanan komponen struktur, sebaran biaya, dan matriks prioritas penanganan (P1, P2, P3).
+              </p>
+            </div>
+          </div>
+
+          <div className="flex items-center gap-3 shrink-0">
+            <button
+              onClick={runPythonAnalytics}
+              disabled={isPythonLoading || assessments.length === 0}
+              className="px-5 py-2.5 rounded-xl bg-gradient-to-r from-emerald-500 to-teal-500 hover:from-emerald-400 hover:to-teal-400 text-slate-950 font-extrabold text-sm shadow-lg shadow-emerald-500/25 transition-all transform active:scale-95 cursor-pointer disabled:opacity-50 flex items-center gap-2"
+            >
+              <RefreshCw className={`w-4 h-4 ${isPythonLoading ? 'animate-spin' : ''}`} />
+              <span>{isPythonLoading ? 'Menghitung...' : pythonResult ? 'Hitung Ulang Python' : 'Jalankan Analisis Python'}</span>
+            </button>
+          </div>
+        </div>
+
+        {/* Python Analytics Results Display */}
+        {pythonResult ? (
+          <div className="mt-5 space-y-5">
+            {/* Quick Stats Grid */}
+            <div className="grid grid-cols-2 sm:grid-cols-4 gap-3">
+              <div className="bg-slate-800/80 rounded-xl p-3.5 border border-slate-700/60">
+                <span className="text-[11px] text-slate-400 font-medium uppercase tracking-wider block">Rata-rata Kerusakan</span>
+                <span className="text-xl font-extrabold text-white mt-1 block">
+                  {pythonResult.summary?.averageDamagePercent || 0}%
+                </span>
+                <span className="text-[10px] text-slate-400">Tingkat degradasi fisik</span>
+              </div>
+              <div className="bg-slate-800/80 rounded-xl p-3.5 border border-slate-700/60">
+                <span className="text-[11px] text-slate-400 font-medium uppercase tracking-wider block">Rata-rata Biaya / Gedung</span>
+                <span className="text-xl font-extrabold text-amber-300 mt-1 block truncate">
+                  {formatRupiah(pythonResult.summary?.meanCost || 0)}
+                </span>
+                <span className="text-[10px] text-slate-400">Mean alokasi per unit</span>
+              </div>
+              <div className="bg-slate-800/80 rounded-xl p-3.5 border border-slate-700/60">
+                <span className="text-[11px] text-slate-400 font-medium uppercase tracking-wider block">Standar Deviasi Biaya</span>
+                <span className="text-xl font-extrabold text-blue-300 mt-1 block truncate">
+                  {formatRupiah(pythonResult.summary?.standardDeviationCost || 0)}
+                </span>
+                <span className="text-[10px] text-slate-400">Variansi sebaran anggaran</span>
+              </div>
+              <div className="bg-slate-800/80 rounded-xl p-3.5 border border-slate-700/60">
+                <span className="text-[11px] text-slate-400 font-medium uppercase tracking-wider block">Prioritas P1 Mendesak</span>
+                <span className="text-xl font-extrabold text-rose-400 mt-1 block">
+                  {pythonResult.priorityRankings?.P1_Mendesak || 0} Gedung
+                </span>
+                <span className="text-[10px] text-rose-300 font-medium">Bahaya keruntuhan struktur</span>
+              </div>
+            </div>
+
+            {/* Recommendations & Component Vulnerability */}
+            <div className="grid grid-cols-1 lg:grid-cols-12 gap-4">
+              {/* Recommendations */}
+              <div className="lg:col-span-6 bg-slate-800/50 rounded-xl p-4 border border-slate-700/60 space-y-3">
+                <h4 className="text-xs font-bold uppercase tracking-wider text-emerald-400 flex items-center gap-1.5">
+                  <Sparkles className="w-4 h-4" />
+                  <span>Rekomendasi Algoritmik Permen PUPR</span>
+                </h4>
+                <div className="space-y-2 text-xs text-slate-200">
+                  {pythonResult.recommendations?.map((rec: string, idx: number) => (
+                    <div key={idx} className="flex items-start gap-2 bg-slate-900/60 p-2.5 rounded-lg border border-slate-700/40">
+                      <span className="w-5 h-5 rounded-full bg-emerald-500/20 text-emerald-400 flex items-center justify-center shrink-0 text-[10px] font-bold">
+                        {idx + 1}
+                      </span>
+                      <p className="leading-relaxed">{rec}</p>
+                    </div>
+                  ))}
+                </div>
+              </div>
+
+              {/* Component Vulnerability Index */}
+              <div className="lg:col-span-6 bg-slate-800/50 rounded-xl p-4 border border-slate-700/60 space-y-3">
+                <h4 className="text-xs font-bold uppercase tracking-wider text-amber-400 flex items-center gap-1.5">
+                  <ShieldAlert className="w-4 h-4" />
+                  <span>Indeks Kerentanan Komponen Teknis (PUPR)</span>
+                </h4>
+                <div className="space-y-2">
+                  {pythonResult.componentVulnerability?.slice(0, 5).map((comp: any, idx: number) => (
+                    <div key={idx} className="bg-slate-900/60 p-2.5 rounded-lg border border-slate-700/40">
+                      <div className="flex items-center justify-between text-xs mb-1">
+                        <span className="font-semibold text-white flex items-center gap-1.5">
+                          <span>{comp.component}</span>
+                          <span className="text-[10px] px-1.5 py-0.2 rounded bg-slate-700 text-slate-300">
+                            {comp.category}
+                          </span>
+                        </span>
+                        <span className="font-bold text-amber-400">
+                          Indeks: {comp.vulnerabilityIndex}
+                        </span>
+                      </div>
+                      <div className="w-full bg-slate-800 h-1.5 rounded-full overflow-hidden">
+                        <div
+                          className={`h-full rounded-full ${
+                            comp.category === 'Struktur' ? 'bg-rose-500' : 'bg-amber-400'
+                          }`}
+                          style={{ width: `${Math.min(100, comp.vulnerabilityIndex * 3)}%` }}
+                        ></div>
+                      </div>
+                    </div>
+                  ))}
+                </div>
+              </div>
+            </div>
+
+            {/* Top Priority Buildings */}
+            {pythonResult.topPriorityBuildings?.length > 0 && (
+              <div className="bg-slate-800/50 rounded-xl p-4 border border-slate-700/60">
+                <div className="flex items-center justify-between mb-3">
+                  <h4 className="text-xs font-bold uppercase tracking-wider text-rose-400 flex items-center gap-1.5">
+                    <AlertTriangle className="w-4 h-4" />
+                    <span>Daftar Gedung Prioritas Paling Kritis (Urutan Skor Urgensi Python)</span>
+                  </h4>
+                  <span className="text-[10px] text-slate-400">Diurutkan berdasarkan skor risiko struktural tertinggi</span>
+                </div>
+                <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-2.5 text-xs">
+                  {pythonResult.topPriorityBuildings.slice(0, 6).map((b: any) => (
+                    <div
+                      key={b.id}
+                      onClick={() => {
+                        const target = assessments.find((a) => a.id === b.id);
+                        if (target) {
+                          setSelectedAssessmentForDetail(target);
+                          setActiveTab('penilaian');
+                        }
+                      }}
+                      className="bg-slate-900/80 hover:bg-slate-900 p-3 rounded-xl border border-slate-700/70 hover:border-amber-400/50 transition-all cursor-pointer group"
+                    >
+                      <div className="flex items-center justify-between mb-1">
+                        <span className="text-[10px] font-bold px-2 py-0.5 rounded bg-rose-500/20 text-rose-300 border border-rose-500/30">
+                          Skor: {b.urgencyScore}
+                        </span>
+                        <span className="text-[10px] text-slate-400 group-hover:text-amber-400 flex items-center gap-0.5">
+                          Detail <ChevronRight className="w-3 h-3" />
+                        </span>
+                      </div>
+                      <h5 className="font-bold text-white text-sm truncate group-hover:text-amber-300 transition-colors">
+                        {b.buildingName}
+                      </h5>
+                      <p className="text-[11px] text-slate-400 truncate mt-0.5">
+                        Kec. {b.kecamatan} • {b.category}
+                      </p>
+                      <div className="flex items-center justify-between text-[11px] mt-2 pt-2 border-t border-slate-800">
+                        <span className="text-slate-300">Kerusakan: <strong className="text-rose-400">{b.damagePercent}%</strong></span>
+                        <span className="font-bold text-amber-400">{formatRupiah(b.rehabCost)}</span>
+                      </div>
+                    </div>
+                  ))}
+                </div>
+              </div>
+            )}
+          </div>
+        ) : (
+          <div className="mt-4 p-4 rounded-xl bg-slate-800/40 border border-slate-700/40 flex flex-col sm:flex-row items-center justify-between gap-3 text-xs text-slate-300">
+            <div className="flex items-center gap-2.5">
+              <Zap className="w-4 h-4 text-emerald-400 shrink-0" />
+              <span>
+                Klik tombol <strong>"Jalankan Analisis Python"</strong> untuk memproses seluruh {totalBuildings} data survei dengan algoritma machine calculation Python dalam hitungan milidetik.
+              </span>
+            </div>
+            <button
+              onClick={runPythonAnalytics}
+              disabled={isPythonLoading || assessments.length === 0}
+              className="px-4 py-2 rounded-lg bg-emerald-500 hover:bg-emerald-400 text-slate-950 font-bold text-xs shrink-0 cursor-pointer disabled:opacity-50"
+            >
+              Mulai Analisis Sekarang
+            </button>
+          </div>
+        )}
       </div>
 
       {/* Building Categories Section */}
