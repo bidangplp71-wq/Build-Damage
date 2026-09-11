@@ -385,19 +385,21 @@ export const AssessmentForm: React.FC = () => {
     }
   }, [selectedAssessmentForEdit, assessments, kecamatans, desas]);
 
+  // Current selected kecamatan & desa objects
+  const currentKec = kecamatans.find((k) => k.id === kecamatanId);
+  const currentDesa = desas.find((d) => d.id === desaId);
+
   // Filter available desas based on selected kecamatan
   const availableDesas = desas.filter((d) => d.kecamatanId === kecamatanId);
 
-  // Default select first desa when kecamatan changes if empty & not editing
+  // Default select first desa and automatically update target sheet when kecamatan changes
   useEffect(() => {
     if (!selectedAssessmentForEdit && availableDesas.length > 0 && (!desaId || !availableDesas.some((d) => d.id === desaId))) {
       setDesaId(availableDesas[0].id);
     }
-    if (!selectedAssessmentForEdit) {
-      const curKec = kecamatans.find((k) => k.id === kecamatanId);
-      if (curKec) {
-        setTargetSheetName(`Kec. ${curKec.name}`);
-      }
+    const curKec = kecamatans.find((k) => k.id === kecamatanId);
+    if (curKec) {
+      setTargetSheetName(`Kec. ${curKec.name}`);
     }
   }, [kecamatanId, availableDesas, desaId, selectedAssessmentForEdit, kecamatans]);
 
@@ -2102,31 +2104,38 @@ export const AssessmentForm: React.FC = () => {
 
       {/* SECTION 2: Lokasi Wilayah (Kecamatan & Desa Berjenjang) */}
       <div className="bg-white p-6 rounded-2xl border border-slate-200 shadow-xs space-y-4">
-        <div className="flex items-center justify-between border-b border-slate-100 pb-2">
-          <h3 className="text-sm font-bold text-slate-900 uppercase tracking-wider flex items-center gap-2">
-            <MapPin className="w-4 h-4 text-emerald-600" />
-            <span>II. Lokasi Wilayah Administrasi (Perkecamatan & Desa)</span>
-          </h3>
+        <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-2 border-b border-slate-100 pb-3">
+          <div>
+            <h3 className="text-sm font-bold text-slate-900 uppercase tracking-wider flex items-center gap-2">
+              <MapPin className="w-4 h-4 text-emerald-600" />
+              <span>II. Lokasi Wilayah Administrasi (Perkecamatan & Desa)</span>
+            </h3>
+            <p className="text-xs text-slate-500 mt-0.5">
+              Data penilaian otomatis disinkronkan langsung ke tab sheet kecamatan yang bersangkutan.
+            </p>
+          </div>
           <button
             type="button"
             onClick={() => setActiveTab('wilayah')}
-            className="text-xs font-semibold text-indigo-600 hover:text-indigo-800"
+            className="self-start sm:self-center px-3 py-1.5 text-xs font-semibold text-indigo-700 bg-indigo-50 hover:bg-indigo-100 rounded-xl border border-indigo-200 transition-colors flex items-center gap-1.5 cursor-pointer shadow-2xs"
+            title="Buka menu data wilayah untuk penambahan atau pemekaran desa baru"
           >
-            + Pemekaran Desa Baru
+            <Sparkles className="w-3.5 h-3.5 text-indigo-600" />
+            <span>Kelola Wilayah & Pemekaran</span>
           </button>
         </div>
 
-        <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-4 text-xs">
+        <div className="grid grid-cols-1 md:grid-cols-3 gap-4 text-xs">
           {/* Kecamatan */}
           <div>
-            <div className="flex items-center justify-between mb-1">
+            <div className="flex items-center justify-between mb-1.5">
               <label className="font-semibold text-slate-700">
                 Kecamatan <span className="text-rose-500">*</span>
               </label>
               <button
                 type="button"
                 onClick={handleOpenQuickKec}
-                className="text-[11px] font-bold text-indigo-600 hover:text-indigo-800 flex items-center gap-0.5 cursor-pointer"
+                className="text-[11px] font-semibold text-indigo-600 hover:text-indigo-800 flex items-center gap-0.5 cursor-pointer"
                 title="Tambah kecamatan baru jika belum ada di daftar"
               >
                 <Plus className="w-3 h-3" />
@@ -2136,10 +2145,15 @@ export const AssessmentForm: React.FC = () => {
             <select
               value={kecamatanId || ''}
               onChange={(e) => {
-                setKecamatanId(e.target.value);
+                const newKecId = e.target.value;
+                setKecamatanId(newKecId);
+                const kObj = kecamatans.find((k) => k.id === newKecId);
+                if (kObj) {
+                  setTargetSheetName(`Kec. ${kObj.name}`);
+                }
               }}
               required
-              className="w-full px-3 py-2 rounded-xl border border-slate-200 bg-white font-semibold text-slate-800"
+              className="w-full px-3 py-2.5 rounded-xl border border-slate-200 bg-white font-semibold text-slate-800 focus:ring-2 focus:ring-emerald-500 focus:border-emerald-500"
             >
               {kecamatans.map((k) => (
                 <option key={k.id} value={k.id}>
@@ -2151,36 +2165,25 @@ export const AssessmentForm: React.FC = () => {
 
           {/* Desa (Dibatasi per kecamatan yang dipilih) */}
           <div>
-            <div className="flex items-center justify-between mb-1">
+            <div className="flex items-center justify-between mb-1.5">
               <label className="font-semibold text-slate-700">
                 Desa / Kelurahan <span className="text-rose-500">*</span>
               </label>
-              <div className="flex items-center gap-2">
-                <button
-                  type="button"
-                  onClick={() => handleOpenQuickDesa(false)}
-                  className="text-[11px] font-bold text-indigo-600 hover:text-indigo-800 flex items-center gap-0.5 cursor-pointer"
-                  title="Tambah desa yang belum terdaftar di kecamatan ini"
-                >
-                  <Plus className="w-3 h-3" />
-                  <span>Tambah Desa</span>
-                </button>
-                <button
-                  type="button"
-                  onClick={() => handleOpenQuickDesa(true)}
-                  className="text-[11px] font-bold text-amber-600 hover:text-amber-800 flex items-center gap-0.5 cursor-pointer"
-                  title="Tambah desa hasil pemekaran"
-                >
-                  <Sparkles className="w-3 h-3" />
-                  <span>Pemekaran</span>
-                </button>
-              </div>
+              <button
+                type="button"
+                onClick={() => handleOpenQuickDesa(false)}
+                className="text-[11px] font-semibold text-indigo-600 hover:text-indigo-800 flex items-center gap-0.5 cursor-pointer"
+                title="Tambah desa yang belum terdaftar di kecamatan ini"
+              >
+                <Plus className="w-3 h-3" />
+                <span>Tambah Desa</span>
+              </button>
             </div>
             <select
               value={desaId || ''}
               onChange={(e) => setDesaId(e.target.value)}
               required
-              className="w-full px-3 py-2 rounded-xl border border-slate-200 bg-white font-semibold text-slate-800"
+              className="w-full px-3 py-2.5 rounded-xl border border-slate-200 bg-white font-semibold text-slate-800 focus:ring-2 focus:ring-emerald-500 focus:border-emerald-500"
             >
               {availableDesas.map((d) => (
                 <option key={d.id} value={d.id}>
@@ -2192,68 +2195,53 @@ export const AssessmentForm: React.FC = () => {
               )}
             </select>
             <div className="flex items-center justify-between text-[11px] text-slate-400 mt-1">
-              <span>{availableDesas.length} Desa terdaftar di kecamatan ini</span>
+              <span>{availableDesas.length} Desa terdaftar</span>
               <button
                 type="button"
-                onClick={() => handleOpenQuickDesa(false)}
-                className="text-indigo-600 hover:underline font-medium cursor-pointer"
+                onClick={() => handleOpenQuickDesa(true)}
+                className="text-amber-600 hover:underline font-semibold flex items-center gap-0.5 cursor-pointer"
+                title="Tambah desa pemekaran baru"
               >
-                + Belum terdaftar?
+                <Sparkles className="w-2.5 h-2.5" />
+                <span>+ Pemekaran</span>
               </button>
             </div>
           </div>
 
-          {/* Sheet Tujuan Google Sheet (Direct Placement) */}
-          <div>
-            <div className="flex items-center justify-between mb-1">
-              <label className="font-semibold text-slate-700 flex items-center gap-1">
-                <FileSpreadsheet className="w-3.5 h-3.5 text-emerald-600" />
-                <span>Sheet Google Tujuan</span>
-                <span className="text-emerald-700 bg-emerald-50 text-[10px] px-1 py-0.5 rounded font-bold border border-emerald-200">
-                  Langsung Masuk
-                </span>
-              </label>
-            </div>
-            <select
-              value={targetSheetName}
-              onChange={(e) => setTargetSheetName(e.target.value)}
-              className="w-full px-3 py-2 rounded-xl border border-emerald-300 bg-emerald-50/40 font-bold text-slate-800 focus:ring-2 focus:ring-emerald-500"
-            >
-              <option value="Kec. Aesesa">Kec. Aesesa</option>
-              <option value="Kec. Aesesa Selatan">Kec. Aesesa Selatan</option>
-              <option value="Kec. Boawae">Kec. Boawae</option>
-              <option value="Kec. Keo Tengah">Kec. Keo Tengah</option>
-              <option value="Kec. Mauponggo">Kec. Mauponggo</option>
-              <option value="Kec. Nangaroro">Kec. Nangaroro</option>
-              <option value="Kec. Wolowae">Kec. Wolowae</option>
-              {targetSheetName &&
-                ![
-                  'Kec. Aesesa',
-                  'Kec. Aesesa Selatan',
-                  'Kec. Boawae',
-                  'Kec. Keo Tengah',
-                  'Kec. Mauponggo',
-                  'Kec. Nangaroro',
-                  'Kec. Wolowae',
-                ].includes(targetSheetName) && (
-                  <option value={targetSheetName}>{targetSheetName}</option>
-                )}
-            </select>
-            <p className="text-[10px] text-slate-500 mt-1">
-              Masuk langsung ke tab ini di Google Sheet tanpa menimpa data lama.
-            </p>
-          </div>
-
           {/* Alamat Lengkap */}
           <div>
-            <label className="block font-semibold text-slate-700 mb-1">Alamat Lengkap / Patokan</label>
+            <div className="flex items-center justify-between mb-1.5">
+              <label className="font-semibold text-slate-700">Alamat Lengkap / Patokan</label>
+            </div>
             <input
               type="text"
               value={detailedAddress || ''}
               onChange={(e) => setDetailedAddress(e.target.value)}
-              placeholder="Contoh: Jl. Trans Flores Km. 4 Kompleks Pasar"
-              className="w-full px-3 py-2 rounded-xl border border-slate-200"
+              placeholder="Contoh: RT 02 / RW 01, Jl. Trans Flores Kompleks Pasar"
+              className="w-full px-3 py-2.5 rounded-xl border border-slate-200 bg-white text-slate-800 focus:ring-2 focus:ring-emerald-500 focus:border-emerald-500"
             />
+            <p className="text-[11px] text-slate-400 mt-1">
+              RT / RW, Dusun, atau penanda lokasi bangunan
+            </p>
+          </div>
+        </div>
+
+        {/* Indikator Otomatis Masuk ke Tab Google Sheet Sesuai Kecamatan */}
+        <div className="flex flex-wrap items-center justify-between gap-3 px-4 py-2.5 bg-emerald-50/80 border border-emerald-200 rounded-xl text-xs text-emerald-950">
+          <div className="flex items-center gap-2.5">
+            <div className="w-6 h-6 rounded-lg bg-emerald-600 text-white flex items-center justify-center shrink-0 shadow-2xs">
+              <FileSpreadsheet className="w-3.5 h-3.5" />
+            </div>
+            <div className="flex flex-wrap items-center gap-1.5">
+              <span className="text-slate-600 font-medium">Sheet Google Tujuan:</span>
+              <span className="font-bold text-emerald-950 bg-white px-2.5 py-0.5 rounded-md border border-emerald-300 inline-flex items-center gap-1.5 shadow-2xs">
+                <span className="w-2 h-2 rounded-full bg-emerald-500" />
+                {targetSheetName || (currentKec ? `Kec. ${currentKec.name}` : 'Kec. Aesesa')}
+              </span>
+            </div>
+          </div>
+          <div className="text-[11px] text-emerald-700 font-medium flex items-center gap-1">
+            <span>✓ Langsung masuk ke tab sheet kecamatan tanpa perlu memilih manual</span>
           </div>
         </div>
 
