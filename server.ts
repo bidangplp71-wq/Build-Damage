@@ -407,9 +407,9 @@ app.post('/api/config', (req, res) => {
 // ==========================================
 // PYTHON FAST ANALYTICS API (Permen PUPR)
 // ==========================================
-app.post('/api/analytics/python', (req, res) => {
+app.all('/api/analytics/python', (req, res) => {
   try {
-    const { assessments } = req.body;
+    const assessments = req.body?.assessments || req.body || [];
     const inputList = Array.isArray(assessments) && assessments.length > 0
       ? assessments
       : getStoredAssessments();
