@@ -1,6 +1,9 @@
 {
   "spreadsheetUrl": "",
   "webhookUrl": "",
+  "sheetName": "REKAP_SEMUA_KECAMATAN",
+  "splitByKecamatan": true,
+  "includeMasterSummarySheet": true,
   "driveFolderId": "https://drive.google.com/drive/folders/1xKF8SYvNY97A9-ga0B42z3jQTbcC_Tk5?usp=sharing",
   "savePhotosToDrive": true
 }

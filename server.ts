@@ -20,8 +20,235 @@ if (!fs.existsSync(UPLOADS_DIR)) {
   fs.mkdirSync(UPLOADS_DIR, { recursive: true });
 }
 
+// Durable local data directory for server-side persistence
+const DATA_DIR = path.join(process.cwd(), 'data');
+if (!fs.existsSync(DATA_DIR)) {
+  fs.mkdirSync(DATA_DIR, { recursive: true });
+}
+const ASSESSMENTS_FILE = path.join(DATA_DIR, 'assessments.json');
+const ASSESSMENTS_BACKUP_FILE = path.join(DATA_DIR, 'assessments.backup.json');
+
+// Helper to safely load assessments from server file
+function getStoredAssessments(): any[] {
+  try {
+    if (fs.existsSync(ASSESSMENTS_FILE)) {
+      const content = fs.readFileSync(ASSESSMENTS_FILE, 'utf8');
+      const parsed = JSON.parse(content);
+      if (Array.isArray(parsed)) return parsed;
+    }
+  } catch (err) {
+    console.error('Error reading assessments file, checking backup:', err);
+    try {
+      if (fs.existsSync(ASSESSMENTS_BACKUP_FILE)) {
+        const backupContent = fs.readFileSync(ASSESSMENTS_BACKUP_FILE, 'utf8');
+        const parsedBackup = JSON.parse(backupContent);
+        if (Array.isArray(parsedBackup)) return parsedBackup;
+      }
+    } catch (bErr) {
+      console.error('Error reading assessments backup:', bErr);
+    }
+  }
+  return [];
+}
+
+// Helper to safely write assessments to server file with backup
+function saveStoredAssessments(list: any[]): boolean {
+  try {
+    if (!Array.isArray(list)) return false;
+    const jsonStr = JSON.stringify(list, null, 2);
+    // Write backup first if current file exists
+    if (fs.existsSync(ASSESSMENTS_FILE)) {
+      try {
+        fs.copyFileSync(ASSESSMENTS_FILE, ASSESSMENTS_BACKUP_FILE);
+      } catch {}
+    }
+    fs.writeFileSync(ASSESSMENTS_FILE, jsonStr, 'utf8');
+    return true;
+  } catch (err) {
+    console.error('Error writing assessments file:', err);
+    return false;
+  }
+}
+
 // Serve uploaded photos statically
 app.use('/uploads', express.static(path.join(process.cwd(), 'uploads')));
+
+// ==========================================
+// ASSESSMENTS API (Zero-quota Cloud Persistence)
+// ==========================================
+
+// GET /api/assessments - Fetch all assessments stored on server
+app.get('/api/assessments', (req, res) => {
+  try {
+    const list = getStoredAssessments();
+    res.json({
+      success: true,
+      count: list.length,
+      assessments: list,
+    });
+  } catch (err: any) {
+    res.status(500).json({ success: false, message: 'Gagal mengambil data penilaian: ' + err.message });
+  }
+});
+
+// POST /api/assessments - Upsert single assessment non-destructively
+app.post('/api/assessments', (req, res) => {
+  try {
+    const assessment = req.body;
+    if (!assessment || !assessment.id) {
+      return res.status(400).json({ success: false, message: 'Data penilaian dan ID wajib ada' });
+    }
+
+    const currentList = getStoredAssessments();
+    const map = new Map<string, any>();
+    currentList.forEach((a) => {
+      if (a && a.id) map.set(a.id, a);
+    });
+
+    const existing = map.get(assessment.id);
+    if (existing) {
+      // Non-destructive merge: preserve existing photos if new ones are empty
+      const mergedPhotos =
+        assessment.photos && assessment.photos.length > 0
+          ? assessment.photos
+          : existing.photos || [];
+      map.set(assessment.id, {
+        ...existing,
+        ...assessment,
+        photos: mergedPhotos,
+        updatedAt: assessment.updatedAt || new Date().toISOString(),
+      });
+    } else {
+      map.set(assessment.id, assessment);
+    }
+
+    const updatedList = Array.from(map.values());
+    saveStoredAssessments(updatedList);
+
+    return res.json({
+      success: true,
+      count: updatedList.length,
+      assessment: map.get(assessment.id),
+      message: 'Data penilaian berhasil disimpan di server!',
+    });
+  } catch (err: any) {
+    console.error('Error saving assessment on server:', err);
+    return res.status(500).json({ success: false, message: 'Gagal menyimpan penilaian: ' + err.message });
+  }
+});
+
+// POST /api/assessments/sync-batch - Batch sync / merge assessments
+app.post('/api/assessments/sync-batch', (req, res) => {
+  try {
+    const { assessments: incomingList } = req.body;
+    if (!Array.isArray(incomingList)) {
+      return res.status(400).json({ success: false, message: 'Array assessments diperlukan' });
+    }
+
+    const currentList = getStoredAssessments();
+    const map = new Map<string, any>();
+    // 1. Keep all existing assessments on server
+    currentList.forEach((a) => {
+      if (a && a.id) map.set(a.id, a);
+    });
+
+    // 2. Non-destructively merge incoming assessments
+    incomingList.forEach((incoming) => {
+      if (!incoming || !incoming.id) return;
+      const existing = map.get(incoming.id);
+      if (!existing) {
+        map.set(incoming.id, incoming);
+      } else {
+        const existingTime = new Date(existing.updatedAt || existing.createdAt || 0).getTime();
+        const incomingTime = new Date(incoming.updatedAt || incoming.createdAt || 0).getTime();
+        if (incomingTime >= existingTime) {
+          const mergedPhotos =
+            incoming.photos && incoming.photos.length > 0
+              ? incoming.photos
+              : existing.photos || [];
+          map.set(incoming.id, { ...existing, ...incoming, photos: mergedPhotos });
+        }
+      }
+    });
+
+    const merged = Array.from(map.values());
+    saveStoredAssessments(merged);
+
+    return res.json({
+      success: true,
+      count: merged.length,
+      assessments: merged,
+      message: `${merged.length} data penilaian berhasil tersinkron di server!`,
+    });
+  } catch (err: any) {
+    console.error('Error batch syncing assessments on server:', err);
+    return res.status(500).json({ success: false, message: 'Gagal sinkronisasi batch: ' + err.message });
+  }
+});
+
+// DELETE /api/assessments/:id - Delete single assessment on server
+app.delete('/api/assessments/:id', (req, res) => {
+  try {
+    const { id } = req.params;
+    if (!id) {
+      return res.status(400).json({ success: false, message: 'ID diperlukan' });
+    }
+
+    const currentList = getStoredAssessments();
+    const filtered = currentList.filter((a) => a.id !== id);
+    saveStoredAssessments(filtered);
+
+    return res.json({
+      success: true,
+      deletedId: id,
+      remainingCount: filtered.length,
+      message: 'Data penilaian berhasil dihapus dari server',
+    });
+  } catch (err: any) {
+    return res.status(500).json({ success: false, message: 'Gagal menghapus penilaian: ' + err.message });
+  }
+});
+
+// POST /api/webhook / POST /api/sheet-webhook - Catch incoming survey data from Google Apps Script or external tools
+app.all(['/api/webhook', '/api/sheet-webhook'], (req, res) => {
+  try {
+    const payload = req.body || req.query;
+    console.log('Incoming webhook received:', typeof payload === 'object' ? Object.keys(payload) : payload);
+
+    if (payload && typeof payload === 'object') {
+      const currentList = getStoredAssessments();
+      const map = new Map<string, any>();
+      currentList.forEach((a) => {
+        if (a && a.id) map.set(a.id, a);
+      });
+
+      // If array of items
+      if (Array.isArray(payload.data)) {
+        payload.data.forEach((item: any) => {
+          if (item && (item.id || item.code || item.buildingName)) {
+            const itemId = item.id || `webhook_${Date.now()}_${Math.random().toString(36).substring(2, 7)}`;
+            map.set(itemId, { ...item, id: itemId });
+          }
+        });
+      } else if (payload.buildingName || payload.id || payload.code) {
+        const itemId = payload.id || `webhook_${Date.now()}_${Math.random().toString(36).substring(2, 7)}`;
+        map.set(itemId, { ...payload, id: itemId });
+      }
+
+      const updated = Array.from(map.values());
+      saveStoredAssessments(updated);
+    }
+
+    return res.json({
+      status: 'success',
+      success: true,
+      message: 'Webhook data received and safely saved to server',
+    });
+  } catch (err: any) {
+    console.error('Webhook error:', err);
+    return res.status(500).json({ status: 'error', message: err.message });
+  }
+});
 
 // API endpoint to upload a single photo
 app.post('/api/photos/upload', (req, res) => {

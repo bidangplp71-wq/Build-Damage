@@ -34,6 +34,7 @@ import {
   syncActivityLogsToGoogleSheet,
   directSaveActivityLogToGoogleSheet,
   fetchAssessmentsFromGoogleSheet,
+  consolidateSheetsInGoogleSheet,
   isConfiguredSheetUrl,
   directSaveUserToGoogleSheet,
   syncAllUsersToGoogleSheet,
@@ -94,6 +95,7 @@ interface AppContextType {
   syncAssessmentToSheet: (id: string) => Promise<{ success: boolean; message: string }>;
   syncAllToSheet: () => Promise<{ success: boolean; message: string; count?: number }>;
   syncFromGoogleSheet: (showToastAlert?: boolean) => Promise<{ success: boolean; message: string; count?: number }>;
+  consolidateAndSyncSheets: () => Promise<{ success: boolean; message: string; count?: number }>;
   recoverAndSyncPhotos: (targetAssessmentId?: string) => Promise<{ recoveredCount: number; success: boolean; message: string }>;
   attachPhotoToAssessment: (assessmentId: string, photoId: string, dataUrl: string) => Promise<boolean>;
 
@@ -606,8 +608,9 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
   const deletedAssessmentIds = useRef<Set<string>>(getStoredDeletedAssessmentIds());
   const isInitialLoad = useRef(true);
   
-  // Load Google Sheet Config dynamically from the Express full-stack server on startup
+  // Load Google Sheet Config & Assessments dynamically from Express server on startup
   useEffect(() => {
+    // 1. Load server configuration
     fetch('/api/config')
       .then((res) => res.json())
       .then((data) => {
@@ -655,6 +658,69 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
         }
       })
       .catch((err) => console.warn('Failed to load server-side google sheet config:', err));
+
+    // 2. Load assessments from server (/api/assessments) for zero-quota persistence & cross-device sharing
+    fetch('/api/assessments')
+      .then((res) => res.json())
+      .then((data) => {
+        if (data.success && Array.isArray(data.assessments) && data.assessments.length > 0) {
+          setAssessments((prev) => {
+            const map = new Map<string, BuildingAssessment>();
+            prev.forEach((p) => { if (p && p.id) map.set(p.id, p); });
+            data.assessments.forEach((s: BuildingAssessment) => {
+              if (!s || !s.id) return;
+              const existing = map.get(s.id);
+              if (!existing) {
+                map.set(s.id, s);
+              } else {
+                const existingTime = new Date(existing.updatedAt || existing.createdAt || 0).getTime();
+                const remoteTime = new Date(s.updatedAt || s.createdAt || 0).getTime();
+                if (remoteTime >= existingTime) {
+                  map.set(s.id, { ...existing, ...s });
+                }
+              }
+            });
+            const merged = Array.from(map.values());
+            try {
+              localStorage.setItem(STORAGE_KEYS.ASSESSMENTS, JSON.stringify(merged));
+            } catch {}
+            return merged;
+          });
+        }
+      })
+      .catch((err) => console.warn('Server assessments initial fetch notice:', err));
+  }, []);
+
+  // Periodic background check against server storage to pick up new surveys submitted from other devices or webhooks
+  useEffect(() => {
+    const interval = setInterval(() => {
+      fetch('/api/assessments')
+        .then((res) => res.json())
+        .then((data) => {
+          if (data.success && Array.isArray(data.assessments) && data.assessments.length > 0) {
+            setAssessments((prev) => {
+              let hasNew = false;
+              const map = new Map<string, BuildingAssessment>();
+              prev.forEach((p) => { if (p && p.id) map.set(p.id, p); });
+              data.assessments.forEach((s: BuildingAssessment) => {
+                if (!s || !s.id) return;
+                if (!map.has(s.id)) {
+                  map.set(s.id, s);
+                  hasNew = true;
+                }
+              });
+              if (!hasNew) return prev;
+              const merged = Array.from(map.values());
+              try {
+                localStorage.setItem(STORAGE_KEYS.ASSESSMENTS, JSON.stringify(merged));
+              } catch {}
+              return merged;
+            });
+          }
+        })
+        .catch(() => {});
+    }, 10000);
+    return () => clearInterval(interval);
   }, []);
 
   // Load from Firebase ONCE on mount with Deleted IDs Filtering
@@ -1889,6 +1955,13 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
 
     setAssessments((prev) => [assessmentToSave, ...prev]);
 
+    // Save to Express server for zero-quota persistence and multi-client accessibility
+    fetch('/api/assessments', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify(assessmentToSave),
+    }).catch((e) => console.warn('Server assessment save notice:', e));
+
     if (db) {
       const cleanA = prepareAssessmentForFirestore(assessmentToSave);
       setDoc(doc(db, 'assessments', cleanA.id), cleanA).catch((err) => {
@@ -1955,9 +2028,18 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
   };
 
   const updateAssessment = async (id: string, data: Partial<BuildingAssessment>) => {
+    const target = assessments.find((a) => a.id === id);
+
+    // Locking enforcement: Once verified, data cannot be modified unless status is being explicitly reverted by verifier/admin
+    if (target?.verificationStatus === 'Terverifikasi' && data.verificationStatus === undefined) {
+      return {
+        success: false,
+        message: 'Akses ditolak: Data ini telah berstatus Terverifikasi oleh Verifikator/Admin dan terkunci dari perubahan data teknis/lapangan.',
+      };
+    }
+
     const hasGSheet = Boolean(googleSheetConfig.webhookUrl && googleSheetConfig.webhookUrl.startsWith('http'));
     const now = new Date().toISOString();
-    const target = assessments.find((a) => a.id === id);
     const updatedCode = data.code || target?.code || target?.id || id;
 
     setAssessments((prev) =>
@@ -1974,6 +2056,16 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
           : a
       )
     );
+
+    // Update on Express server for instant zero-quota persistence across devices
+    if (target) {
+      const mergedServer = { ...target, ...data, code: updatedCode, updatedAt: now };
+      fetch('/api/assessments', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify(mergedServer),
+      }).catch((e) => console.warn('Server assessment update notice:', e));
+    }
 
     if (db && target) {
       const merged = { ...target, ...data, code: updatedCode, updatedAt: now };
@@ -2017,6 +2109,14 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
     }
 
     const target = assessments.find((a) => a.id === id);
+
+    // Locking enforcement: Verified data is locked from deletion
+    if (target?.verificationStatus === 'Terverifikasi') {
+      return {
+        success: false,
+        message: 'Akses ditolak: Data yang telah berstatus Terverifikasi telah terkunci secara permanen dan tidak dapat dihapus!',
+      };
+    }
     logUserActivity(
       'DELETE_ASSESSMENT',
       'Penilaian Kerusakan',
@@ -2035,6 +2135,11 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
     deletedAssessmentIds.current.add(id);
     persistDeletedAssessmentId(id);
     deletePhotosByAssessmentIdLocally(id);
+
+    // Delete from Express server
+    fetch(`/api/assessments/${id}`, {
+      method: 'DELETE',
+    }).catch(() => {});
 
     if (db && !isFirestoreQuotaExceeded) {
       deleteDoc(doc(db, 'assessments', id)).catch((err) => {
@@ -2283,10 +2388,14 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
   }, [assessments.length]);
 
   const verifyAssessment = async (id: string, status: VerificationStatus, notes: string) => {
-    if (currentUser.role !== 'super_admin' && currentUser.role !== 'admin_verifikator') {
+    if (
+      currentUser.role !== 'super_admin' &&
+      currentUser.role !== 'admin' &&
+      currentUser.role !== 'admin_verifikator'
+    ) {
       return {
         success: false,
-        message: 'Akses ditolak: Hanya Admin Verifikator atau Super Admin yang dapat memvalidasi survei.',
+        message: 'Akses ditolak: Hanya Super Admin, Admin, atau Verifikator yang dapat memvalidasi survei.',
       };
     }
 
@@ -2433,9 +2542,9 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
 
       setAssessments((prev) => {
         const map = new Map<string, BuildingAssessment>();
-        // Add existing local assessments
+        // Preserve all existing local assessments without discarding any
         prev.forEach((p) => {
-          if (!storedDeleted.has(p.id)) {
+          if (p && p.id) {
             map.set(p.id, p);
           }
         });
@@ -2443,45 +2552,24 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
         // Set of keys already claimed by a sheet item to prevent duplicate assignment
         const claimedKeys = new Set<string>();
 
-        // Overlay Google Sheet records: every row from Google Sheet is preserved
+        // Overlay Google Sheet records: every row from Google Sheet is preserved without collapsing
         sheetItems.forEach((s) => {
-          let matchedKey: string | undefined = undefined;
-          if (map.has(s.id)) {
-            matchedKey = s.id;
-          } else if (s.code) {
-            for (const [k, v] of map.entries()) {
-              if (!claimedKeys.has(k) && v.code && v.code.trim().toUpperCase() === s.code.trim().toUpperCase()) {
-                matchedKey = k;
-                break;
-              }
-            }
-          }
-
-          // IMPORTANT: Do NOT fuzzy match by buildingName or desaName!
-          // Multiple survey rows can legitimately have identical or empty building names (e.g. "Rumah Warga").
-          // Matching by name caused different sheet rows to collapse into fewer rows.
-
-          if (matchedKey) {
-            claimedKeys.add(matchedKey);
-            const existing = map.get(matchedKey)!;
-            const regCode = s.code || existing.code || generateNextRegistrationCode(Array.from(map.values()));
-            map.set(matchedKey, {
+          const existing = map.get(s.id);
+          if (existing) {
+            map.set(s.id, {
               ...existing,
               ...s,
               id: existing.id,
-              code: regCode,
               photos: existing.photos && existing.photos.length > 0 ? existing.photos : s.photos,
               components: existing.components && existing.components.length > 0 ? existing.components : s.components,
               googleSheetSynced: true,
               googleSheetSyncedAt: new Date().toISOString(),
             });
           } else {
-            claimedKeys.add(s.id);
-            // New record from Google Sheet: guarantee registration code
-            const regCode = s.code || generateNextRegistrationCode(Array.from(map.values()));
             map.set(s.id, {
               ...s,
-              code: regCode,
+              googleSheetSynced: true,
+              googleSheetSyncedAt: new Date().toISOString(),
             });
           }
         });
@@ -2501,6 +2589,13 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
             localStorage.setItem(STORAGE_KEYS.ASSESSMENTS, JSON.stringify(lightweight));
           } catch {}
         }
+
+        // Persist merged dataset to Express server for zero-quota persistence & multi-user visibility
+        fetch('/api/assessments/sync-batch', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ assessments: mergedList }),
+        }).catch((err) => console.warn('Server sync-batch notice:', err));
 
         // Persist synced Google Sheet items directly into Firestore database
         if (db && !isFirestoreQuotaExceeded && sheetItems.length > 0) {
@@ -2530,6 +2625,35 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
     } catch (err: any) {
       const errMsg = `Gagal memuat data dari Google Sheet: ${err?.message || 'Koneksi terputus'}`;
       if (showToastAlert) showToast(errMsg, 'error');
+      return { success: false, message: errMsg, count: 0 };
+    }
+  };
+
+  /**
+   * Consolidate 7 kecamatan sheets into a single Rekap sheet (REKAP_SEMUA_KECAMATAN)
+   * and immediately refresh local state from that single master sheet
+   */
+  const consolidateAndSyncSheets = async (): Promise<{ success: boolean; message: string; count?: number }> => {
+    try {
+      showToast('Memproses penyatuan data dari 7 sheet kecamatan ke satu Sheet Rekap...', 'info');
+      const consResult = await consolidateSheetsInGoogleSheet(googleSheetConfig, assessments);
+      const syncResult = await syncFromGoogleSheet(false);
+      const totalCount = syncResult.count || assessments.length;
+      const finalMsg = consResult.success
+        ? `Berhasil menyatukan data 7 sheet kecamatan ke Sheet Rekap ("${googleSheetConfig.sheetName || 'REKAP_SEMUA_KECAMATAN'}"). Total ${totalCount} data termuat.`
+        : `Penyatuan sheet selesai. Total ${totalCount} data termuat dari sheet rekap.`;
+      showToast(finalMsg, 'success');
+      logUserActivity(
+        'SYNC_GOOGLE_SHEET',
+        'Integrasi Google Sheet',
+        `Konsolidasi 7 Sheet Kecamatan ke Sheet Rekap Utama (${googleSheetConfig.sheetName || 'REKAP_SEMUA_KECAMATAN'})`,
+        'REKAP_SEMUA_KECAMATAN',
+        finalMsg
+      );
+      return { success: true, message: finalMsg, count: totalCount };
+    } catch (err: any) {
+      const errMsg = `Gagal menyatukan data sheet: ${err?.message || 'Koneksi terputus'}`;
+      showToast(errMsg, 'error');
       return { success: false, message: errMsg, count: 0 };
     }
   };
@@ -2904,6 +3028,7 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
         syncAssessmentToSheet,
         syncAllToSheet,
         syncFromGoogleSheet,
+        consolidateAndSyncSheets,
         recoverAndSyncPhotos,
         attachPhotoToAssessment,
 

@@ -45,6 +45,7 @@ import {
   MessageSquare,
   Edit3,
   Sparkles,
+  Lock,
 } from 'lucide-react';
 import { PhotoViewerModal } from './PhotoViewerModal';
 import { DuplicateAuditModal } from './DuplicateAuditModal';
@@ -64,7 +65,10 @@ export const AssessmentTable: React.FC = () => {
     showToast,
     googleSheetConfig,
     syncFromGoogleSheet,
+    consolidateAndSyncSheets,
   } = useApp();
+
+  const [isConsolidating, setIsConsolidating] = useState(false);
 
   // Filters State
   const [searchTerm, setSearchTerm] = useState('');
@@ -158,62 +162,78 @@ export const AssessmentTable: React.FC = () => {
     setCurrentPage(1);
   };
 
-  // Filtered Assessments
+  // Filtered Assessments with flexible matching and newest-first sort
   const filteredAssessments = useMemo(() => {
-    return assessments.filter((item) => {
-      // Duplicate only filter
-      if (showOnlyDuplicates && !duplicateMap.has(item.id)) {
-        return false;
-      }
+    const selKec = selectedKecamatanId ? kecamatans.find((k) => k.id === selectedKecamatanId) : undefined;
+    const selDesa = selectedDesaId ? desas.find((d) => d.id === selectedDesaId) : undefined;
 
-      // Search matches
-      if (searchTerm) {
-        const q = searchTerm.toLowerCase();
-        const match =
-          item.buildingName.toLowerCase().includes(q) ||
-          (item.code && item.code.toLowerCase().includes(q)) ||
-          item.ownerAgency.toLowerCase().includes(q) ||
-          (item.namaPemilikRumah && item.namaPemilikRumah.toLowerCase().includes(q)) ||
-          (item.namaPemilikGedung && item.namaPemilikGedung.toLowerCase().includes(q)) ||
-          (item.nikPemilik && item.nikPemilik.includes(q)) ||
-          item.kecamatanName.toLowerCase().includes(q) ||
-          item.desaName.toLowerCase().includes(q) ||
-          item.detailedAddress.toLowerCase().includes(q);
-        if (!match) return false;
-      }
+    return assessments
+      .filter((item) => {
+        // Duplicate only filter
+        if (showOnlyDuplicates && !duplicateMap.has(item.id)) {
+          return false;
+        }
 
-      // Category
-      if (selectedCategory && item.buildingCategory !== selectedCategory) {
-        return false;
-      }
+        // Search matches across all key fields
+        if (searchTerm) {
+          const q = searchTerm.toLowerCase().trim();
+          const match =
+            (item.buildingName && item.buildingName.toLowerCase().includes(q)) ||
+            (item.code && item.code.toLowerCase().includes(q)) ||
+            (item.ownerAgency && item.ownerAgency.toLowerCase().includes(q)) ||
+            (item.namaPemilikRumah && item.namaPemilikRumah.toLowerCase().includes(q)) ||
+            (item.namaPemilikGedung && item.namaPemilikGedung.toLowerCase().includes(q)) ||
+            (item.nikPemilik && item.nikPemilik.includes(q)) ||
+            (item.kecamatanName && item.kecamatanName.toLowerCase().includes(q)) ||
+            (item.desaName && item.desaName.toLowerCase().includes(q)) ||
+            (item.detailedAddress && item.detailedAddress.toLowerCase().includes(q));
+          if (!match) return false;
+        }
 
-      // Kecamatan
-      if (selectedKecamatanId && item.kecamatanId !== selectedKecamatanId) {
-        return false;
-      }
+        // Category (case-insensitive and tolerant)
+        if (selectedCategory) {
+          const cat = (item.buildingCategory || 'Gedung Pemerintah').toLowerCase();
+          if (cat !== selectedCategory.toLowerCase()) return false;
+        }
 
-      // Desa
-      if (selectedDesaId && item.desaId !== selectedDesaId) {
-        return false;
-      }
+        // Kecamatan (match ID or name)
+        if (selectedKecamatanId) {
+          const matchKecId = item.kecamatanId === selectedKecamatanId;
+          const matchKecName = selKec && item.kecamatanName && item.kecamatanName.toLowerCase().trim() === selKec.name.toLowerCase().trim();
+          if (!matchKecId && !matchKecName) return false;
+        }
 
-      // Disaster
-      if (selectedDisaster && item.disasterType !== selectedDisaster) {
-        return false;
-      }
+        // Desa (match ID or name)
+        if (selectedDesaId) {
+          const matchDesaId = item.desaId === selectedDesaId;
+          const matchDesaName = selDesa && item.desaName && item.desaName.toLowerCase().trim() === selDesa.name.toLowerCase().trim();
+          if (!matchDesaId && !matchDesaName) return false;
+        }
 
-      // Damage Classification
-      if (selectedClassification && item.damageClassification !== selectedClassification) {
-        return false;
-      }
+        // Disaster
+        if (selectedDisaster && item.disasterType !== selectedDisaster) {
+          return false;
+        }
 
-      // Verification Status
-      if (selectedVerification && item.verificationStatus !== selectedVerification) {
-        return false;
-      }
+        // Damage Classification (case-insensitive)
+        if (selectedClassification) {
+          const currentClass = (item.damageClassification || '').toLowerCase().trim();
+          if (currentClass !== selectedClassification.toLowerCase().trim()) return false;
+        }
 
-      return true;
-    });
+        // Verification Status
+        if (selectedVerification && item.verificationStatus !== selectedVerification) {
+          return false;
+        }
+
+        return true;
+      })
+      .sort((a, b) => {
+        // Sort newest first so all incoming data is instantly visible at the top
+        const tA = new Date(a.updatedAt || a.createdAt || a.assessmentDate || 0).getTime();
+        const tB = new Date(b.updatedAt || b.createdAt || b.assessmentDate || 0).getTime();
+        return tB - tA;
+      });
   }, [
     assessments,
     searchTerm,
@@ -223,6 +243,10 @@ export const AssessmentTable: React.FC = () => {
     selectedDisaster,
     selectedClassification,
     selectedVerification,
+    showOnlyDuplicates,
+    duplicateMap,
+    kecamatans,
+    desas,
   ]);
 
   // Pagination logic
@@ -243,6 +267,16 @@ export const AssessmentTable: React.FC = () => {
       }
     } finally {
       setIsRefreshing(false);
+    }
+  };
+
+  // Consolidate 7 kecamatan sheets into single master Rekap sheet
+  const handleConsolidateSheets = async () => {
+    setIsConsolidating(true);
+    try {
+      await consolidateAndSyncSheets();
+    } finally {
+      setIsConsolidating(false);
     }
   };
 
@@ -545,15 +579,24 @@ export const AssessmentTable: React.FC = () => {
 
           {/* Direct Google Sheet button */}
           {googleSheetConfig.spreadsheetUrl && (
-            <div className="flex items-center gap-1.5">
+            <div className="flex items-center gap-1.5 flex-wrap">
+              <button
+                onClick={handleConsolidateSheets}
+                disabled={isConsolidating || isRefreshing}
+                title="Satukan seluruh data dari 7 sheet kecamatan ke satu Sheet Rekap (REKAP_SEMUA_KECAMATAN) dan perbarui web secara terpusat"
+                className="flex items-center gap-1.5 px-3 py-2 text-xs font-bold text-teal-950 bg-teal-100/90 hover:bg-teal-200 rounded-xl border border-teal-300 transition-colors cursor-pointer shadow-2xs"
+              >
+                <Layers className={`w-3.5 h-3.5 text-teal-700 ${isConsolidating ? 'animate-spin' : ''}`} />
+                <span>{isConsolidating ? 'Menyatukan...' : 'Satukan 7 Sheet ke Rekap'}</span>
+              </button>
               <button
                 onClick={() => syncFromGoogleSheet(true)}
-                disabled={isRefreshing}
-                title="Tarik seluruh data survei dari Google Sheet mulai dari baris A2 ke bawah"
+                disabled={isRefreshing || isConsolidating}
+                title="Tarik seluruh data survei dari Google Sheet Rekap mulai dari baris A2 ke bawah"
                 className="flex items-center gap-1.5 px-3 py-2 text-xs font-bold text-indigo-900 bg-indigo-50 hover:bg-indigo-100 rounded-xl border border-indigo-200 transition-colors cursor-pointer"
               >
                 <RefreshCw className={`w-3.5 h-3.5 text-indigo-600 ${isRefreshing ? 'animate-spin' : ''}`} />
-                <span>Tarik dari Sheet (A2)</span>
+                <span>Tarik dari Sheet</span>
               </button>
               <a
                 href={googleSheetConfig.spreadsheetUrl}
@@ -773,7 +816,9 @@ export const AssessmentTable: React.FC = () => {
             selectedDesaId ||
             selectedDisaster ||
             selectedClassification ||
-            selectedVerification) && (
+            selectedVerification ||
+            selectedCategory ||
+            showOnlyDuplicates) && (
             <button
               onClick={handleResetFilter}
               className="text-xs font-semibold text-rose-600 hover:text-rose-800 transition-colors"
@@ -782,6 +827,29 @@ export const AssessmentTable: React.FC = () => {
             </button>
           )}
         </div>
+      </div>
+
+      {/* Active Data Count Banner */}
+      <div className="flex flex-wrap items-center justify-between gap-2 text-xs text-slate-700 bg-slate-50 px-3 py-2 rounded-xl border border-slate-200">
+        <div className="flex items-center gap-2 flex-wrap">
+          <span>
+            Total Data Sistem:{' '}
+            <strong className="text-slate-900 font-bold font-mono">{assessments.length}</strong> Bangunan
+          </span>
+          {filteredAssessments.length !== assessments.length && (
+            <span className="inline-flex items-center gap-1 px-2 py-0.5 rounded-md bg-amber-100 text-amber-900 font-semibold text-[11px]">
+              Menampilkan {filteredAssessments.length} data tersaring
+            </span>
+          )}
+        </div>
+        {filteredAssessments.length !== assessments.length && (
+          <button
+            onClick={handleResetFilter}
+            className="text-xs font-bold text-indigo-700 hover:text-indigo-900 bg-indigo-50 hover:bg-indigo-100 px-2.5 py-1 rounded-lg border border-indigo-200 transition-colors cursor-pointer"
+          >
+            Tampilkan Semua Data ({assessments.length})
+          </button>
+        )}
       </div>
 
       {/* Main Table */}
@@ -805,14 +873,19 @@ export const AssessmentTable: React.FC = () => {
             <tbody className="divide-y divide-slate-100 text-slate-700">
               {paginatedAssessments.map((item, index) => {
                 const rowNo = (currentPage - 1) * pageSize + index + 1;
+                const isVerified = item.verificationStatus === 'Terverifikasi';
                 const canEdit =
-                  currentUser.role === 'super_admin' ||
-                  currentUser.role === 'admin' ||
-                  currentUser.id === item.createdBy;
+                  !isVerified &&
+                  (currentUser.role === 'super_admin' ||
+                    currentUser.role === 'admin' ||
+                    currentUser.role === 'admin_user' ||
+                    currentUser.id === item.createdBy);
                 const canDelete =
-                  currentUser.role === 'super_admin' || currentUser.role === 'admin';
+                  !isVerified &&
+                  (currentUser.role === 'super_admin' || currentUser.role === 'admin');
                 const canVerify =
                   currentUser.role === 'super_admin' ||
+                  currentUser.role === 'admin' ||
                   currentUser.role === 'admin_verifikator';
 
                 return (
@@ -1083,34 +1156,46 @@ export const AssessmentTable: React.FC = () => {
                           }
                         })()}
 
-                        {/* Edit Button (Hidden for Public) */}
+                        {/* Edit Button or Locked Indicator (Hidden for Public) */}
                         {currentUser.role !== 'admin_publik' && (
-                          <button
-                            onClick={() => {
-                              if (!canEdit) {
-                                showToast(
-                                  'Akses ditolak: Anda hanya dapat mengedit survei yang Anda buat, kecuali Super Admin/Admin.',
-                                  'error'
-                                );
-                                return;
+                          isVerified ? (
+                            <button
+                              type="button"
+                              disabled
+                              title="Data penilaian telah diverifikasi secara resmi dan terkunci dari perubahan."
+                              className="p-1.5 rounded-lg bg-emerald-50 text-emerald-800 border border-emerald-200 flex items-center gap-1 text-[10px] font-bold cursor-not-allowed opacity-90 shadow-2xs"
+                            >
+                              <Lock className="w-3.5 h-3.5 text-emerald-600" />
+                              <span>Terkunci</span>
+                            </button>
+                          ) : (
+                            <button
+                              onClick={() => {
+                                if (!canEdit) {
+                                  showToast(
+                                    'Akses ditolak: Anda tidak memiliki izin untuk mengedit data ini.',
+                                    'error'
+                                  );
+                                  return;
+                                }
+                                setSelectedAssessmentForEdit(item);
+                                setActiveTab('input_baru');
+                              }}
+                              title={
+                                item.verificationStatus === 'Perlu Revisi'
+                                  ? 'PERLU REVISI: Klik untuk memeriksa catatan dan memperbaiki data survei ini'
+                                  : 'Edit Penilaian'
                               }
-                              setSelectedAssessmentForEdit(item);
-                              setActiveTab('input_baru');
-                            }}
-                            title={
-                              item.verificationStatus === 'Perlu Revisi'
-                                ? 'PERLU REVISI: Klik untuk memeriksa catatan dan memperbaiki data survei ini'
-                                : 'Edit Penilaian'
-                            }
-                            className={`p-1.5 rounded-lg transition-all cursor-pointer flex items-center gap-1 ${
-                              item.verificationStatus === 'Perlu Revisi'
-                                ? 'bg-rose-600 hover:bg-rose-700 text-white font-bold ring-2 ring-rose-300 ring-offset-1 text-[10px] shadow-xs'
-                                : 'bg-slate-100 hover:bg-slate-200 text-slate-700 border border-slate-200'
-                            }`}
-                          >
-                            <Edit3 className="w-3.5 h-3.5" />
-                            {item.verificationStatus === 'Perlu Revisi' && <span>Perbaiki</span>}
-                          </button>
+                              className={`p-1.5 rounded-lg transition-all cursor-pointer flex items-center gap-1 ${
+                                item.verificationStatus === 'Perlu Revisi'
+                                  ? 'bg-rose-600 hover:bg-rose-700 text-white font-bold ring-2 ring-rose-300 ring-offset-1 text-[10px] shadow-xs'
+                                  : 'bg-slate-100 hover:bg-slate-200 text-slate-700 border border-slate-200'
+                              }`}
+                            >
+                              <Edit3 className="w-3.5 h-3.5" />
+                              {item.verificationStatus === 'Perlu Revisi' && <span>Perbaiki</span>}
+                            </button>
+                          )
                         )}
 
                         {/* Update / Verify Button */}

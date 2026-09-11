@@ -1,5 +1,6 @@
 import * as XLSX from 'xlsx';
 import { BuildingAssessment, GoogleSheetConfig, Kecamatan, UserActivityLog, UserAccount } from '../types';
+import { INITIAL_DESA } from '../data/initialData';
 import { formatRupiah, getInitialSubComponents } from '../utils/puprCalculations';
 import { hydrateAssessmentPhotos } from '../utils/imageCompressor';
 import { getPhotoLocally } from '../utils/photoStorage';
@@ -45,7 +46,7 @@ export async function ensurePhotoDataBase64(photo: any): Promise<string> {
 }
 
 export interface GoogleSheetRowPayload {
-  action: 'insert' | 'update' | 'delete' | 'sync_all' | 'ping' | 'sync_activity_logs' | 'log_user_access' | 'test_drive';
+  action: 'insert' | 'update' | 'delete' | 'sync_all' | 'ping' | 'sync_activity_logs' | 'log_user_access' | 'test_drive' | 'consolidate_sheets';
   sheetName: string;
   logSheetName?: string;
   kecamatanSheetName?: string;
@@ -55,7 +56,7 @@ export interface GoogleSheetRowPayload {
   spreadsheetId?: string;
   registrationCode?: string;
   previousRegistrationCode?: string;
-  data: Record<string, any> | Record<string, any>[];
+  data?: Record<string, any> | Record<string, any>[];
   dataByKecamatan?: Record<string, Record<string, any>[]>;
   photos?: {
     id: string;
@@ -525,6 +526,19 @@ function doPost(e) {
         status: "success",
         message: "Koneksi Google Apps Script SIM-PKBG Aktif & Siap!",
         timestamp: new Date().toISOString()
+      })).setMimeType(ContentService.MimeType.JSON);
+    }
+    
+    // ACTION 1B: CONSOLIDATE ALL 7 KECAMATAN SHEETS INTO 1 MASTER REKAP SHEET
+    if (action === 'consolidate_sheets' || action === 'consolidate') {
+      var targetRekap = masterSheetName || "REKAP_SEMUA_KECAMATAN";
+      var consRes = consolidateKecamatanSheetsToRekap(ss, targetRekap);
+      return ContentService.createTextOutput(JSON.stringify({
+        status: "success",
+        message: "Berhasil menyatukan data dari " + consRes.sourceSheetCount + " sheet kecamatan ke 1 sheet rekap utama ('" + consRes.masterTabName + "')! Total " + consRes.totalConsolidatedRows + " gedung.",
+        totalRows: consRes.totalConsolidatedRows,
+        sourceSheets: consRes.sourceSheets,
+        masterSheet: consRes.masterTabName
       })).setMimeType(ContentService.MimeType.JSON);
     }
     
@@ -1159,10 +1173,15 @@ function doGet(e) {
   }
 
   // Fetch all building assessments (Data Penilaian Kerusakan)
-  if (action === 'fetch_assessments' || action === 'fetch_all' || action === 'data' || !action) {
+  // Otomatis satukan data dari 7 sheet kecamatan ke tab master rekapitulasi sebelum membaca
+  if (action === 'fetch_assessments' || action === 'fetch_all' || action === 'consolidate' || action === 'data' || !action) {
     try {
-      var targetSheet = ss.getSheetByName("Data_Penilaian_Kerusakan_PUPR") 
-                     || ss.getSheetByName("REKAP_SEMUA_KECAMATAN")
+      // 1. Jalankan konsolidasi 7 sheet kecamatan ke REKAP_SEMUA_KECAMATAN
+      var consInfo = consolidateKecamatanSheetsToRekap(ss, "REKAP_SEMUA_KECAMATAN");
+      
+      // 2. Baca dari sheet rekapitulasi utama yang telah terkonsolidasi
+      var targetSheet = ss.getSheetByName("REKAP_SEMUA_KECAMATAN") 
+                     || ss.getSheetByName("Data_Penilaian_Kerusakan_PUPR")
                      || ss.getSheetByName("Data_Kerusakan_PUPR")
                      || ss.getSheetByName("Master_Rekapitulasi");
       
@@ -1188,9 +1207,9 @@ function doGet(e) {
         }
       }
 
-      // Collect rows from any individual kecamatan tabs that might not be in the master sheet yet
+      // Pastikan baris dari 7 sheet kecamatan yang belum terindeks ikut terbaca
       var allSheets = ss.getSheets();
-      var excludedNames = ["Daftar_Pengguna", "Log_Akses_Pengguna", "00_RINGKASAN_KECAMATAN"];
+      var excludedNames = ["Daftar_Pengguna", "Log_Akses_Pengguna", "00_RINGKASAN_KECAMATAN", "REKAP_SEMUA_KECAMATAN"];
       
       for (var sIdx = 0; sIdx < allSheets.length; sIdx++) {
         var curSheet = allSheets[sIdx];
@@ -1223,7 +1242,9 @@ function doGet(e) {
       return ContentService.createTextOutput(JSON.stringify({
         status: "success",
         data: dataList,
-        totalRows: dataList.length
+        totalRows: dataList.length,
+        consolidatedSheets: consInfo ? consInfo.sourceSheets : [],
+        masterSheet: targetSheet ? targetSheet.getName() : "REKAP_SEMUA_KECAMATAN"
       })).setMimeType(ContentService.MimeType.JSON);
     } catch(err) {
       return ContentService.createTextOutput(JSON.stringify({
@@ -1263,6 +1284,135 @@ function testIzinAksesGoogleDrive() {
   Logger.log("Nama Folder Utama Drive: " + root.getName());
   if (ss) {
     Logger.log("Nama Spreadsheet Terhubung: " + ss.getName());
+  }
+}
+
+/**
+ * =========================================================================
+ * FUNGSI KONSOLIDASI: SATUKAN 7 SHEET KECAMATAN KE 1 SHEET REKAPITULASI UTAMA
+ * =========================================================================
+ */
+function consolidateKecamatanSheetsToRekap(ss, targetRekapName) {
+  var rekapName = targetRekapName || "REKAP_SEMUA_KECAMATAN";
+  var allSheets = ss.getSheets();
+  var excludedNames = [
+    "Daftar_Pengguna",
+    "Log_Akses_Pengguna",
+    "00_RINGKASAN_KECAMATAN",
+    rekapName,
+    "Data_Penilaian_Kerusakan_PUPR",
+    "SEMUA_DATA_GABUNGAN"
+  ];
+  
+  var allRows = [];
+  var seenKeys = {};
+  var sourceSheetsFound = [];
+  var masterHeaders = null;
+
+  for (var s = 0; s < allSheets.length; s++) {
+    var curSheet = allSheets[s];
+    var sName = curSheet.getName();
+    if (excludedNames.indexOf(sName) !== -1) continue;
+    
+    if (curSheet.getLastRow() > 1) {
+      var data = curSheet.getDataRange().getValues();
+      var headers = data[0];
+      if (!masterHeaders && headers.length > 0) {
+        masterHeaders = headers;
+      }
+      sourceSheetsFound.push(sName);
+
+      for (var r = 1; r < data.length; r++) {
+        var rowObj = {};
+        var hasContent = false;
+        for (var c = 0; c < headers.length; c++) {
+          var val = data[r][c];
+          if (val !== undefined && val !== null && String(val).trim() !== "") hasContent = true;
+          rowObj[headers[c]] = val;
+        }
+        
+        if (!hasContent) continue;
+        var regVal = String(rowObj['No Registrasi'] || rowObj['ID'] || "").trim();
+        // Lewati baris total atau subtotal kecamatan
+        if (regVal.toUpperCase().indexOf('TOTAL') !== -1) continue;
+
+        var bName = String(rowObj['Nama Bangunan'] || "").trim().toLowerCase();
+        var kecVal = String(rowObj['Kecamatan'] || sName.replace(/^Kec\.\s*/i, '')).trim();
+        rowObj['Kecamatan'] = kecVal;
+
+        var key = regVal ? regVal.toUpperCase() : (bName + "|" + kecVal.toLowerCase());
+        if (key && !seenKeys[key]) {
+          seenKeys[key] = true;
+          allRows.push(rowObj);
+        }
+      }
+    }
+  }
+
+  // Tulis ke sheet REKAP_SEMUA_KECAMATAN
+  var rekapSheet = getOrCreateSheet(ss, rekapName);
+  if (allRows.length > 0) {
+    writeTableToSheet(rekapSheet, allRows, "#0f172a");
+  }
+
+  // Juga perbarui Data_Penilaian_Kerusakan_PUPR untuk kompatibilitas tautan lama
+  if (rekapName !== "Data_Penilaian_Kerusakan_PUPR") {
+    var altSheet = getOrCreateSheet(ss, "Data_Penilaian_Kerusakan_PUPR");
+    if (allRows.length > 0) {
+      writeTableToSheet(altSheet, allRows, "#0f172a");
+    }
+  }
+
+  // Perbarui lembar dashboard ringkasan statistik
+  if (allRows.length > 0) {
+    createStatisticsSummarySheet(ss, allRows);
+  }
+
+  return {
+    sourceSheetCount: sourceSheetsFound.length,
+    sourceSheets: sourceSheetsFound,
+    totalConsolidatedRows: allRows.length,
+    masterTabName: rekapName
+  };
+}
+
+/**
+ * Menu Spreadsheet Otomatis pada Google Sheets:
+ * Memudahkan pengguna mengklik satu kali untuk menyatukan seluruh 7 sheet kecamatan ke sheet rekap
+ */
+function onOpen() {
+  try {
+    SpreadsheetApp.getUi().createMenu('SIM-PKBG PUPR')
+      .addItem('🔄 Satukan 7 Sheet Kecamatan ke Sheet Rekap (REKAP_SEMUA_KECAMATAN)', 'menuConsolidateSheets')
+      .addItem('📊 Perbarui Ringkasan Statistik Kecamatan (00_RINGKASAN_KECAMATAN)', 'menuUpdateStats')
+      .addToUi();
+  } catch(e) {}
+}
+
+function menuConsolidateSheets() {
+  var ss = SpreadsheetApp.getActiveSpreadsheet();
+  var res = consolidateKecamatanSheetsToRekap(ss, "REKAP_SEMUA_KECAMATAN");
+  SpreadsheetApp.getUi().alert(
+    "Konsolidasi Selesai!",
+    "Berhasil menyatukan seluruh data dari " + res.sourceSheetCount + " sheet kecamatan ke dalam tab '" + res.masterTabName + "'.\\nTotal " + res.totalConsolidatedRows + " data bangunan sekarang siap dibaca oleh aplikasi web SIM-PKBG.",
+    SpreadsheetApp.getUi().ButtonSet.OK
+  );
+}
+
+function menuUpdateStats() {
+  var ss = SpreadsheetApp.getActiveSpreadsheet();
+  var masterSheet = ss.getSheetByName("REKAP_SEMUA_KECAMATAN") || ss.getSheetByName("Data_Penilaian_Kerusakan_PUPR");
+  if (masterSheet && masterSheet.getLastRow() > 1) {
+    var rawData = masterSheet.getDataRange().getValues();
+    var headers = rawData[0];
+    var allRows = [];
+    for (var i = 1; i < rawData.length; i++) {
+      var obj = {};
+      for (var h = 0; h < headers.length; h++) obj[headers[h]] = rawData[i][h];
+      allRows.push(obj);
+    }
+    createStatisticsSummarySheet(ss, allRows);
+    SpreadsheetApp.getUi().alert("Ringkasan statistik 00_RINGKASAN_KECAMATAN berhasil diperbarui!");
   }
 }
 `;
@@ -1649,7 +1799,7 @@ export function exportActivityLogsToCsv(logs: UserActivityLog[]): void {
  * Flexible parser converting raw extracted row objects into BuildingAssessment instances
  */
 export function parseExtractedRowsToAssessments(
-  extractedRows: Array<{ rowObj: Record<string, any>; sheetRowNumber: number }>
+  extractedRows: Array<{ rowObj: Record<string, any>; sheetRowNumber: number; sourceSheet?: string }>
 ): BuildingAssessment[] {
   const getVal = (rowObj: Record<string, any>, candidates: string[]): any => {
     const keys = Object.keys(rowObj);
@@ -1824,50 +1974,77 @@ export function parseExtractedRowsToAssessments(
 
   extractedRows.forEach(({ rowObj, sheetRowNumber, sourceSheet }, index) => {
     const rawCodeCandidate = String(
-      getVal(rowObj, ['No Registrasi', 'Nomor Registrasi', 'No Reg', 'Kode Registrasi', 'ID Registrasi']) || ''
+      getVal(rowObj, ['No Registrasi', 'Nomor Registrasi', 'No Reg', 'Kode Registrasi', 'ID Registrasi', 'No. Reg', 'Kode']) || ''
     ).trim();
 
     const rawCode = isRealRegCode(rawCodeCandidate) ? rawCodeCandidate : '';
 
-    const buildingName = String(
-      getVal(rowObj, ['Nama Bangunan', 'Nama Gedung', 'Nama Objek', 'Nama Fasilitas', 'Nama', 'Bangunan']) || ''
+    let buildingName = String(
+      getVal(rowObj, [
+        'Nama Bangunan', 'Nama Gedung', 'Nama Objek', 'Nama Fasilitas',
+        'Nama Pemilik', 'Nama Pemilik Rumah', 'Nama Pemilik Gedung',
+        'Nama KK', 'Nama Kepala Keluarga', 'Nama Warga', 'Pemilik',
+        'Penerima Bantuan', 'Nama Subjek', 'Nama Sarana', 'Bangunan', 'Nama'
+      ]) || ''
     ).trim();
-
-    // Skip empty rows without building name and without code
-    if (!buildingName && !rawCode) return;
 
     let rawKec = String(getVal(rowObj, ['Kecamatan', 'Kec', 'Nama Kecamatan']) || '').trim();
     if (!rawKec && sourceSheet && sourceSheet.startsWith('Kec ')) {
       rawKec = sourceSheet.replace(/^Kec\s+/i, '');
     }
 
-    const desaName = String(getVal(rowObj, ['Desa / Kelurahan', 'Desa', 'Kelurahan', 'Nama Desa']) || '').trim();
-    const detailedAddress = String(getVal(rowObj, ['Alamat Lengkap', 'Alamat', 'Lokasi']) || '').trim();
-    const ownerAgency = String(getVal(rowObj, ['Pengguna / Pemilik', 'Pemilik', 'Pengguna', 'Instansi', 'Pemilik / Pengelola']) || '');
+    const desaName = String(getVal(rowObj, ['Desa / Kelurahan', 'Desa', 'Kelurahan', 'Nama Desa', 'Kampung', 'Dusun']) || '').trim();
+    const detailedAddress = String(getVal(rowObj, ['Alamat Lengkap', 'Alamat', 'Lokasi', 'RT/RW']) || '').trim();
+    const ownerAgency = String(getVal(rowObj, ['Pengguna / Pemilik', 'Pemilik', 'Pengguna', 'Instansi', 'Pemilik / Pengelola', 'Nama KK', 'Kepala Keluarga']) || '');
+    const namaPemilikRumah = String(getVal(rowObj, ['Nama Pemilik Rumah', 'Pemilik Rumah', 'Nama Pemilik', 'Nama KK', 'Nama Kepala Keluarga']) || '');
+    const namaPemilikGedung = String(getVal(rowObj, ['Nama Pemilik Gedung', 'Pemilik Gedung']) || '');
+
+    // Fallback: If buildingName is not yet set, construct a clear descriptive name
+    if (!buildingName) {
+      if (namaPemilikRumah) {
+        buildingName = `Rumah ${namaPemilikRumah}`;
+      } else if (namaPemilikGedung) {
+        buildingName = namaPemilikGedung;
+      } else if (ownerAgency) {
+        buildingName = `Bangunan Milik ${ownerAgency}`;
+      } else if (detailedAddress) {
+        buildingName = `Bangunan di ${detailedAddress}`;
+      } else if (desaName) {
+        buildingName = `Bangunan Desa ${desaName} (Baris ${sheetRowNumber})`;
+      } else if (rawCode) {
+        buildingName = `Gedung ${rawCode}`;
+      }
+    }
+
+    // Only skip if row is truly empty across all cells
+    const hasAnyContent = Object.values(rowObj).some(
+      (v) => v !== undefined && v !== null && String(v).trim() !== '' && String(v).trim() !== '-'
+    );
+    if (!hasAnyContent) return;
+
+    if (!buildingName) {
+      buildingName = `Survei Bangunan Lapangan (Baris ${sheetRowNumber})`;
+    }
 
     const kecInfo = resolveKecamatan(rawKec, buildingName, desaName, detailedAddress, ownerAgency);
 
     const totalFloorAreaM2 = parseNumber(getVal(rowObj, ['Luas Lantai (M2)', 'Luas Lantai', 'Luas (M2)', 'Luas', 'Luas Bangunan'])) || 0;
     const totalDamagePercent = parseNumber(getVal(rowObj, ['Tingkat Kerusakan (%)', 'Tingkat Kerusakan', '% Kerusakan', 'Persentase Kerusakan'])) || 0;
 
-    // Deduplication keys
-    const codeKey = rawCode ? rawCode.toUpperCase() : '';
-    // Fine-grained signature including floor area, damage %, and address to prevent dropping valid distinct buildings
-    const signatureKey = rawCode
-      ? codeKey
-      : `${buildingName.toLowerCase()}|${kecInfo.name.toLowerCase()}|${desaName.toLowerCase()}|${totalFloorAreaM2}|${totalDamagePercent}|${detailedAddress.toLowerCase()}`;
+    // Unique registration code and ID generation (Never drop survey rows)
+    let code = rawCode;
+    if (code) {
+      const codeUpper = code.toUpperCase();
+      if (seenCodes.has(codeUpper)) {
+        code = `${code}-${index + 1}`;
+      }
+      seenCodes.add(code.toUpperCase());
+    } else {
+      code = `REG-PUPR-2026-${String(index + 1).padStart(4, '0')}`;
+    }
 
-    if (codeKey && seenCodes.has(codeKey)) return;
-    if (!codeKey && seenSignatures.has(signatureKey)) return;
-
-    if (codeKey) seenCodes.add(codeKey);
-    if (signatureKey) seenSignatures.add(signatureKey);
-
-    const code = rawCode || `REG-PUPR-2026-${String(results.length + 1).padStart(4, '0')}`;
     const cleanSheet = (sourceSheet || 'sheet').toLowerCase().replace(/[^a-z0-9]/g, '_');
-    const id = rawCode
-      ? `sheet_reg_${rawCode.replace(/[^a-zA-Z0-9_-]/g, '_')}`
-      : `sheet_${cleanSheet}_r${sheetRowNumber}_i${index + 1}_${buildingName.toLowerCase().replace(/[^a-z0-9]/g, '_')}`;
+    const id = `sheet_${cleanSheet}_r${sheetRowNumber}_i${index + 1}`;
 
     const numberOfFloors = parseNumber(getVal(rowObj, ['Jumlah Tingkat', 'Jumlah Lantai', 'Tingkat', 'Lantai'])) || 1;
     const yearBuilt = parseNumber(getVal(rowObj, ['Tahun Dibangun', 'Tahun Pembangunan', 'Tahun'])) || new Date().getFullYear();
@@ -1909,9 +2086,16 @@ export function parseExtractedRowsToAssessments(
       }
     }
 
-    const desaId = `desa_${desaName.toLowerCase().replace(/\s+/g, '_') || 'umum'}`;
-    const namaPemilikRumah = String(getVal(rowObj, ['Nama Pemilik Rumah', 'Pemilik Rumah']) || '');
-    const namaPemilikGedung = String(getVal(rowObj, ['Nama Pemilik Gedung', 'Pemilik Gedung']) || '');
+    // Match canonical desaId from name
+    let matchedDesaId = '';
+    if (desaName) {
+      const cleanDesa = desaName.toLowerCase().replace(/^(desa|kelurahan)\s+/i, '').trim();
+      const found = INITIAL_DESA.find(
+        (d) => d.name.toLowerCase() === cleanDesa || d.name.toLowerCase() === desaName.toLowerCase()
+      );
+      if (found) matchedDesaId = found.id;
+    }
+    const desaId = matchedDesaId || `desa_${desaName.toLowerCase().replace(/\s+/g, '_') || 'umum'}`;
     const nikPemilik = String(getVal(rowObj, ['NIK Pemilik', 'NIK', 'NIK 16 Digit']) || '0');
     const noKkPemilik = String(getVal(rowObj, ['No KK Pemilik', 'No KK', 'Nomor KK', 'No. KK']) || '0');
 
@@ -2005,6 +2189,88 @@ export function parseExtractedRowsToAssessments(
 }
 
 /**
+ * Triggers Google Apps Script consolidation of all 7 Kecamatan sheets into 1 Master Rekap sheet (REKAP_SEMUA_KECAMATAN).
+ * If Webhook is not reachable but assessments are in memory, performs sync to REKAP_SEMUA_KECAMATAN.
+ */
+export async function consolidateSheetsInGoogleSheet(
+  config: GoogleSheetConfig,
+  assessments?: BuildingAssessment[]
+): Promise<{ success: boolean; message: string; totalConsolidated?: number }> {
+  const masterSheetName = config.sheetName || 'REKAP_SEMUA_KECAMATAN';
+  const hasWebhook = Boolean(config.webhookUrl && config.webhookUrl.startsWith('http'));
+
+  if (hasWebhook) {
+    try {
+      // 1. Send POST with action: 'consolidate_sheets'
+      const payload: GoogleSheetRowPayload = {
+        action: 'consolidate_sheets',
+        sheetName: masterSheetName,
+        timestamp: new Date().toISOString(),
+      };
+
+      try {
+        await fetch(config.webhookUrl, {
+          method: 'POST',
+          mode: 'no-cors',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify(payload),
+        });
+      } catch (postErr) {
+        console.warn('POST consolidate_sheets note:', postErr);
+      }
+
+      // 2. Also call GET with action: 'consolidate' to trigger and get return details
+      try {
+        const getUrl = `${config.webhookUrl}${config.webhookUrl.includes('?') ? '&' : '?'}action=consolidate&_t=${Date.now()}`;
+        const getRes = await fetch(getUrl, { cache: 'no-store' });
+        if (getRes.ok) {
+          const json = await getRes.json();
+          if (json && (json.status === 'success' || json.data)) {
+            const count = json.totalRows ?? (Array.isArray(json.data) ? json.data.length : undefined);
+            return {
+              success: true,
+              message: `Berhasil menyatukan seluruh data 7 kecamatan ke sheet rekap "${masterSheetName}"! (${count !== undefined ? `${count} data gedung` : 'Selesai'})`,
+              totalConsolidated: count,
+            };
+          }
+        }
+      } catch (getErr) {
+        console.warn('GET consolidate note:', getErr);
+      }
+
+      return {
+        success: true,
+        message: `Perintah konsolidasi 7 sheet kecamatan ke tab "${masterSheetName}" berhasil dikirimkan ke Google Sheet!`,
+      };
+    } catch (err: any) {
+      console.warn('Webhook consolidate error:', err);
+    }
+  }
+
+  // Fallback: If we have current assessments in memory, push them to REKAP_SEMUA_KECAMATAN via syncAllToGoogleSheet
+  if (assessments && assessments.length > 0 && hasWebhook) {
+    const syncRes = await syncAllToGoogleSheet(assessments, {
+      ...config,
+      sheetName: masterSheetName,
+      splitByKecamatan: true,
+      includeMasterSummarySheet: true,
+    });
+    return {
+      success: syncRes.success,
+      message: syncRes.success
+        ? `Berhasil menyatukan ${assessments.length} data ke sheet rekap "${masterSheetName}"!`
+        : syncRes.message,
+      totalConsolidated: syncRes.syncedCount,
+    };
+  }
+
+  return {
+    success: false,
+    message: 'Webhook Google Sheet belum dikonfigurasi untuk menjalankan konsolidasi otomatis.',
+  };
+}
+
+/**
  * Reads all assessment data directly from Google Sheet starting from row A2 (the first data row).
  * Supports Webhook JSON API & direct CSV export of multi-tab sheets.
  */
@@ -2065,20 +2331,34 @@ export async function fetchAssessmentsFromGoogleSheet(
   const gidMatch = config.spreadsheetUrl.match(/[?#&]gid=([0-9]+)/);
   const gid = gidMatch ? gidMatch[1] : '';
 
-  const masterSheetName = config.sheetName || 'Data_Penilaian_Kerusakan_PUPR';
+  const masterSheetName = config.sheetName || 'REKAP_SEMUA_KECAMATAN';
 
-  // List of sheet tabs to fetch & aggregate (Master rekap + individual kecamatan tabs)
+  // List of sheet tabs to fetch & aggregate (Master rekap + Form responses + default sheets + 7 individual kecamatan tabs)
   const sheetNamesToFetch = [
     masterSheetName,
-    'Data_Penilaian_Kerusakan_PUPR',
     'REKAP_SEMUA_KECAMATAN',
-    'Kec Keo Tengah',
-    'Kec Mauponggo',
-    'Kec Aesesa Selatan',
-    'Kec Wolowae',
-    'Kec Nangaroro',
-    'Kec Aesesa',
-    'Kec Boawae'
+    'Data_Penilaian_Kerusakan_PUPR',
+    'Sheet1',
+    'Sheet 1',
+    'Lembar1',
+    'Lembar 1',
+    'Form Responses 1',
+    'Jawaban Formulir 1',
+    'Form Responses',
+    'Responses 1',
+    'Data',
+    'Database',
+    'Survei Lapangan',
+    'Survei',
+    'Input Data',
+    // 7 Kecamatan Variations
+    'Kec. Aesesa', 'Kec Aesesa', 'Aesesa', 'Kecamatan Aesesa', 'AESESA', 'KEC. AESESA', 'KECAMATAN AESESA',
+    'Kec. Aesesa Selatan', 'Kec Aesesa Selatan', 'Aesesa Selatan', 'Kecamatan Aesesa Selatan', 'AESESA SELATAN', 'KEC. AESESA SELATAN', 'KECAMATAN AESESA SELATAN',
+    'Kec. Boawae', 'Kec Boawae', 'Boawae', 'Kecamatan Boawae', 'BOAWAE', 'KEC. BOAWAE', 'KECAMATAN BOAWAE',
+    'Kec. Mauponggo', 'Kec Mauponggo', 'Mauponggo', 'Kecamatan Mauponggo', 'MAUPONGGO', 'KEC. MAUPONGGO', 'KECAMATAN MAUPONGGO',
+    'Kec. Nangaroro', 'Kec Nangaroro', 'Nangaroro', 'Kecamatan Nangaroro', 'NANGARORO', 'KEC. NANGARORO', 'KECAMATAN NANGARORO',
+    'Kec. Keo Tengah', 'Kec Keo Tengah', 'Keo Tengah', 'Kecamatan Keo Tengah', 'KEO TENGAH', 'KEC. KEO TENGAH', 'KECAMATAN KEO TENGAH',
+    'Kec. Wolowae', 'Kec Wolowae', 'Wolowae', 'Kecamatan Wolowae', 'WOLOWAE', 'KEC. WOLOWAE', 'KECAMATAN WOLOWAE',
   ];
 
   // Remove duplicates from sheetNamesToFetch
@@ -2088,9 +2368,62 @@ export async function fetchAssessmentsFromGoogleSheet(
   let successfulFetches = 0;
   let lastStatus = 0;
 
+  // Helper function to parse GViz JSON response into ExtractedRow[]
+  const parseGvizResponseToRows = (rawText: string, sheetName: string): ExtractedRow[] => {
+    if (!rawText || !rawText.includes('google.visualization.Query.setResponse')) return [];
+    try {
+      const match = rawText.match(/google\.visualization\.Query\.setResponse\(([\s\S]+)\);?/);
+      if (!match || !match[1]) return [];
+      const json = JSON.parse(match[1]);
+      if (!json || !json.table) return [];
+
+      const cols = json.table.cols || [];
+      const headers = cols.map((col: any, idx: number) => {
+        return (col.label && String(col.label).trim()) || (col.id && String(col.id).trim()) || `kolom_${idx + 1}`;
+      });
+
+      const rows = json.table.rows || [];
+      const extracted: ExtractedRow[] = [];
+
+      rows.forEach((r: any, rIdx: number) => {
+        if (!r || !Array.isArray(r.c)) return;
+        const rowObj: Record<string, any> = {};
+        let hasData = false;
+
+        r.c.forEach((cell: any, cIdx: number) => {
+          const colName = headers[cIdx] || `kolom_${cIdx + 1}`;
+          let val = '';
+          if (cell !== null && cell !== undefined) {
+            val = cell.f !== undefined && cell.f !== null ? cell.f : cell.v !== undefined && cell.v !== null ? cell.v : '';
+          }
+          if (val !== '' && val !== null && val !== undefined && String(val).trim() !== '-' && String(val).trim() !== '') {
+            hasData = true;
+          }
+          rowObj[colName] = val;
+        });
+
+        if (hasData) {
+          extracted.push({
+            rowObj,
+            sheetRowNumber: rIdx + 2,
+            sourceSheet: sheetName,
+          });
+        }
+      });
+
+      return extracted;
+    } catch (e) {
+      console.warn('gviz JSON parse err:', e);
+      return [];
+    }
+  };
+
   // Helper function to parse CSV text into ExtractedRow[]
   const parseCsvTextToRows = (csvText: string, sheetName: string): ExtractedRow[] => {
     if (!csvText || csvText.trim().length === 0) return [];
+    if (csvText.includes('google.visualization.Query.setResponse')) {
+      return parseGvizResponseToRows(csvText, sheetName);
+    }
     try {
       const workbook = XLSX.read(csvText, { type: 'string', raw: true });
       const firstSheetName = workbook.SheetNames[0];
@@ -2098,7 +2431,7 @@ export async function fetchAssessmentsFromGoogleSheet(
       const matrix: any[][] = XLSX.utils.sheet_to_json(worksheet, { header: 1, defval: '' });
       if (!matrix || matrix.length === 0) return [];
 
-      const headerKeywords = ['nama', 'bangunan', 'gedung', 'registrasi', 'kode', 'no', 'kecamatan', 'desa', 'kerusakan', 'biaya', 'alamat', 'luas'];
+      const headerKeywords = ['nama', 'bangunan', 'gedung', 'registrasi', 'kode', 'no', 'kecamatan', 'desa', 'kerusakan', 'biaya', 'alamat', 'luas', 'pemilik'];
       let headerRowIdx = 0;
       let maxKeywordMatches = 0;
 
@@ -2123,7 +2456,7 @@ export async function fetchAssessmentsFromGoogleSheet(
       for (let r = headerRowIdx + 1; r < matrix.length; r++) {
         const row = matrix[r];
         if (!Array.isArray(row)) continue;
-        const hasContent = row.some((cell) => cell !== undefined && cell !== null && String(cell).trim().length > 0);
+        const hasContent = row.some((cell) => cell !== undefined && cell !== null && String(cell).trim().length > 0 && String(cell).trim() !== '-');
         if (!hasContent) continue;
 
         const rowObj: Record<string, any> = {};
@@ -2144,7 +2477,34 @@ export async function fetchAssessmentsFromGoogleSheet(
   };
 
   try {
-    // 1. Fetch CSV for each target sheet tab
+    // 1. Always fetch default active sheet tab or gid
+    const primaryUrls: string[] = [];
+    if (gid) {
+      primaryUrls.push(`https://docs.google.com/spreadsheets/d/${spreadsheetId}/gviz/tq?tqx=out:csv&gid=${gid}&_t=${cacheBuster}`);
+      primaryUrls.push(`https://docs.google.com/spreadsheets/d/${spreadsheetId}/export?format=csv&gid=${gid}&_t=${cacheBuster}`);
+    }
+    primaryUrls.push(`https://docs.google.com/spreadsheets/d/${spreadsheetId}/gviz/tq?tqx=out:csv&_t=${cacheBuster}`);
+    primaryUrls.push(`https://docs.google.com/spreadsheets/d/${spreadsheetId}/export?format=csv&_t=${cacheBuster}`);
+
+    for (const url of primaryUrls) {
+      try {
+        const res = await fetch(url, { cache: 'no-store' });
+        lastStatus = res.status;
+        if (res.ok) {
+          const text = await res.text();
+          if (text && !text.trim().startsWith('<!DOCTYPE') && !text.includes('<html')) {
+            const parsedRows = parseCsvTextToRows(text, 'LembarUtama');
+            if (parsedRows.length > 0) {
+              allExtractedRows.push(...parsedRows);
+              successfulFetches++;
+              break;
+            }
+          }
+        }
+      } catch {}
+    }
+
+    // 2. Fetch CSV for each named target sheet tab
     for (const sheetName of uniqueSheetNames) {
       const url = `https://docs.google.com/spreadsheets/d/${spreadsheetId}/gviz/tq?tqx=out:csv&sheet=${encodeURIComponent(sheetName)}&_t=${cacheBuster}`;
       try {
@@ -2161,7 +2521,7 @@ export async function fetchAssessmentsFromGoogleSheet(
           }
         }
       } catch {
-        // Skip unaccessible tab
+        // Skip inaccessible tab
       }
     }
 

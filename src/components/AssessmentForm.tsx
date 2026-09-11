@@ -80,6 +80,7 @@ import {
   RefreshCw,
   AlertCircle,
   MessageSquare,
+  Lock,
 } from 'lucide-react';
 
 export const AssessmentForm: React.FC = () => {
@@ -1001,6 +1002,13 @@ export const AssessmentForm: React.FC = () => {
 
   const executeSaveAssessment = async (payload: BuildingAssessment) => {
     if (isEditMode) {
+      if (selectedAssessmentForEdit?.verificationStatus === 'Terverifikasi') {
+        showToast(
+          'Akses ditolak: Data penilaian ini telah berstatus Terverifikasi dan terkunci resmi dari perubahan.',
+          'error'
+        );
+        return;
+      }
       const isRevision = selectedAssessmentForEdit?.verificationStatus === 'Perlu Revisi';
       const res = await updateAssessment(selectedAssessmentForEdit!.id, payload);
       if (res.success && isRevision) {
@@ -1086,21 +1094,64 @@ export const AssessmentForm: React.FC = () => {
             <RotateCcw className="w-3.5 h-3.5" />
             <span>Reset Nilai</span>
           </button>
-          <button
-            type="submit"
-            className="flex items-center gap-1.5 px-4 py-2 text-xs font-bold text-slate-950 bg-amber-500 hover:bg-amber-400 rounded-xl shadow-xs transition-colors cursor-pointer"
-          >
-            <Save className="w-4 h-4" />
-            <span>
-              {isEditMode
-                ? (selectedAssessmentForEdit?.verificationStatus === 'Perlu Revisi'
-                    ? 'Simpan & Kirim Ulang ke Verifikator'
-                    : 'Simpan Perubahan')
-                : 'Simpan & Hitung'}
-            </span>
-          </button>
+          {isEditMode && selectedAssessmentForEdit?.verificationStatus === 'Terverifikasi' ? (
+            <div
+              title="Data penilaian telah berstatus Terverifikasi resmi dan terkunci dari perubahan."
+              className="flex items-center gap-1.5 px-4 py-2 text-xs font-bold text-emerald-900 bg-emerald-100 border border-emerald-300 rounded-xl cursor-not-allowed shadow-xs"
+            >
+              <Lock className="w-4 h-4 text-emerald-700" />
+              <span>Terkunci (Terverifikasi)</span>
+            </div>
+          ) : (
+            <button
+              type="submit"
+              className="flex items-center gap-1.5 px-4 py-2 text-xs font-bold text-slate-950 bg-amber-500 hover:bg-amber-400 rounded-xl shadow-xs transition-colors cursor-pointer"
+            >
+              <Save className="w-4 h-4" />
+              <span>
+                {isEditMode
+                  ? (selectedAssessmentForEdit?.verificationStatus === 'Perlu Revisi'
+                      ? 'Simpan & Kirim Ulang ke Verifikator'
+                      : 'Simpan Perubahan')
+                  : 'Simpan & Hitung'}
+              </span>
+            </button>
+          )}
         </div>
       </div>
+
+      {/* TERVERIFIKASI / LOCKED FORM BANNER */}
+      {isEditMode && selectedAssessmentForEdit?.verificationStatus === 'Terverifikasi' && (
+        <div className="bg-gradient-to-r from-emerald-50 via-teal-50 to-emerald-50 border-2 border-emerald-400 rounded-2xl p-5 shadow-sm space-y-2 animate-in fade-in">
+          <div className="flex items-start gap-3">
+            <div className="w-11 h-11 rounded-xl bg-emerald-600 text-white flex items-center justify-center shrink-0 shadow-xs mt-0.5">
+              <Lock className="w-6 h-6" />
+            </div>
+            <div className="flex-1">
+              <div className="flex flex-wrap items-center gap-2">
+                <h3 className="text-base font-extrabold text-emerald-950">
+                  FORMULIR TERKUNCI: STATUS TELAH "TERVERIFIKASI"
+                </h3>
+                <span className="px-2.5 py-0.5 rounded-full text-[11px] font-bold border bg-emerald-200 text-emerald-900 border-emerald-400">
+                  Resmi Terverifikasi
+                </span>
+              </div>
+              <p className="text-xs text-emerald-900/90 mt-1 leading-relaxed">
+                Data penilaian teknis gedung ini telah diverifikasi dan disahkan oleh <strong>{selectedAssessmentForEdit.verifiedBy || 'Tim Verifikator'}</strong>
+                {selectedAssessmentForEdit.verifiedAt && (
+                  <span> pada {new Date(selectedAssessmentForEdit.verifiedAt).toLocaleDateString('id-ID', { day: 'numeric', month: 'long', year: 'numeric' })}</span>
+                )}.
+                Untuk menjaga keabsahan dokumen dan rekapitulasi data, seluruh isian penilaian terkunci secara resmi dari perubahan.
+              </p>
+              {selectedAssessmentForEdit.verificationNotes && (
+                <div className="mt-2 p-2.5 bg-white/95 rounded-xl border border-emerald-300 text-xs text-emerald-950">
+                  <span className="font-bold">Catatan Verifikator:</span> {selectedAssessmentForEdit.verificationNotes}
+                </div>
+              )}
+            </div>
+          </div>
+        </div>
+      )}
 
       {/* REVISION INSTRUCTION BANNER FROM ADMIN/VERIFIKATOR */}
       {isEditMode && selectedAssessmentForEdit?.verificationNotes && (
@@ -3126,19 +3177,29 @@ export const AssessmentForm: React.FC = () => {
         >
           Batal
         </button>
-        <button
-          type="submit"
-          className="flex items-center gap-2 px-6 py-2.5 text-xs font-bold text-slate-950 bg-amber-500 hover:bg-amber-400 rounded-xl shadow-md shadow-amber-500/20 transition-all cursor-pointer"
-        >
-          <Save className="w-4 h-4" />
-          <span>
-            {isEditMode
-              ? (selectedAssessmentForEdit?.verificationStatus === 'Perlu Revisi'
-                  ? 'Simpan & Kirim Ulang ke Verifikator'
-                  : 'Simpan Perubahan Penilaian')
-              : 'Simpan & Sinkronkan Data'}
-          </span>
-        </button>
+        {isEditMode && selectedAssessmentForEdit?.verificationStatus === 'Terverifikasi' ? (
+          <div
+            title="Data penilaian telah berstatus Terverifikasi resmi dan terkunci dari perubahan."
+            className="flex items-center gap-2 px-6 py-2.5 text-xs font-bold text-emerald-900 bg-emerald-100 border border-emerald-300 rounded-xl cursor-not-allowed shadow-xs"
+          >
+            <Lock className="w-4 h-4 text-emerald-700" />
+            <span>Formulir Terkunci (Terverifikasi)</span>
+          </div>
+        ) : (
+          <button
+            type="submit"
+            className="flex items-center gap-2 px-6 py-2.5 text-xs font-bold text-slate-950 bg-amber-500 hover:bg-amber-400 rounded-xl shadow-md shadow-amber-500/20 transition-all cursor-pointer"
+          >
+            <Save className="w-4 h-4" />
+            <span>
+              {isEditMode
+                ? (selectedAssessmentForEdit?.verificationStatus === 'Perlu Revisi'
+                    ? 'Simpan & Kirim Ulang ke Verifikator'
+                    : 'Simpan Perubahan Penilaian')
+                : 'Simpan & Sinkronkan Data'}
+            </span>
+          </button>
+        )}
       </div>
       </form>
 
