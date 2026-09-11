@@ -2314,9 +2314,40 @@ export async function fetchAssessmentsFromGoogleSheet(
   let successfulFetches = 0;
   let lastStatus = 0;
 
+  // List of known Rekapitulasi / System sheets that must NEVER be read as individual survey rows
+  const EXCLUDED_REKAP_SHEET_KEYWORDS = [
+    'DATA_PENILAIAN_KERUSAKAN_PUPR',
+    'DATA PENILAIAN KERUSAKAN PUPR',
+    'DATA_PENILAIAN_KERUSAKAN',
+    'DATA PENILAIAN KERUSAKAN',
+    'DATA_KERUSAKAN_PUPR',
+    'DATA KERUSAKAN PUPR',
+    'REKAP_SEMUA_KECAMATAN',
+    'REKAP SEMUA KECAMATAN',
+    'REKAPITULASI',
+    'REKAP',
+    'DAFTAR_PENGGUNA',
+    'LOG_AKSES_PENGGUNA',
+    'DUKCAPIL',
+    'REFERENSI',
+    'SHEET_REKAP',
+    'DATA_REKAP',
+  ];
+
+  const isExcludedRekapSheet = (name: string): boolean => {
+    if (!name) return false;
+    const clean = name.toUpperCase().replace(/\s+/g, '_');
+    return EXCLUDED_REKAP_SHEET_KEYWORDS.some((kw) => {
+      const cleanKw = kw.toUpperCase().replace(/\s+/g, '_');
+      return clean.includes(cleanKw) || name.toUpperCase().includes(kw);
+    });
+  };
+
   // Helper function to parse GViz JSON response into ExtractedRow[]
   const parseGvizResponseToRows = (rawText: string, sheetName: string): ExtractedRow[] => {
     if (!rawText || !rawText.includes('google.visualization.Query.setResponse')) return [];
+    if (isExcludedRekapSheet(sheetName)) return [];
+
     try {
       const match = rawText.match(/google\.visualization\.Query\.setResponse\(([\s\S]+)\);?/);
       if (!match || !match[1]) return [];
@@ -2328,9 +2359,9 @@ export async function fetchAssessmentsFromGoogleSheet(
         return (col.label && String(col.label).trim()) || (col.id && String(col.id).trim()) || `kolom_${idx + 1}`;
       });
 
-      // If headers explicitly contain REKAP_SEMUA_KECAMATAN or REKAPITULASI, reject as non-kecamatan tab
+      // If headers explicitly contain excluded keywords (like Data_Penilaian_Kerusakan_PUPR or REKAP), reject as non-survey tab
       const headerStr = (headers.join(' ') + ' ' + sheetName).toUpperCase();
-      if (headerStr.includes('REKAP_SEMUA_KECAMATAN') || headerStr.includes('REKAPITULASI')) {
+      if (isExcludedRekapSheet(headerStr)) {
         return [];
       }
 
@@ -2355,7 +2386,7 @@ export async function fetchAssessmentsFromGoogleSheet(
         });
 
         const rowValuesStr = Object.values(rowObj).join(' ').toUpperCase();
-        if (rowValuesStr.includes('REKAP_SEMUA_KECAMATAN') || rowValuesStr.includes('REKAPITULASI')) {
+        if (isExcludedRekapSheet(rowValuesStr)) {
           return;
         }
 
@@ -2377,12 +2408,14 @@ export async function fetchAssessmentsFromGoogleSheet(
   // Helper function to parse CSV text into ExtractedRow[]
   const parseCsvTextToRows = (csvText: string, sheetName: string): ExtractedRow[] => {
     if (!csvText || csvText.trim().length === 0) return [];
+    if (isExcludedRekapSheet(sheetName)) return [];
     if (csvText.includes('google.visualization.Query.setResponse')) {
       return parseGvizResponseToRows(csvText, sheetName);
     }
     try {
       const workbook = XLSX.read(csvText, { type: 'string', raw: true });
       const firstSheetName = workbook.SheetNames[0];
+      if (isExcludedRekapSheet(firstSheetName)) return [];
       const worksheet = workbook.Sheets[firstSheetName];
       const matrix: any[][] = XLSX.utils.sheet_to_json(worksheet, { header: 1, defval: '' });
       if (!matrix || matrix.length === 0) return [];
@@ -2407,6 +2440,7 @@ export async function fetchAssessmentsFromGoogleSheet(
 
       const rawHeaderRow = Array.isArray(matrix[headerRowIdx]) ? matrix[headerRowIdx] : [];
       const headers = rawHeaderRow.map((c, i) => String(c || '').trim() || `kolom_${i + 1}`);
+      if (isExcludedRekapSheet(headers.join(' '))) return [];
 
       const rows: ExtractedRow[] = [];
       for (let r = headerRowIdx + 1; r < matrix.length; r++) {
@@ -2420,6 +2454,10 @@ export async function fetchAssessmentsFromGoogleSheet(
           const colName = headers[c] || `kolom_${c + 1}`;
           rowObj[colName] = row[c] !== undefined ? row[c] : '';
         }
+
+        const rowValuesStr = Object.values(rowObj).join(' ').toUpperCase();
+        if (isExcludedRekapSheet(rowValuesStr)) continue;
+
         rows.push({
           rowObj,
           sheetRowNumber: r + 1,
@@ -2502,16 +2540,15 @@ export async function fetchAssessmentsFromGoogleSheet(
       }
     }
 
-    // 2. If 0 rows were found from the 7 kecamatan tabs, fallback to Master Rekap or active tab
+    // 2. If 0 rows were found from the 7 kecamatan tabs, check single-tab survey sheets (never rekap)
     if (allExtractedRows.length === 0) {
       const fallbackSheetNames = [
-        masterSheetName,
-        'REKAP_SEMUA_KECAMATAN',
         'Form Responses 1',
         'Jawaban Formulir 1',
         'Sheet1',
         'Data',
-      ];
+      ].filter((name) => !isExcludedRekapSheet(name));
+
       for (const sheetName of Array.from(new Set(fallbackSheetNames))) {
         const gvizUrl = `https://docs.google.com/spreadsheets/d/${spreadsheetId}/gviz/tq?sheet=${encodeURIComponent(sheetName)}&_t=${cacheBuster}`;
         try {
