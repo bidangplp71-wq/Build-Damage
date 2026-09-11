@@ -89,7 +89,7 @@ interface AppContextType {
   assessments: BuildingAssessment[];
   addAssessment: (data: BuildingAssessment) => Promise<{ success: boolean; message: string }>;
   updateAssessment: (id: string, data: Partial<BuildingAssessment>) => Promise<{ success: boolean; message: string }>;
-  deleteAssessment: (id: string) => { success: boolean; message: string };
+  deleteAssessment: (id: string, bypassAuth?: boolean) => { success: boolean; message: string };
   purgeAllDuplicates: () => { success: boolean; count: number; message: string };
   verifyAssessment: (id: string, status: VerificationStatus, notes: string) => Promise<{ success: boolean; message: string }>;
   syncAssessmentToSheet: (id: string) => Promise<{ success: boolean; message: string }>;
@@ -2105,9 +2105,10 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
     };
   };
 
-  const deleteAssessment = (id: string) => {
-    // Super Admin, Admin, and Verifikator are authorized to delete (including duplicates)
+  const deleteAssessment = (id: string, bypassAuth = false) => {
+    // Super Admin, Admin, and Verifikator are authorized to delete (or bypass with valid PIN)
     if (
+      !bypassAuth &&
       currentUser.role !== 'super_admin' &&
       currentUser.role !== 'admin' &&
       currentUser.role !== 'admin_verifikator'
@@ -2120,8 +2121,8 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
 
     const target = assessments.find((a) => a.id === id);
 
-    // Locking enforcement: Verified data is locked from deletion
-    if (target?.verificationStatus === 'Terverifikasi') {
+    // Locking enforcement: Verified data is locked from deletion unless bypassed by explicit PIN authorization
+    if (!bypassAuth && target?.verificationStatus === 'Terverifikasi') {
       return {
         success: false,
         message: 'Akses ditolak: Data yang telah berstatus Terverifikasi telah terkunci secara permanen dan tidak dapat dihapus!',

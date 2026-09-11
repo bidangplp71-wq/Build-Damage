@@ -16,17 +16,42 @@ import {
   Filter,
   ExternalLink,
   FolderCheck,
-  FolderMinus
+  FolderMinus,
+  Trash2,
+  Lock,
+  Eye,
+  EyeOff,
+  AlertCircle,
+  ShieldAlert
 } from 'lucide-react';
 import { BuildingAssessment } from '../types';
 
 export const DriveDirectory: React.FC = () => {
-  const { currentUser, assessments, updateAssessment, addAssessment, showToast } = useApp();
+  const { currentUser, assessments, updateAssessment, addAssessment, deleteAssessment, showToast } = useApp();
   
   const [editingId, setEditingId] = useState<string | null>(null);
   const [tempUrl, setTempUrl] = useState('');
   const [isSaving, setIsSaving] = useState(false);
   
+  // Secret PIN definition (never displayed to user)
+  const SECRET_PIN = 'simpkbg2026';
+
+  // Delete Modal & PIN State (Single Item)
+  const [itemToDelete, setItemToDelete] = useState<BuildingAssessment | null>(null);
+  const [deleteMode, setDeleteMode] = useState<'ALL_DATA' | 'DRIVE_LINK_ONLY'>('ALL_DATA');
+  const [pinInput, setPinInput] = useState('');
+  const [showPinMask, setShowPinMask] = useState(false);
+  const [deleteError, setDeleteError] = useState('');
+  const [isDeleting, setIsDeleting] = useState(false);
+
+  // Batch Selection & Batch Delete State
+  const [selectedRowIds, setSelectedRowIds] = useState<Set<string>>(new Set());
+  const [isBatchDeleteModalOpen, setIsBatchDeleteModalOpen] = useState(false);
+  const [batchPinInput, setBatchPinInput] = useState('');
+  const [showBatchPinMask, setShowBatchPinMask] = useState(false);
+  const [batchDeleteError, setBatchDeleteError] = useState('');
+  const [isBatchDeleting, setIsBatchDeleting] = useState(false);
+
   // Dropdown states for adding link
   const [selectedBuildingId, setSelectedBuildingId] = useState('');
   const [isManualMode, setIsManualMode] = useState(false);
@@ -222,6 +247,118 @@ export const DriveDirectory: React.FC = () => {
     setTempUrl(currentUrl || '');
   };
 
+  // Handle single item deletion with PIN verification
+  const handleOpenDeleteModal = (building: BuildingAssessment) => {
+    setItemToDelete(building);
+    setDeleteMode('ALL_DATA');
+    setPinInput('');
+    setShowPinMask(false);
+    setDeleteError('');
+  };
+
+  const handleConfirmDelete = async () => {
+    if (!itemToDelete) return;
+    setDeleteError('');
+
+    if (pinInput.trim() !== SECRET_PIN) {
+      setDeleteError('PIN otorisasi tidak valid atau salah.');
+      showToast('PIN otorisasi salah. Penghapusan dibatalkan.', 'error');
+      return;
+    }
+
+    setIsDeleting(true);
+    try {
+      if (deleteMode === 'ALL_DATA') {
+        const res = deleteAssessment(itemToDelete.id, true);
+        if (res.success) {
+          showToast(`Data gedung "${itemToDelete.buildingName}" berhasil dihapus.`, 'success');
+          setSelectedRowIds(prev => {
+            const next = new Set(prev);
+            next.delete(itemToDelete.id);
+            return next;
+          });
+          setItemToDelete(null);
+          setPinInput('');
+        } else {
+          setDeleteError(res.message);
+          showToast(res.message, 'error');
+        }
+      } else {
+        const res = await updateAssessment(itemToDelete.id, { backupDriveUrl: '' });
+        if (res.success) {
+          showToast(`Tautan Google Drive untuk "${itemToDelete.buildingName}" berhasil dihapus.`, 'success');
+          setItemToDelete(null);
+          setPinInput('');
+        } else {
+          setDeleteError(res.message);
+          showToast(res.message, 'error');
+        }
+      }
+    } catch (err: any) {
+      setDeleteError('Terjadi kesalahan saat menghapus: ' + err.message);
+    } finally {
+      setIsDeleting(false);
+    }
+  };
+
+  // Handle batch deletion with PIN verification
+  const handleOpenBatchDeleteModal = () => {
+    if (selectedRowIds.size === 0) {
+      showToast('Pilih setidaknya satu gedung terlebih dahulu.', 'info');
+      return;
+    }
+    setBatchPinInput('');
+    setShowBatchPinMask(false);
+    setBatchDeleteError('');
+    setIsBatchDeleteModalOpen(true);
+  };
+
+  const handleConfirmBatchDelete = async () => {
+    if (selectedRowIds.size === 0) return;
+    setBatchDeleteError('');
+
+    if (batchPinInput.trim() !== SECRET_PIN) {
+      setBatchDeleteError('PIN otorisasi tidak valid atau salah.');
+      showToast('PIN otorisasi salah. Penghapusan massal dibatalkan.', 'error');
+      return;
+    }
+
+    setIsBatchDeleting(true);
+    try {
+      let count = 0;
+      const ids = Array.from(selectedRowIds);
+      for (const id of ids) {
+        const res = deleteAssessment(id, true);
+        if (res.success) count++;
+      }
+      showToast(`Berhasil menghapus ${count} data gedung dari direktori.`, 'success');
+      setSelectedRowIds(new Set());
+      setIsBatchDeleteModalOpen(false);
+      setBatchPinInput('');
+    } catch (err: any) {
+      setBatchDeleteError('Terjadi kesalahan saat memproses penghapusan massal: ' + err.message);
+    } finally {
+      setIsBatchDeleting(false);
+    }
+  };
+
+  const toggleSelectAll = () => {
+    if (selectedRowIds.size === displayBuildings.length && displayBuildings.length > 0) {
+      setSelectedRowIds(new Set());
+    } else {
+      setSelectedRowIds(new Set(displayBuildings.map(b => b.id)));
+    }
+  };
+
+  const toggleSelectRow = (id: string) => {
+    setSelectedRowIds(prev => {
+      const next = new Set(prev);
+      if (next.has(id)) next.delete(id);
+      else next.add(id);
+      return next;
+    });
+  };
+
   const canSetLink = !['admin_publik', 'admin_verifikator'].includes(currentUser.role);
 
   return (
@@ -379,19 +516,31 @@ export const DriveDirectory: React.FC = () => {
               Direktori Seluruh Data Gedung ({displayBuildings.length} dari {assessments.length})
             </h3>
             
-            {(searchQuery || selectedKecamatan !== 'ALL' || driveFilter !== 'ALL') && (
-              <button
-                onClick={() => {
-                  setSearchQuery('');
-                  setSelectedKecamatan('ALL');
-                  setDriveFilter('ALL');
-                }}
-                className="text-xs font-bold text-rose-600 hover:text-rose-700 flex items-center gap-1 hover:underline"
-              >
-                <X className="w-3.5 h-3.5" />
-                Reset Filter Pencarian
-              </button>
-            )}
+            <div className="flex items-center gap-2">
+              {selectedRowIds.size > 0 && (
+                <button
+                  onClick={handleOpenBatchDeleteModal}
+                  className="text-xs font-bold px-3 py-1.5 rounded-xl bg-rose-600 hover:bg-rose-700 text-white flex items-center gap-1.5 transition-all shadow-sm cursor-pointer active:scale-95"
+                >
+                  <Trash2 className="w-3.5 h-3.5" />
+                  <span>Hapus ({selectedRowIds.size} Terpilih)</span>
+                </button>
+              )}
+
+              {(searchQuery || selectedKecamatan !== 'ALL' || driveFilter !== 'ALL') && (
+                <button
+                  onClick={() => {
+                    setSearchQuery('');
+                    setSelectedKecamatan('ALL');
+                    setDriveFilter('ALL');
+                  }}
+                  className="text-xs font-bold text-rose-600 hover:text-rose-700 flex items-center gap-1 hover:underline cursor-pointer"
+                >
+                  <X className="w-3.5 h-3.5" />
+                  Reset Filter Pencarian
+                </button>
+              )}
+            </div>
           </div>
 
           <div className="grid grid-cols-1 sm:grid-cols-12 gap-3">
@@ -456,9 +605,18 @@ export const DriveDirectory: React.FC = () => {
           <table className="w-full text-left border-collapse relative min-w-[800px]">
             <thead className="sticky top-0 bg-slate-50/95 backdrop-blur z-10 shadow-sm">
               <tr className="border-b border-slate-200">
+                <th className="w-10 px-3 py-4 text-center">
+                  <input 
+                    type="checkbox" 
+                    checked={displayBuildings.length > 0 && selectedRowIds.size === displayBuildings.length}
+                    onChange={toggleSelectAll}
+                    className="w-4 h-4 text-indigo-600 rounded border-slate-300 focus:ring-indigo-500 cursor-pointer"
+                    title="Pilih semua data gedung yang tampil"
+                  />
+                </th>
                 <th className="px-5 py-4 text-xs font-bold text-slate-500 uppercase tracking-wider w-5/12">Nama Gedung & Lokasi</th>
                 <th className="px-5 py-4 text-xs font-bold text-slate-500 uppercase tracking-wider">Status Foto Sistem</th>
-                <th className="px-5 py-4 text-xs font-bold text-slate-500 uppercase tracking-wider text-right">Tautan G-Drive</th>
+                <th className="px-5 py-4 text-xs font-bold text-slate-500 uppercase tracking-wider text-right">Aksi & Direktori Drive</th>
               </tr>
             </thead>
             <tbody className="divide-y divide-slate-100">
@@ -483,7 +641,15 @@ export const DriveDirectory: React.FC = () => {
                 const driveUrl = building.backupDriveUrl || (building as any).googleDriveFolderUrl;
                 
                 return (
-                  <tr key={building.id} className="hover:bg-slate-50 transition-colors">
+                  <tr key={building.id} className={`hover:bg-slate-50 transition-colors ${selectedRowIds.has(building.id) ? 'bg-indigo-50/30' : ''}`}>
+                    <td className="w-10 px-3 py-4 text-center">
+                      <input 
+                        type="checkbox" 
+                        checked={selectedRowIds.has(building.id)}
+                        onChange={() => toggleSelectRow(building.id)}
+                        className="w-4 h-4 text-indigo-600 rounded border-slate-300 focus:ring-indigo-500 cursor-pointer"
+                      />
+                    </td>
                     <td className="px-5 py-4">
                       <div className="font-bold text-slate-800 flex items-center gap-2">
                         <span>{building.buildingName}</span>
@@ -542,47 +708,59 @@ export const DriveDirectory: React.FC = () => {
                           />
                           <button 
                             onClick={() => setEditingId(null)}
-                            className="px-3 py-2 text-slate-600 hover:bg-slate-200 bg-slate-100 rounded-lg text-xs font-bold transition-colors"
+                            className="px-3 py-2 text-slate-600 hover:bg-slate-200 bg-slate-100 rounded-lg text-xs font-bold transition-colors cursor-pointer"
                           >
                             Batal
                           </button>
                           <button 
                             onClick={() => handleUpdateInline(building.id)}
                             disabled={isSaving}
-                            className="px-3 py-2 bg-indigo-600 hover:bg-indigo-700 text-white rounded-lg text-xs font-bold flex items-center gap-1.5 transition-colors disabled:opacity-50"
+                            className="px-3 py-2 bg-indigo-600 hover:bg-indigo-700 text-white rounded-lg text-xs font-bold flex items-center gap-1.5 transition-colors disabled:opacity-50 cursor-pointer"
                           >
                             {isSaving ? <Loader2 className="w-3.5 h-3.5 animate-spin" /> : <Save className="w-3.5 h-3.5" />}
                             Simpan
                           </button>
                         </div>
                       ) : (
-                        <div className="flex items-center justify-end gap-2">
-                          {canSetLink && (
-                            <button 
-                              onClick={() => startEdit(building.id, driveUrl || '')}
-                              className="inline-flex items-center justify-center gap-1.5 px-3 py-1.5 rounded-lg text-xs font-bold transition-colors border bg-white text-slate-600 hover:bg-slate-100 border-slate-200"
-                            >
-                              <Pencil className="w-3.5 h-3.5" />
-                              <span>{driveUrl ? 'Edit Link' : 'Set Link'}</span>
-                            </button>
-                          )}
-                          
+                        <div className="flex items-center justify-end gap-1.5 sm:gap-2 flex-wrap">
                           {driveUrl ? (
                             <a 
                               href={driveUrl} 
                               target="_blank" 
                               rel="noopener noreferrer"
                               className="inline-flex items-center justify-center gap-1.5 px-3 py-1.5 bg-indigo-50 text-indigo-600 hover:bg-indigo-100 hover:text-indigo-700 rounded-lg text-xs font-bold transition-colors border border-indigo-200"
+                              title="Buka folder Google Drive"
                             >
                               <HardDrive className="w-3.5 h-3.5" />
-                              <span>Buka Folder</span>
+                              <span className="hidden sm:inline">Buka Folder</span>
                               <ExternalLink className="w-3 h-3 text-indigo-400" />
                             </a>
                           ) : (
-                            <button disabled className="inline-flex items-center justify-center px-3 py-1.5 bg-slate-100 text-slate-400 rounded-lg text-xs font-bold border border-slate-200 opacity-50 cursor-not-allowed">
+                            <button disabled className="inline-flex items-center justify-center px-2.5 py-1.5 bg-slate-100 text-slate-400 rounded-lg text-xs font-medium border border-slate-200 opacity-60 cursor-not-allowed">
                               Belum Ada Link
                             </button>
                           )}
+
+                          {canSetLink && (
+                            <button 
+                              onClick={() => startEdit(building.id, driveUrl || '')}
+                              className="inline-flex items-center justify-center gap-1 px-2.5 py-1.5 rounded-lg text-xs font-bold transition-colors border bg-white text-slate-600 hover:bg-slate-100 border-slate-200 cursor-pointer"
+                              title="Ubah tautan folder Google Drive"
+                            >
+                              <Pencil className="w-3.5 h-3.5" />
+                              <span className="hidden md:inline">{driveUrl ? 'Edit Link' : 'Set Link'}</span>
+                            </button>
+                          )}
+
+                          {/* Tombol Kasi Hapus */}
+                          <button
+                            onClick={() => handleOpenDeleteModal(building)}
+                            className="inline-flex items-center justify-center gap-1 px-2.5 py-1.5 rounded-lg text-xs font-bold transition-all border bg-rose-50 text-rose-600 hover:bg-rose-100 hover:text-rose-700 border-rose-200 shadow-xs cursor-pointer active:scale-95"
+                            title="Hapus data gedung atau link Drive (Otorisasi PIN)"
+                          >
+                            <Trash2 className="w-3.5 h-3.5 text-rose-600" />
+                            <span>Hapus</span>
+                          </button>
                         </div>
                       )}
                     </td>
@@ -590,7 +768,7 @@ export const DriveDirectory: React.FC = () => {
                 );
               }) : (
                 <tr>
-                  <td colSpan={3} className="px-5 py-12 text-center text-slate-500 text-sm">
+                  <td colSpan={4} className="px-5 py-12 text-center text-slate-500 text-sm">
                     <Building2 className="w-12 h-12 text-slate-300 mx-auto mb-3" />
                     <div>Tidak ada data gedung yang sesuai dengan filter pencarian.</div>
                     {(searchQuery || selectedKecamatan !== 'ALL' || driveFilter !== 'ALL') && (
@@ -600,7 +778,7 @@ export const DriveDirectory: React.FC = () => {
                           setSelectedKecamatan('ALL');
                           setDriveFilter('ALL');
                         }}
-                        className="mt-2 text-xs font-bold text-indigo-600 hover:underline"
+                        className="mt-2 text-xs font-bold text-indigo-600 hover:underline cursor-pointer"
                       >
                         Reset semua filter pencarian
                       </button>
@@ -612,6 +790,286 @@ export const DriveDirectory: React.FC = () => {
           </table>
         </div>
       </div>
+
+      {/* MODAL KONFIRMASI HAPUS DENGAN OTORISASI PIN */}
+      {itemToDelete && (
+        <div className="fixed inset-0 z-50 bg-slate-950/60 backdrop-blur-xs flex items-center justify-center p-4 animate-in fade-in duration-200">
+          <div className="bg-white rounded-2xl shadow-2xl border border-slate-200 max-w-md w-full overflow-hidden animate-in zoom-in-95 duration-200">
+            {/* Modal Header */}
+            <div className="p-5 border-b border-slate-100 flex items-center justify-between bg-rose-50/50">
+              <div className="flex items-center gap-3">
+                <div className="w-10 h-10 rounded-xl bg-rose-100 text-rose-600 flex items-center justify-center shrink-0 shadow-sm">
+                  <Trash2 className="w-5 h-5" />
+                </div>
+                <div>
+                  <h3 className="text-base font-bold text-slate-900">Konfirmasi Hapus Data</h3>
+                  <p className="text-xs text-slate-500">Direktori & Database Sistem</p>
+                </div>
+              </div>
+              <button
+                onClick={() => setItemToDelete(null)}
+                className="p-2 text-slate-400 hover:text-slate-600 rounded-lg hover:bg-slate-100 transition-colors cursor-pointer"
+              >
+                <X className="w-5 h-5" />
+              </button>
+            </div>
+
+            {/* Modal Body */}
+            <div className="p-5 space-y-4">
+              {/* Target Data Info */}
+              <div className="p-3.5 bg-slate-50 rounded-xl border border-slate-200 text-xs space-y-1.5">
+                <div className="font-bold text-sm text-slate-800">
+                  {itemToDelete.buildingName}
+                </div>
+                <div className="text-slate-500 flex items-center gap-2">
+                  <span className="font-mono bg-slate-200/80 px-1.5 py-0.5 rounded text-[11px] text-slate-700">
+                    {itemToDelete.code || itemToDelete.id}
+                  </span>
+                  <span>•</span>
+                  <span>{itemToDelete.kecamatanName !== '-' ? `Kec. ${itemToDelete.kecamatanName}` : 'Nagekeo'}</span>
+                </div>
+              </div>
+
+              {/* Delete Mode Option (If building has a Drive Link) */}
+              {(itemToDelete.backupDriveUrl || (itemToDelete as any).googleDriveFolderUrl) && (
+                <div className="space-y-2">
+                  <label className="text-xs font-bold text-slate-700 uppercase tracking-wider block">
+                    Pilih Tindakan Penghapusan
+                  </label>
+                  <div className="grid grid-cols-1 gap-2">
+                    <label className={`flex items-start gap-3 p-3 rounded-xl border cursor-pointer transition-all ${
+                      deleteMode === 'ALL_DATA'
+                        ? 'border-rose-300 bg-rose-50/50 text-slate-900'
+                        : 'border-slate-200 hover:bg-slate-50 text-slate-700'
+                    }`}>
+                      <input
+                        type="radio"
+                        name="deleteMode"
+                        checked={deleteMode === 'ALL_DATA'}
+                        onChange={() => setDeleteMode('ALL_DATA')}
+                        className="mt-0.5 text-rose-600 focus:ring-rose-500"
+                      />
+                      <div>
+                        <div className="text-xs font-bold text-rose-700">Hapus Seluruh Data Gedung</div>
+                        <div className="text-[11px] text-slate-500 mt-0.5">
+                          Menghapus data gedung beserta seluruh kalkulasi dan foto dari direktori & database.
+                        </div>
+                      </div>
+                    </label>
+
+                    <label className={`flex items-start gap-3 p-3 rounded-xl border cursor-pointer transition-all ${
+                      deleteMode === 'DRIVE_LINK_ONLY'
+                        ? 'border-indigo-300 bg-indigo-50/50 text-slate-900'
+                        : 'border-slate-200 hover:bg-slate-50 text-slate-700'
+                    }`}>
+                      <input
+                        type="radio"
+                        name="deleteMode"
+                        checked={deleteMode === 'DRIVE_LINK_ONLY'}
+                        onChange={() => setDeleteMode('DRIVE_LINK_ONLY')}
+                        className="mt-0.5 text-indigo-600 focus:ring-indigo-500"
+                      />
+                      <div>
+                        <div className="text-xs font-bold text-indigo-700">Hapus Tautan Google Drive Saja</div>
+                        <div className="text-[11px] text-slate-500 mt-0.5">
+                          Hanya mengosongkan link Google Drive tanpa menghapus data penilaian gedung.
+                        </div>
+                      </div>
+                    </label>
+                  </div>
+                </div>
+              )}
+
+              {/* PIN Input Section (MASKED, NEVER DISPLAY THE PIN) */}
+              <div className="space-y-1.5 pt-1">
+                <label className="text-xs font-bold text-slate-700 flex items-center justify-between">
+                  <span className="flex items-center gap-1.5">
+                    <Lock className="w-3.5 h-3.5 text-slate-500" />
+                    PIN Otorisasi Pengamanan
+                  </span>
+                </label>
+
+                <div className="relative">
+                  <div className="absolute inset-y-0 left-0 pl-3 flex items-center pointer-events-none text-slate-400">
+                    <Lock className="w-4 h-4" />
+                  </div>
+                  <input
+                    type={showPinMask ? 'text' : 'password'}
+                    value={pinInput}
+                    onChange={(e) => {
+                      setPinInput(e.target.value);
+                      setDeleteError('');
+                    }}
+                    onKeyDown={(e) => {
+                      if (e.key === 'Enter' && pinInput.trim()) {
+                        handleConfirmDelete();
+                      }
+                    }}
+                    placeholder="Masukkan PIN otorisasi..."
+                    className="w-full pl-9 pr-10 py-2.5 rounded-xl border border-slate-300 focus:outline-none focus:ring-2 focus:ring-rose-500 focus:border-rose-500 text-sm font-medium tracking-wider bg-white"
+                    autoFocus
+                  />
+                  <button
+                    type="button"
+                    onClick={() => setShowPinMask(!showPinMask)}
+                    className="absolute inset-y-0 right-0 pr-3 flex items-center text-slate-400 hover:text-slate-600 cursor-pointer"
+                    title={showPinMask ? 'Sembunyikan karakter' : 'Tampilkan karakter'}
+                  >
+                    {showPinMask ? <EyeOff className="w-4 h-4" /> : <Eye className="w-4 h-4" />}
+                  </button>
+                </div>
+
+                <p className="text-[11px] text-slate-500 flex items-center gap-1">
+                  <ShieldAlert className="w-3 h-3 text-amber-500 shrink-0" />
+                  <span>Diperlukan PIN otorisasi pengamanan sistem untuk memproses tindakan ini.</span>
+                </p>
+              </div>
+
+              {/* Error Alert */}
+              {deleteError && (
+                <div className="p-3 bg-rose-50 border border-rose-200 rounded-xl text-xs text-rose-700 flex items-center gap-2 font-medium animate-in fade-in">
+                  <AlertCircle className="w-4 h-4 text-rose-600 shrink-0" />
+                  <span>{deleteError}</span>
+                </div>
+              )}
+            </div>
+
+            {/* Modal Footer */}
+            <div className="p-4 border-t border-slate-100 bg-slate-50 flex items-center justify-end gap-2">
+              <button
+                type="button"
+                onClick={() => setItemToDelete(null)}
+                disabled={isDeleting}
+                className="px-4 py-2 rounded-xl text-xs font-bold text-slate-600 hover:bg-slate-200 transition-colors cursor-pointer"
+              >
+                Batal
+              </button>
+              <button
+                type="button"
+                onClick={handleConfirmDelete}
+                disabled={!pinInput.trim() || isDeleting}
+                className="px-4 py-2 rounded-xl text-xs font-bold bg-rose-600 hover:bg-rose-700 disabled:opacity-50 text-white shadow-sm flex items-center gap-2 transition-all cursor-pointer"
+              >
+                {isDeleting ? <Loader2 className="w-3.5 h-3.5 animate-spin" /> : <Trash2 className="w-3.5 h-3.5" />}
+                <span>{isDeleting ? 'Memproses...' : 'Konfirmasi Hapus'}</span>
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
+
+      {/* MODAL HAPUS MASSAL DENGAN OTORISASI PIN */}
+      {isBatchDeleteModalOpen && (
+        <div className="fixed inset-0 z-50 bg-slate-950/60 backdrop-blur-xs flex items-center justify-center p-4 animate-in fade-in duration-200">
+          <div className="bg-white rounded-2xl shadow-2xl border border-slate-200 max-w-md w-full overflow-hidden animate-in zoom-in-95 duration-200">
+            {/* Modal Header */}
+            <div className="p-5 border-b border-slate-100 flex items-center justify-between bg-rose-50/50">
+              <div className="flex items-center gap-3">
+                <div className="w-10 h-10 rounded-xl bg-rose-100 text-rose-600 flex items-center justify-center shrink-0 shadow-sm">
+                  <Trash2 className="w-5 h-5" />
+                </div>
+                <div>
+                  <h3 className="text-base font-bold text-slate-900">Hapus Massal Gedung</h3>
+                  <p className="text-xs text-slate-500">{selectedRowIds.size} gedung dipilih</p>
+                </div>
+              </div>
+              <button
+                onClick={() => setIsBatchDeleteModalOpen(false)}
+                className="p-2 text-slate-400 hover:text-slate-600 rounded-lg hover:bg-slate-100 transition-colors cursor-pointer"
+              >
+                <X className="w-5 h-5" />
+              </button>
+            </div>
+
+            {/* Modal Body */}
+            <div className="p-5 space-y-4">
+              <div className="p-3.5 bg-rose-50 rounded-xl border border-rose-200 text-xs text-rose-800 space-y-1">
+                <div className="font-bold flex items-center gap-1.5">
+                  <AlertTriangle className="w-4 h-4 text-rose-600" />
+                  Peringatan Tindakan Massal
+                </div>
+                <p className="text-rose-700 leading-relaxed">
+                  Anda akan menghapus secara permanen <strong>{selectedRowIds.size} data gedung</strong> dari sistem dan direktori. Tindakan ini tidak dapat dibatalkan.
+                </p>
+              </div>
+
+              {/* PIN Input Section (MASKED) */}
+              <div className="space-y-1.5">
+                <label className="text-xs font-bold text-slate-700 flex items-center justify-between">
+                  <span className="flex items-center gap-1.5">
+                    <Lock className="w-3.5 h-3.5 text-slate-500" />
+                    PIN Otorisasi Pengamanan
+                  </span>
+                </label>
+
+                <div className="relative">
+                  <div className="absolute inset-y-0 left-0 pl-3 flex items-center pointer-events-none text-slate-400">
+                    <Lock className="w-4 h-4" />
+                  </div>
+                  <input
+                    type={showBatchPinMask ? 'text' : 'password'}
+                    value={batchPinInput}
+                    onChange={(e) => {
+                      setBatchPinInput(e.target.value);
+                      setBatchDeleteError('');
+                    }}
+                    onKeyDown={(e) => {
+                      if (e.key === 'Enter' && batchPinInput.trim()) {
+                        handleConfirmBatchDelete();
+                      }
+                    }}
+                    placeholder="Masukkan PIN otorisasi..."
+                    className="w-full pl-9 pr-10 py-2.5 rounded-xl border border-slate-300 focus:outline-none focus:ring-2 focus:ring-rose-500 focus:border-rose-500 text-sm font-medium tracking-wider bg-white"
+                    autoFocus
+                  />
+                  <button
+                    type="button"
+                    onClick={() => setShowBatchPinMask(!showBatchPinMask)}
+                    className="absolute inset-y-0 right-0 pr-3 flex items-center text-slate-400 hover:text-slate-600 cursor-pointer"
+                    title={showBatchPinMask ? 'Sembunyikan karakter' : 'Tampilkan karakter'}
+                  >
+                    {showBatchPinMask ? <EyeOff className="w-4 h-4" /> : <Eye className="w-4 h-4" />}
+                  </button>
+                </div>
+
+                <p className="text-[11px] text-slate-500 flex items-center gap-1">
+                  <ShieldAlert className="w-3 h-3 text-amber-500 shrink-0" />
+                  <span>Diperlukan PIN otorisasi pengamanan sistem untuk memproses tindakan ini.</span>
+                </p>
+              </div>
+
+              {/* Error Alert */}
+              {batchDeleteError && (
+                <div className="p-3 bg-rose-50 border border-rose-200 rounded-xl text-xs text-rose-700 flex items-center gap-2 font-medium animate-in fade-in">
+                  <AlertCircle className="w-4 h-4 text-rose-600 shrink-0" />
+                  <span>{batchDeleteError}</span>
+                </div>
+              )}
+            </div>
+
+            {/* Modal Footer */}
+            <div className="p-4 border-t border-slate-100 bg-slate-50 flex items-center justify-end gap-2">
+              <button
+                type="button"
+                onClick={() => setIsBatchDeleteModalOpen(false)}
+                disabled={isBatchDeleting}
+                className="px-4 py-2 rounded-xl text-xs font-bold text-slate-600 hover:bg-slate-200 transition-colors cursor-pointer"
+              >
+                Batal
+              </button>
+              <button
+                type="button"
+                onClick={handleConfirmBatchDelete}
+                disabled={!batchPinInput.trim() || isBatchDeleting}
+                className="px-4 py-2 rounded-xl text-xs font-bold bg-rose-600 hover:bg-rose-700 disabled:opacity-50 text-white shadow-sm flex items-center gap-2 transition-all cursor-pointer"
+              >
+                {isBatchDeleting ? <Loader2 className="w-3.5 h-3.5 animate-spin" /> : <Trash2 className="w-3.5 h-3.5" />}
+                <span>{isBatchDeleting ? 'Menghapus...' : `Hapus ${selectedRowIds.size} Gedung`}</span>
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
     </div>
   );
 };
