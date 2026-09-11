@@ -2542,14 +2542,14 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
 
       setAssessments((prev) => {
         const map = new Map<string, BuildingAssessment>();
-        // 1. Preserve manual local assessments (surveys added via app form)
+        // 1. Preserve only true unsynced local drafts created directly on the app's assessment form
         prev.forEach((p) => {
-          if (p && p.id && !p.id.startsWith('sheet_')) {
+          if (p && p.id && !p.id.startsWith('sheet_') && !p.id.startsWith('bldg_') && !p.id.startsWith('dampup_') && (p as any).isLocalDraft) {
             map.set(p.id, p);
           }
         });
 
-        // 2. Set all canonical Google Sheet records from the 7 Kecamatan sheets
+        // 2. Set all canonical Google Sheet records from the 7 Kecamatan sheets (Exact 98 records)
         sheetItems.forEach((s) => {
           map.set(s.id, {
             ...s,

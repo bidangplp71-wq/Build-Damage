@@ -2295,29 +2295,7 @@ export async function fetchAssessmentsFromGoogleSheet(
   }
   const allExtractedRows: ExtractedRow[] = [];
 
-  // METHOD 1: Fetch via Webhook JSON API if Webhook URL is configured
-  if (hasWebhook) {
-    try {
-      const getUrl = `${config.webhookUrl}${config.webhookUrl.includes('?') ? '&' : '?'}action=fetch_assessments&_t=${Date.now()}`;
-      const res = await fetch(getUrl, { cache: 'no-store' });
-      if (res.ok) {
-        const json = await res.json();
-        if (json && json.status === 'success' && Array.isArray(json.data) && json.data.length > 0) {
-          json.data.forEach((rowObj: any, index: number) => {
-            allExtractedRows.push({
-              rowObj,
-              sheetRowNumber: index + 2,
-              sourceSheet: 'WebhookJSON',
-            });
-          });
-        }
-      }
-    } catch (err) {
-      console.warn('Webhook JSON fetch_assessments notice:', err);
-    }
-  }
-
-  // METHOD 2: Direct CSV Export from Google Sheets URL (Scanning all sheet tabs)
+  // METHOD 1: Direct multi-tab scan for the 7 Kecamatan tabs (Primary source of truth: 98 survey rows)
   const spreadsheetId = extractSpreadsheetId(config.spreadsheetUrl);
   if (!spreadsheetId) {
     return {
@@ -2350,6 +2328,12 @@ export async function fetchAssessmentsFromGoogleSheet(
         return (col.label && String(col.label).trim()) || (col.id && String(col.id).trim()) || `kolom_${idx + 1}`;
       });
 
+      // If headers explicitly contain REKAP_SEMUA_KECAMATAN or REKAPITULASI, reject as non-kecamatan tab
+      const headerStr = (headers.join(' ') + ' ' + sheetName).toUpperCase();
+      if (headerStr.includes('REKAP_SEMUA_KECAMATAN') || headerStr.includes('REKAPITULASI')) {
+        return [];
+      }
+
       const rows = json.table.rows || [];
       const extracted: ExtractedRow[] = [];
 
@@ -2369,6 +2353,11 @@ export async function fetchAssessmentsFromGoogleSheet(
           }
           rowObj[colName] = val;
         });
+
+        const rowValuesStr = Object.values(rowObj).join(' ').toUpperCase();
+        if (rowValuesStr.includes('REKAP_SEMUA_KECAMATAN') || rowValuesStr.includes('REKAPITULASI')) {
+          return;
+        }
 
         if (hasData) {
           extracted.push({
@@ -2489,10 +2478,23 @@ export async function fetchAssessmentsFromGoogleSheet(
             if (text && text.includes('google.visualization.Query.setResponse')) {
               const parsedRows = parseGvizResponseToRows(text, alias);
               if (parsedRows.length > 0) {
-                allExtractedRows.push(...parsedRows);
-                successfulFetches++;
-                foundForKecamatan = true;
-                break; // Found the tab for this kecamatan, proceed to next kecamatan
+                // Verify that the rows do NOT belong to the fallback REKAP sheet
+                // (if GViz defaulted to REKAP, it will contain rows from multiple other kecamatans)
+                const otherKecNames = kecamatanTabGroups
+                  .filter((g) => g.name.toLowerCase() !== group.name.toLowerCase())
+                  .map((g) => g.name.toLowerCase());
+                
+                const isFallbackRekap = parsedRows.some((r) => {
+                  const rowText = Object.values(r.rowObj).join(' ').toLowerCase();
+                  return otherKecNames.some((other) => rowText.includes(other));
+                });
+
+                if (!isFallbackRekap) {
+                  allExtractedRows.push(...parsedRows);
+                  successfulFetches++;
+                  foundForKecamatan = true;
+                  break; // Found the specific kecamatan tab!
+                }
               }
             }
           }
