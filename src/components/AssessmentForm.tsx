@@ -196,8 +196,36 @@ export const AssessmentForm: React.FC = () => {
   const [cascadeSubComponentId, setCascadeSubComponentId] = useState<string>('pondasi_1');
   const [cascadeDamageInput, setCascadeDamageInput] = useState<number>(0);
 
-  // Photos State (Maksimal 10 Foto Visual per Bangunan)
-  const [photos, setPhotos] = useState<BuildingPhoto[]>([]);
+  // Photos State (Maksimal 20 Foto Visual per Bangunan)
+  const [photos, setPhotos] = useState<BuildingPhoto[]>(() => {
+    try {
+      const saved = sessionStorage.getItem('sipandu_form_draft_photos');
+      if (saved) {
+        const parsed = JSON.parse(saved);
+        if (Array.isArray(parsed) && parsed.length > 0) {
+          return parsed;
+        }
+      }
+    } catch {}
+    return [];
+  });
+  const photosRef = React.useRef<BuildingPhoto[]>(photos);
+  useEffect(() => {
+    photosRef.current = photos;
+  }, [photos]);
+
+  // Persist draft photos in sessionStorage for new entries
+  useEffect(() => {
+    try {
+      if (!selectedAssessmentForEdit) {
+        if (photos.length > 0) {
+          sessionStorage.setItem('sipandu_form_draft_photos', JSON.stringify(photos));
+        } else {
+          sessionStorage.removeItem('sipandu_form_draft_photos');
+        }
+      }
+    } catch {}
+  }, [photos, selectedAssessmentForEdit]);
   const [photoInputMethod, setPhotoInputMethod] = useState<'upload' | 'url'>('upload');
   const [newPhotoDamageLocation, setNewPhotoDamageLocation] = useState<string>('Tampak Depan Bangunan');
   const [newPhotoCaption, setNewPhotoCaption] = useState('');
@@ -316,8 +344,16 @@ export const AssessmentForm: React.FC = () => {
   };
 
   // Load existing data if edit mode, or auto-generate sequential code for new entry
+  const loadedAssessmentIdRef = React.useRef<string | null>(null);
+
   useEffect(() => {
     if (selectedAssessmentForEdit) {
+      // If this exact assessment is already loaded, DO NOT re-populate or overwrite in-progress edits/photos!
+      if (loadedAssessmentIdRef.current === selectedAssessmentForEdit.id) {
+        return;
+      }
+      loadedAssessmentIdRef.current = selectedAssessmentForEdit.id;
+
       const a = selectedAssessmentForEdit;
       setCode(a.code || generateNextRegistrationCode(assessments));
       const cat = a.buildingCategory || 'Gedung Pemerintah';
@@ -377,13 +413,18 @@ export const AssessmentForm: React.FC = () => {
       setHeadRank(a.headOfDepartment?.rank || '');
       setAnalysisTeam(a.analysisTeam && a.analysisTeam.length > 0 ? a.analysisTeam : []);
     } else {
-      // New assessment: ensure code is populated with next sequential code if empty and head officials are empty by default
-      setCode((prev) => (prev && prev.trim() ? prev : generateNextRegistrationCode(assessments)));
-      setHeadName('');
-      setHeadNip('');
-      setHeadRank('');
+      if (loadedAssessmentIdRef.current !== null) {
+        loadedAssessmentIdRef.current = null;
+        setCode(generateNextRegistrationCode(assessments));
+        setHeadName('');
+        setHeadNip('');
+        setHeadRank('');
+      } else {
+        // New assessment: ensure code is populated with next sequential code if empty
+        setCode((prev) => (prev && prev.trim() ? prev : generateNextRegistrationCode(assessments)));
+      }
     }
-  }, [selectedAssessmentForEdit, assessments, kecamatans, desas]);
+  }, [selectedAssessmentForEdit?.id]);
 
   // Current selected kecamatan & desa objects
   const currentKec = kecamatans.find((k) => k.id === kecamatanId);
@@ -734,12 +775,13 @@ export const AssessmentForm: React.FC = () => {
     const fileList = e.target.files;
     if (!fileList || fileList.length === 0) return;
 
-    if (photos.length >= MAX_BUILDING_PHOTOS) {
+    const currentPhotos = photosRef.current;
+    if (currentPhotos.length >= MAX_BUILDING_PHOTOS) {
       showToast(`Batas maksimal ${MAX_BUILDING_PHOTOS} foto visual per bangunan telah tercapai!`, 'warning');
       return;
     }
 
-    const remainingSlots = MAX_BUILDING_PHOTOS - photos.length;
+    const remainingSlots = MAX_BUILDING_PHOTOS - currentPhotos.length;
     const filesToUpload = (Array.from(fileList) as File[]).slice(0, remainingSlots);
 
     if (fileList.length > remainingSlots) {
@@ -753,12 +795,23 @@ export const AssessmentForm: React.FC = () => {
       // 1. Parallel ultra-fast adaptive compression (compressed concurrently in < 0.3s)
       const compressedResults = await Promise.all(
         filesToUpload.map(async (file, i) => {
-          const compressedBase64 = await compressImageFile(file, 750, 750, 0.68);
+          let compressedBase64 = await compressImageFile(file, 750, 750, 0.68);
+          // Safety fallback if compression returned empty string
+          if (!compressedBase64) {
+            try {
+              compressedBase64 = await new Promise<string>((resolve) => {
+                const reader = new FileReader();
+                reader.onload = () => resolve((reader.result as string) || '');
+                reader.onerror = () => resolve('');
+                reader.readAsDataURL(file);
+              });
+            } catch {}
+          }
           const photoId = `photo_${Date.now()}_${Math.random().toString(36).substring(2, 7)}_${i}`;
 
           let loc = newPhotoDamageLocation;
           if (!loc || loc === 'Tampak Depan Bangunan') {
-            if (photos.length === 0 && i === 0) {
+            if (currentPhotos.length === 0 && i === 0) {
               loc = 'Tampak Depan Bangunan';
             } else {
               loc = newPhotoDamageLocation || 'Struktur - Kolom Praktis / Utama';
@@ -790,10 +843,27 @@ export const AssessmentForm: React.FC = () => {
 
       const validPhotos = compressedResults.filter((p) => !!p.url);
 
-      // 2. Immediately show all photos on screen without waiting for network!
-      setPhotos((prev) => [...prev, ...validPhotos]);
+      if (validPhotos.length === 0) {
+        showToast('Gagal memproses file foto!', 'error');
+        return;
+      }
+
+      // 2. Immediately append all new photos to state and persist in sessionStorage draft!
+      setPhotos((prev) => {
+        const map = new Map<string, BuildingPhoto>();
+        prev.forEach((p) => map.set(p.id, p));
+        validPhotos.forEach((p) => map.set(p.id, p));
+        const updated = Array.from(map.values()).slice(0, MAX_BUILDING_PHOTOS);
+        try {
+          if (!selectedAssessmentForEdit) {
+            sessionStorage.setItem('sipandu_form_draft_photos', JSON.stringify(updated));
+          }
+        } catch {}
+        return updated;
+      });
+
       setNewPhotoCaption('');
-      showToast(`✓ Berhasil menambahkan ${validPhotos.length} foto kerusakan (${photos.length + validPhotos.length}/${MAX_BUILDING_PHOTOS})`, 'success');
+      showToast(`✓ Berhasil menambahkan ${validPhotos.length} foto kerusakan. Total: ${Math.min(MAX_BUILDING_PHOTOS, currentPhotos.length + validPhotos.length)}/${MAX_BUILDING_PHOTOS} foto`, 'success');
 
       // 3. Background server disk upload for multi-device & cloud access
       validPhotos.forEach((p) => {
@@ -816,7 +886,8 @@ export const AssessmentForm: React.FC = () => {
       showToast('URL foto wajib diisi!', 'error');
       return;
     }
-    if (photos.length >= MAX_BUILDING_PHOTOS) {
+    const currentPhotos = photosRef.current;
+    if (currentPhotos.length >= MAX_BUILDING_PHOTOS) {
       showToast(`Batas maksimal ${MAX_BUILDING_PHOTOS} foto per bangunan telah tercapai!`, 'warning');
       return;
     }
@@ -836,14 +907,34 @@ export const AssessmentForm: React.FC = () => {
       }),
     };
 
-    setPhotos((prev) => [...prev, newPhoto]);
+    setPhotos((prev) => {
+      const updated = [...prev, newPhoto].slice(0, MAX_BUILDING_PHOTOS);
+      try {
+        if (!selectedAssessmentForEdit) {
+          sessionStorage.setItem('sipandu_form_draft_photos', JSON.stringify(updated));
+        }
+      } catch {}
+      return updated;
+    });
     setNewPhotoUrl('');
     setNewPhotoCaption('');
-    showToast(`✓ Foto berhasil ditambahkan (${photos.length + 1}/${MAX_BUILDING_PHOTOS})`, 'success');
+    showToast(`✓ Foto berhasil ditambahkan (${currentPhotos.length + 1}/${MAX_BUILDING_PHOTOS})`, 'success');
   };
 
   const handleDeletePhoto = (photoId: string) => {
-    setPhotos((prev) => prev.filter((p) => p.id !== photoId));
+    setPhotos((prev) => {
+      const updated = prev.filter((p) => p.id !== photoId);
+      try {
+        if (!selectedAssessmentForEdit) {
+          if (updated.length > 0) {
+            sessionStorage.setItem('sipandu_form_draft_photos', JSON.stringify(updated));
+          } else {
+            sessionStorage.removeItem('sipandu_form_draft_photos');
+          }
+        }
+      } catch {}
+      return updated;
+    });
     showToast('Foto berhasil dihapus.', 'info');
   };
 
@@ -1032,6 +1123,9 @@ export const AssessmentForm: React.FC = () => {
       showToast(res.message, res.success ? 'success' : 'error');
     }
 
+    try {
+      sessionStorage.removeItem('sipandu_form_draft_photos');
+    } catch {}
     setShowDuplicateConfirmModal(false);
     setPendingSubmitPayload(null);
     setSelectedAssessmentForEdit(null);
@@ -1045,7 +1139,18 @@ export const AssessmentForm: React.FC = () => {
 
   return (
     <>
-      <form onSubmit={handleSubmit} className="space-y-6 max-w-5xl mx-auto pb-12">
+      <form
+        onSubmit={handleSubmit}
+        onKeyDown={(e) => {
+          if (e.key === 'Enter') {
+            const target = e.target as HTMLElement;
+            if (target && target.tagName !== 'TEXTAREA' && target.getAttribute('type') !== 'submit') {
+              e.preventDefault();
+            }
+          }
+        }}
+        className="space-y-6 max-w-5xl mx-auto pb-12"
+      >
       {/* Header bar */}
       <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-4 bg-white p-5 rounded-2xl border border-slate-200 shadow-xs">
         <div className="flex items-center gap-3">
@@ -2833,7 +2938,26 @@ export const AssessmentForm: React.FC = () => {
             </div>
           </div>
 
-          <div className="flex items-center gap-2">
+          <div className="flex flex-wrap items-center gap-2">
+            {photos.length > 0 && (
+              <button
+                type="button"
+                onClick={() => {
+                  if (window.confirm(`Kosongkan semua ${photos.length} foto kerusakan yang telah ditambahkan?`)) {
+                    setPhotos([]);
+                    try {
+                      sessionStorage.removeItem('sipandu_form_draft_photos');
+                    } catch {}
+                    showToast('Semua foto visual kerusakan telah dikosongkan.', 'info');
+                  }
+                }}
+                className="inline-flex items-center gap-1.5 px-3 py-1.5 rounded-xl border border-rose-200 bg-rose-50 hover:bg-rose-100 text-rose-700 text-xs font-semibold transition-colors cursor-pointer"
+                title="Hapus semua foto visual yang ada di form"
+              >
+                <Trash2 className="w-3.5 h-3.5 text-rose-600" />
+                <span>Kosongkan Semua Foto</span>
+              </button>
+            )}
             <button
               type="button"
               onClick={handleLoadSamplePhotos}
@@ -2921,6 +3045,12 @@ export const AssessmentForm: React.FC = () => {
                 type="text"
                 value={newPhotoCaption}
                 onChange={(e) => setNewPhotoCaption(e.target.value)}
+                onKeyDown={(e) => {
+                  if (e.key === 'Enter') {
+                    e.preventDefault();
+                    e.stopPropagation();
+                  }
+                }}
                 placeholder="Contoh: Retak geser diagonal lebar >3mm pada pertemuan kolom sudut..."
                 className="w-full px-3 py-2 rounded-xl border border-slate-200 bg-white text-slate-900 placeholder:text-slate-400 focus:ring-2 focus:ring-amber-500/20 focus:border-amber-500"
               />

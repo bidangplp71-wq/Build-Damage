@@ -110,6 +110,20 @@ export async function compressImageFile(
     resultDataUrl = await readWithFileReader(rawFile, maxWidth, maxHeight, quality);
   }
 
+  // 4. Safety Fail-Safe: If all compression paths failed (e.g. browser memory limits), read raw file directly so photo is never lost!
+  if (!resultDataUrl) {
+    try {
+      resultDataUrl = await new Promise<string>((resolve) => {
+        const reader = new FileReader();
+        reader.onload = () => resolve((reader.result as string) || '');
+        reader.onerror = () => resolve('');
+        reader.readAsDataURL(rawFile);
+      });
+    } catch {
+      resultDataUrl = '';
+    }
+  }
+
   return resultDataUrl;
 }
 
