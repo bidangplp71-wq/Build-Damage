@@ -2032,19 +2032,7 @@ export function parseExtractedRowsToAssessments(
     const totalDamagePercent = parseNumber(getVal(rowObj, ['Tingkat Kerusakan (%)', 'Tingkat Kerusakan', '% Kerusakan', 'Persentase Kerusakan'])) || 0;
     const roundedRehabCost = parseNumber(getVal(rowObj, ['Ajuan Biaya Rehab (Rp)', 'Ajuan Biaya', 'Total Biaya', 'Estimasi Biaya', 'RAB'])) || 0;
 
-    // Cross-tab duplication prevention:
-    // If the exact same physical record appears in both Rekap and individual Kecamatan tabs:
-    const rowSignature = rawCode 
-      ? `code:${rawCode.toUpperCase().trim()}`
-      : `sig:${kecInfo.id}:${desaName.toLowerCase().trim()}:${(namaPemilikRumah || namaPemilikGedung || buildingName).toLowerCase().trim()}:${detailedAddress.toLowerCase().trim()}:${totalFloorAreaM2}:${totalDamagePercent}:${roundedRehabCost}`;
-    
-    if (seenSignatures.has(rowSignature)) {
-      // Mirrored identical row in another sheet tab, skip duplicate injection
-      return;
-    }
-    seenSignatures.add(rowSignature);
-
-    // Unique registration code and ID generation (Never drop survey rows)
+    // Unique registration code and ID generation (Never drop survey rows, record all 98 items)
     let code = rawCode;
     if (code) {
       const codeUpper = code.toUpperCase();
@@ -2342,27 +2330,9 @@ export async function fetchAssessmentsFromGoogleSheet(
   // Check if gid is present in URL
   const gidMatch = config.spreadsheetUrl.match(/[?#&]gid=([0-9]+)/);
   const gid = gidMatch ? gidMatch[1] : '';
-
   const masterSheetName = config.sheetName || 'REKAP_SEMUA_KECAMATAN';
 
-  // List of canonical sheet tabs: 7 Kecamatan tabs + Master Rekap
-  const sheetNamesToFetch = [
-    masterSheetName,
-    'REKAP_SEMUA_KECAMATAN',
-    'Kec. Aesesa',
-    'Kec. Aesesa Selatan',
-    'Kec. Boawae',
-    'Kec. Mauponggo',
-    'Kec. Nangaroro',
-    'Kec. Keo Tengah',
-    'Kec. Wolowae',
-    'Form Responses 1',
-  ];
-
-  // Remove duplicates from sheetNamesToFetch
-  const uniqueSheetNames = Array.from(new Set(sheetNamesToFetch));
   const cacheBuster = Date.now();
-
   let successfulFetches = 0;
   let lastStatus = 0;
 
@@ -2473,27 +2443,93 @@ export async function fetchAssessmentsFromGoogleSheet(
     }
   };
 
+  // 7 Kecamatan definitions with comprehensive alias matching
+  const kecamatanTabGroups: { name: string; aliases: string[] }[] = [
+    {
+      name: 'Aesesa',
+      aliases: ['Kec. Aesesa', 'Aesesa', 'Kec Aesesa', 'AESESA', 'KEC. AESESA', 'KECAMATAN AESESA', 'Kecamatan Aesesa'],
+    },
+    {
+      name: 'Aesesa Selatan',
+      aliases: ['Kec. Aesesa Selatan', 'Aesesa Selatan', 'Kec Aesesa Selatan', 'AESESA SELATAN', 'KEC. AESESA SELATAN', 'KECAMATAN AESESA SELATAN', 'Kecamatan Aesesa Selatan'],
+    },
+    {
+      name: 'Boawae',
+      aliases: ['Kec. Boawae', 'Boawae', 'Kec Boawae', 'BOAWAE', 'KEC. BOAWAE', 'KECAMATAN BOAWAE', 'Kecamatan Boawae'],
+    },
+    {
+      name: 'Mauponggo',
+      aliases: ['Kec. Mauponggo', 'Mauponggo', 'Kec Mauponggo', 'MAUPONGGO', 'KEC. MAUPONGGO', 'KECAMATAN MAUPONGGO', 'Kecamatan Mauponggo'],
+    },
+    {
+      name: 'Nangaroro',
+      aliases: ['Kec. Nangaroro', 'Nangaroro', 'Kec Nangaroro', 'NANGARORO', 'KEC. NANGARORO', 'KECAMATAN NANGARORO', 'Kecamatan Nangaroro'],
+    },
+    {
+      name: 'Keo Tengah',
+      aliases: ['Kec. Keo Tengah', 'Keo Tengah', 'Kec Keo Tengah', 'KEO TENGAH', 'KEC. KEO TENGAH', 'KECAMATAN KEO TENGAH', 'Kecamatan Keo Tengah'],
+    },
+    {
+      name: 'Wolowae',
+      aliases: ['Kec. Wolowae', 'Wolowae', 'Kec Wolowae', 'WOLOWAE', 'KEC. WOLOWAE', 'KECAMATAN WOLOWAE', 'Kecamatan Wolowae'],
+    },
+  ];
+
   try {
-    // 1. Fetch via GViz JSON for each named sheet tab (GViz JSON returns status="error" if tab not found, preventing duplicates!)
-    for (const sheetName of uniqueSheetNames) {
-      const gvizUrl = `https://docs.google.com/spreadsheets/d/${spreadsheetId}/gviz/tq?sheet=${encodeURIComponent(sheetName)}&_t=${cacheBuster}`;
-      try {
-        const res = await fetch(gvizUrl, { cache: 'no-store' });
-        lastStatus = res.status;
-        if (res.ok) {
-          const text = await res.text();
-          if (text && text.includes('google.visualization.Query.setResponse')) {
-            const parsedRows = parseGvizResponseToRows(text, sheetName);
-            if (parsedRows.length > 0) {
-              allExtractedRows.push(...parsedRows);
-              successfulFetches++;
+    // 1. Scan across the 7 Kecamatan tab groups (stops at first matching alias per kecamatan)
+    for (const group of kecamatanTabGroups) {
+      let foundForKecamatan = false;
+      for (const alias of group.aliases) {
+        const gvizUrl = `https://docs.google.com/spreadsheets/d/${spreadsheetId}/gviz/tq?sheet=${encodeURIComponent(alias)}&_t=${cacheBuster}`;
+        try {
+          const res = await fetch(gvizUrl, { cache: 'no-store' });
+          lastStatus = res.status;
+          if (res.ok) {
+            const text = await res.text();
+            if (text && text.includes('google.visualization.Query.setResponse')) {
+              const parsedRows = parseGvizResponseToRows(text, alias);
+              if (parsedRows.length > 0) {
+                allExtractedRows.push(...parsedRows);
+                successfulFetches++;
+                foundForKecamatan = true;
+                break; // Found the tab for this kecamatan, proceed to next kecamatan
+              }
             }
           }
-        }
-      } catch {}
+        } catch {}
+      }
     }
 
-    // 2. If GViz JSON returned nothing (e.g. sheet not public for JSON), fallback to CSV export
+    // 2. If 0 rows were found from the 7 kecamatan tabs, fallback to Master Rekap or active tab
+    if (allExtractedRows.length === 0) {
+      const fallbackSheetNames = [
+        masterSheetName,
+        'REKAP_SEMUA_KECAMATAN',
+        'Form Responses 1',
+        'Jawaban Formulir 1',
+        'Sheet1',
+        'Data',
+      ];
+      for (const sheetName of Array.from(new Set(fallbackSheetNames))) {
+        const gvizUrl = `https://docs.google.com/spreadsheets/d/${spreadsheetId}/gviz/tq?sheet=${encodeURIComponent(sheetName)}&_t=${cacheBuster}`;
+        try {
+          const res = await fetch(gvizUrl, { cache: 'no-store' });
+          if (res.ok) {
+            const text = await res.text();
+            if (text && text.includes('google.visualization.Query.setResponse')) {
+              const parsedRows = parseGvizResponseToRows(text, sheetName);
+              if (parsedRows.length > 0) {
+                allExtractedRows.push(...parsedRows);
+                successfulFetches++;
+                break;
+              }
+            }
+          }
+        } catch {}
+      }
+    }
+
+    // 3. If GViz JSON returned nothing (e.g. sheet not public for JSON), fallback to CSV export
     if (allExtractedRows.length === 0) {
       const defaultUrl = gid
         ? `https://docs.google.com/spreadsheets/d/${spreadsheetId}/export?format=csv&gid=${gid}&_t=${cacheBuster}`
