@@ -9,6 +9,7 @@ import {
   PythonAnalyticsResult,
 } from '../utils/pythonAnalyticsEngine';
 import { PythonAnalyticsModal } from './PythonAnalyticsModal';
+import { DataFulfillmentCard } from './DataFulfillmentCard';
 import {
   Building,
   AlertTriangle,
@@ -237,6 +238,9 @@ export const DashboardAnalytics: React.FC = () => {
           </button>
         </div>
       )}
+
+      {/* PEMENUHAN TARGET DATA (DEFAULT 400, DAPAT DIUBAH SUPER ADMIN) */}
+      <DataFulfillmentCard />
 
       {/* Main KPI Cards */}
       <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-4">

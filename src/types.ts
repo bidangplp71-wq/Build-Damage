@@ -565,4 +565,16 @@ export interface DataNotification {
   surveyorName?: string;
 }
 
+export interface DataFulfillmentSummary {
+  target: number;
+  totalEntered: number;
+  percentage: number;
+  remaining: number;
+  isComplete: boolean;
+  isExceeded: boolean;
+  surplus: number;
+  verifiedCount: number;
+  pendingCount: number;
+}
+
 

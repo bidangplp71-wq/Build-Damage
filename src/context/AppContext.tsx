@@ -133,6 +133,10 @@ interface AppContextType {
   resetHsbgnConfigs: () => void;
   getCategoryConfig: (category: BuildingCategory) => BuildingCategoryConfig;
 
+  // Data Fulfillment Target Configuration (Pemenuhan Kuota Data Input)
+  targetAssessmentCount: number;
+  updateTargetAssessmentCount: (newTarget: number) => { success: boolean; message: string };
+
   // User Access & Activity Audit Trail Analytics
   activityLogs: UserActivityLog[];
   logUserActivity: (
@@ -184,6 +188,7 @@ const STORAGE_KEYS = {
   NOTIFICATIONS: 'sipandu_pupr_notifications_v1',
   DELETED_USERS: 'sipandu_pupr_deleted_users_v3',
   HSBGN_CONFIGS: 'sipandu_pupr_hsbgn_v1',
+  TARGET_COUNT: 'sipandu_pupr_target_count_v1',
 };
 
 // Safe helper to read persisted deleted User IDs across refreshes & sessions
@@ -475,6 +480,53 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
       };
     }
     return base;
+  };
+
+  // Initialize Data Fulfillment Target Count (Default: 400, dynamically configurable by Super Admin)
+  const [targetAssessmentCount, setTargetAssessmentCount] = useState<number>(() => {
+    try {
+      const saved = localStorage.getItem(STORAGE_KEYS.TARGET_COUNT);
+      if (saved) {
+        const val = parseInt(saved, 10);
+        if (!isNaN(val) && val > 0) return val;
+      }
+    } catch {}
+    return 400; // Standar default 400 data
+  });
+
+  const updateTargetAssessmentCount = (newTarget: number): { success: boolean; message: string } => {
+    if (currentUser.role !== 'super_admin' && currentUser.role !== 'admin') {
+      return {
+        success: false,
+        message: 'Akses Ditolak: Hanya Super Admin yang memiliki wewenang mengubah target kuota pemenuhan data.',
+      };
+    }
+    if (!newTarget || isNaN(newTarget) || newTarget < 1) {
+      return {
+        success: false,
+        message: 'Nilai target harus berupa angka bulat positif minimal 1.',
+      };
+    }
+    const sanitizedTarget = Math.round(newTarget);
+    setTargetAssessmentCount(sanitizedTarget);
+    try {
+      localStorage.setItem(STORAGE_KEYS.TARGET_COUNT, sanitizedTarget.toString());
+    } catch (e) {
+      console.error('Error saving targetAssessmentCount:', e);
+    }
+
+    logUserActivity(
+      'UPDATE_ASSESSMENT',
+      'Sistem & Pengguna',
+      `Super Admin ${currentUser.name} memperbarui target kuota data menjadi ${sanitizedTarget} gedung`,
+      `Target: ${sanitizedTarget}`,
+      `Nilai kuota sebelumnya diperbarui ke ${sanitizedTarget}`
+    );
+
+    return {
+      success: true,
+      message: `Target pemenuhan data berhasil disetel ke ${sanitizedTarget.toLocaleString('id-ID')} gedung!`,
+    };
   };
 
   // Initialize Firebase Shield Config
@@ -3075,6 +3127,9 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
         updateHsbgnConfig,
         resetHsbgnConfigs,
         getCategoryConfig,
+
+        targetAssessmentCount,
+        updateTargetAssessmentCount,
 
         activityLogs,
         logUserActivity,

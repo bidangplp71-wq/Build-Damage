@@ -49,6 +49,7 @@ import {
 } from 'lucide-react';
 import { PhotoViewerModal } from './PhotoViewerModal';
 import { DuplicateAuditModal } from './DuplicateAuditModal';
+import { DataFulfillmentCard } from './DataFulfillmentCard';
 
 export const AssessmentTable: React.FC = () => {
   const {
@@ -495,6 +496,9 @@ export const AssessmentTable: React.FC = () => {
           </div>
         </div>
       )}
+
+      {/* PEMENUHAN TARGET DATA QUOTA PROGRESS (COMPACT) */}
+      <DataFulfillmentCard compact />
 
       {/* Header Bar: Title, Count, and Global Actions */}
       <div className="flex flex-col sm:flex-row items-start sm:items-center justify-between gap-4 bg-white p-4 rounded-2xl border border-slate-200 shadow-xs">

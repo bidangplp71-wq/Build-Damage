@@ -1,7 +1,8 @@
 import React, { useState } from 'react';
 import { useApp } from '../context/AppContext';
 import { BUILDING_CATEGORY_CONFIGS, BuildingCategory } from '../types';
-import { Award, Save, RotateCcw, CheckCircle2, ShieldAlert, Building2, Sliders, Info } from 'lucide-react';
+import { Award, Save, RotateCcw, CheckCircle2, ShieldAlert, Building2, Sliders, Info, Target } from 'lucide-react';
+import { DataFulfillmentCard } from './DataFulfillmentCard';
 
 export const HsbgnSettings: React.FC = () => {
   const { currentUser, hsbgnConfigs, updateHsbgnConfig, resetHsbgnConfigs, showToast } = useApp();
@@ -95,6 +96,9 @@ export const HsbgnSettings: React.FC = () => {
           </div>
         </div>
       </div>
+
+      {/* Target Pemenuhan Kuota Data Input Section */}
+      <DataFulfillmentCard />
 
       {!isAdmin && (
         <div className="p-4 rounded-xl bg-rose-50 border border-rose-200 text-rose-800 flex items-center gap-3 text-sm">
