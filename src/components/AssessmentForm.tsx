@@ -81,6 +81,7 @@ import {
   AlertCircle,
   MessageSquare,
   Lock,
+  Loader2,
 } from 'lucide-react';
 
 export const AssessmentForm: React.FC = () => {
@@ -114,6 +115,7 @@ export const AssessmentForm: React.FC = () => {
   const [tempWebhookUrl, setTempWebhookUrl] = useState(googleSheetConfig.webhookUrl || '');
   const [tempSheetName, setTempSheetName] = useState(googleSheetConfig.sheetName || 'Data_Kerusakan_PUPR');
   const [tempDriveFolderId, setTempDriveFolderId] = useState(googleSheetConfig.driveFolderId || '');
+  const [isSubmitting, setIsSubmitting] = useState(false);
 
   // Form Fields
   const [code, setCode] = useState<string>(() => {
@@ -1001,6 +1003,8 @@ export const AssessmentForm: React.FC = () => {
   const handleSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
 
+    if (isSubmitting) return;
+
     if (!buildingName.trim()) {
       showToast('Nama bangunan wajib diisi!', 'error');
       return;
@@ -1018,19 +1022,22 @@ export const AssessmentForm: React.FC = () => {
       ? (namaPemilikRumah.trim() || ownerAgency.trim() || 'Pemilik Rumah')
       : (namaPemilikGedung.trim() || ownerAgency.trim() || 'Pengelola Gedung');
 
-    // Ensure valid non-empty registration code (auto-assign if empty)
+    // Ensure valid non-empty and unique registration code
     let finalCode = code.trim();
-    if (!finalCode) {
+    if (!finalCode || (!isEditMode && !isRegistrationCodeUnique(finalCode, assessments))) {
       finalCode = generateNextRegistrationCode(assessments);
       setCode(finalCode);
-      showToast(`No. Registrasi otomatis ditetapkan: ${finalCode}`, 'info');
+      if (!code.trim()) {
+        showToast(`No. Registrasi otomatis ditetapkan: ${finalCode}`, 'info');
+      }
     }
 
+    // ALWAYS ensure a guaranteed globally unique document ID for new assessments to prevent collisions or overwriting
     const targetAssId = isEditMode
       ? selectedAssessmentForEdit!.id
-      : (finalCode.startsWith('REG-') ? finalCode : `REG-${finalCode}`);
+      : `ass_${Date.now()}_${Math.random().toString(36).substring(2, 9)}`;
 
-    // Ensure photos remain as compressed Base64 to be saved permanently in Firestore
+    // Ensure photos remain as compressed Base64 to be saved permanently
     const syncedPhotos: BuildingPhoto[] = photos;
 
     const assessmentPayload: BuildingAssessment = {
@@ -1110,36 +1117,44 @@ export const AssessmentForm: React.FC = () => {
   };
 
   const executeSaveAssessment = async (payload: BuildingAssessment) => {
-    if (isEditMode) {
-      if (selectedAssessmentForEdit?.verificationStatus === 'Terverifikasi') {
-        showToast(
-          'Akses ditolak: Data penilaian ini telah berstatus Terverifikasi dan terkunci resmi dari perubahan.',
-          'error'
-        );
-        return;
-      }
-      const isRevision = selectedAssessmentForEdit?.verificationStatus === 'Perlu Revisi';
-      const res = await updateAssessment(selectedAssessmentForEdit!.id, payload);
-      if (res.success && isRevision) {
-        showToast(
-          '✓ Data berhasil diperbaiki dan status dikembalikan ke "Menunggu Verifikasi" untuk diverifikasi ulang oleh Admin!',
-          'success'
-        );
+    setIsSubmitting(true);
+    try {
+      if (isEditMode) {
+        if (selectedAssessmentForEdit?.verificationStatus === 'Terverifikasi') {
+          showToast(
+            'Akses ditolak: Data penilaian ini telah berstatus Terverifikasi dan terkunci resmi dari perubahan.',
+            'error'
+          );
+          setIsSubmitting(false);
+          return;
+        }
+        const isRevision = selectedAssessmentForEdit?.verificationStatus === 'Perlu Revisi';
+        const res = await updateAssessment(selectedAssessmentForEdit!.id, payload);
+        if (res.success && isRevision) {
+          showToast(
+            '✓ Data berhasil diperbaiki dan status dikembalikan ke "Menunggu Verifikasi" untuk diverifikasi ulang oleh Admin!',
+            'success'
+          );
+        } else {
+          showToast(res.message, res.success ? 'success' : 'error');
+        }
       } else {
+        const res = await addAssessment(payload);
         showToast(res.message, res.success ? 'success' : 'error');
       }
-    } else {
-      const res = await addAssessment(payload);
-      showToast(res.message, res.success ? 'success' : 'error');
-    }
 
-    try {
-      sessionStorage.removeItem('sipandu_form_draft_photos');
-    } catch {}
-    setShowDuplicateConfirmModal(false);
-    setPendingSubmitPayload(null);
-    setSelectedAssessmentForEdit(null);
-    setActiveTab('penilaian');
+      try {
+        sessionStorage.removeItem('sipandu_form_draft_photos');
+      } catch {}
+      setShowDuplicateConfirmModal(false);
+      setPendingSubmitPayload(null);
+      setSelectedAssessmentForEdit(null);
+      setActiveTab('penilaian');
+    } catch (err: any) {
+      showToast('Terjadi kesalahan saat menyimpan: ' + (err?.message || 'Error'), 'error');
+    } finally {
+      setIsSubmitting(false);
+    }
   };
 
   const handleResetScores = () => {
@@ -1228,16 +1243,30 @@ export const AssessmentForm: React.FC = () => {
           ) : (
             <button
               type="submit"
-              className="flex items-center gap-1.5 px-4 py-2 text-xs font-bold text-slate-950 bg-amber-500 hover:bg-amber-400 rounded-xl shadow-xs transition-colors cursor-pointer"
+              disabled={isSubmitting}
+              className={`flex items-center gap-1.5 px-4 py-2 text-xs font-bold rounded-xl shadow-xs transition-colors cursor-pointer ${
+                isSubmitting
+                  ? 'bg-amber-300 text-slate-700 cursor-not-allowed opacity-90'
+                  : 'text-slate-950 bg-amber-500 hover:bg-amber-400'
+              }`}
             >
-              <Save className="w-4 h-4" />
-              <span>
-                {isEditMode
-                  ? (selectedAssessmentForEdit?.verificationStatus === 'Perlu Revisi'
-                      ? 'Simpan & Kirim Ulang ke Verifikator'
-                      : 'Simpan Perubahan')
-                  : 'Simpan & Hitung'}
-              </span>
+              {isSubmitting ? (
+                <>
+                  <Loader2 className="w-4 h-4 animate-spin text-slate-900" />
+                  <span>Menyimpan Data...</span>
+                </>
+              ) : (
+                <>
+                  <Save className="w-4 h-4" />
+                  <span>
+                    {isEditMode
+                      ? (selectedAssessmentForEdit?.verificationStatus === 'Perlu Revisi'
+                          ? 'Simpan & Kirim Ulang ke Verifikator'
+                          : 'Simpan Perubahan')
+                      : 'Simpan & Hitung'}
+                  </span>
+                </>
+              )}
             </button>
           )}
         </div>
@@ -3363,16 +3392,30 @@ export const AssessmentForm: React.FC = () => {
         ) : (
           <button
             type="submit"
-            className="flex items-center gap-2 px-6 py-2.5 text-xs font-bold text-slate-950 bg-amber-500 hover:bg-amber-400 rounded-xl shadow-md shadow-amber-500/20 transition-all cursor-pointer"
+            disabled={isSubmitting}
+            className={`flex items-center gap-2 px-6 py-2.5 text-xs font-bold rounded-xl shadow-md transition-all cursor-pointer ${
+              isSubmitting
+                ? 'bg-amber-300 text-slate-700 cursor-not-allowed opacity-90'
+                : 'text-slate-950 bg-amber-500 hover:bg-amber-400 shadow-amber-500/20'
+            }`}
           >
-            <Save className="w-4 h-4" />
-            <span>
-              {isEditMode
-                ? (selectedAssessmentForEdit?.verificationStatus === 'Perlu Revisi'
-                    ? 'Simpan & Kirim Ulang ke Verifikator'
-                    : 'Simpan Perubahan Penilaian')
-                : 'Simpan & Sinkronkan Data'}
-            </span>
+            {isSubmitting ? (
+              <>
+                <Loader2 className="w-4 h-4 animate-spin text-slate-900" />
+                <span>Menyimpan & Menyinkronkan...</span>
+              </>
+            ) : (
+              <>
+                <Save className="w-4 h-4" />
+                <span>
+                  {isEditMode
+                    ? (selectedAssessmentForEdit?.verificationStatus === 'Perlu Revisi'
+                        ? 'Simpan & Kirim Ulang ke Verifikator'
+                        : 'Simpan Perubahan Penilaian')
+                    : 'Simpan & Sinkronkan Data'}
+                </span>
+              </>
+            )}
           </button>
         )}
       </div>

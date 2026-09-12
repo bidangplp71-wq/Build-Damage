@@ -60,6 +60,11 @@ import {
 import { hydrateAssessmentPhotos } from '../utils/imageCompressor';
 import { detectAllDuplicateGroups } from '../utils/duplicateDetector';
 import { generateNextRegistrationCode } from '../utils/registrationCodeGenerator';
+import {
+  queueAssessmentForSync,
+  removeAssessmentFromSyncQueue,
+  flushOfflineSyncQueue,
+} from '../utils/offlineSync';
 
 interface AppContextType {
   // Current user & Auth
@@ -743,9 +748,22 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
       .catch((err) => console.warn('Server assessments initial fetch notice:', err));
   }, []);
 
-  // Periodic background check against server storage to pick up new surveys submitted from other devices or webhooks
+  // Periodic background check against server storage & flush offline sync queue
   useEffect(() => {
+    // Immediate initial flush
+    flushOfflineSyncQueue().catch(() => {});
+
+    const handleOnline = () => {
+      console.info('[Network] Online event detected, flushing offline sync outbox...');
+      flushOfflineSyncQueue().catch(() => {});
+    };
+    window.addEventListener('online', handleOnline);
+
     const interval = setInterval(() => {
+      // 1. Flush any pending offline queue submissions
+      flushOfflineSyncQueue().catch(() => {});
+
+      // 2. Fetch latest surveys from server
       fetch('/api/assessments')
         .then((res) => res.json())
         .then((data) => {
@@ -771,8 +789,11 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
           }
         })
         .catch(() => {});
-    }, 10000);
-    return () => clearInterval(interval);
+    }, 8000);
+    return () => {
+      clearInterval(interval);
+      window.removeEventListener('online', handleOnline);
+    };
   }, []);
 
   // Load from Firebase ONCE on mount with Deleted IDs Filtering
@@ -1994,26 +2015,71 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
     }
   };
 
-  // Assessment operations: Direct save to Google Sheet without manual synchronization
+  // Assessment operations: Guaranteed instant multi-layer save (State + LocalStorage + IndexedDB + Server + Cloud)
   const addAssessment = async (data: BuildingAssessment) => {
     const hasGSheet = Boolean(googleSheetConfig.webhookUrl && googleSheetConfig.webhookUrl.startsWith('http'));
 
-    // Optimistically mark as direct-saved if sheet link is configured
+    // Ensure guaranteed unique ID for every single new assessment to prevent any collisions or overwrites
+    const finalId = data.id && data.id.trim()
+      ? data.id.trim()
+      : `ass_${Date.now()}_${Math.random().toString(36).substring(2, 9)}`;
+
     const assessmentToSave: BuildingAssessment = {
       ...data,
+      id: finalId,
+      createdAt: data.createdAt || new Date().toISOString(),
+      updatedAt: new Date().toISOString(),
       googleSheetSynced: hasGSheet,
       googleSheetSyncedAt: hasGSheet ? new Date().toISOString() : undefined,
     };
 
-    setAssessments((prev) => [assessmentToSave, ...prev]);
+    // 1. Optimistic instant React state update
+    setAssessments((prev) => {
+      const filtered = prev.filter((a) => a.id !== assessmentToSave.id);
+      return [assessmentToSave, ...filtered];
+    });
 
-    // Save to Express server for zero-quota persistence and multi-client accessibility
+    // 2. Instant synchronous LocalStorage write (zero latency, resilient to browser close/refresh)
+    try {
+      const existingRaw = localStorage.getItem(STORAGE_KEYS.ASSESSMENTS);
+      const existingList = existingRaw ? JSON.parse(existingRaw) : [];
+      const updatedList = [assessmentToSave, ...existingList.filter((a: any) => a.id !== assessmentToSave.id)];
+      localStorage.setItem(STORAGE_KEYS.ASSESSMENTS, JSON.stringify(updatedList));
+    } catch (err) {
+      try {
+        const lightweight = [assessmentToSave].map((a) => ({
+          ...a,
+          photos: (a.photos || []).map((p) => ({
+            ...p,
+            url: p.url && (p.url.startsWith('http') || p.url.startsWith('/uploads/') || p.url.startsWith('data:') || p.url.length < 300) ? p.url : '',
+          })),
+        }));
+        localStorage.setItem(STORAGE_KEYS.ASSESSMENTS, JSON.stringify(lightweight));
+      } catch {}
+    }
+
+    // 3. Save photos permanently to IndexedDB
+    if (assessmentToSave.photos && assessmentToSave.photos.length > 0) {
+      savePhotosLocally(assessmentToSave.photos, assessmentToSave.id).catch(() => {});
+    }
+
+    // 4. Queue into Offline Outbox for guaranteed delivery regardless of network drops
+    queueAssessmentForSync(assessmentToSave, 'insert');
+
+    // 5. Send to Express server for zero-quota persistence and multi-client accessibility
     fetch('/api/assessments', {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify(assessmentToSave),
-    }).catch((e) => console.warn('Server assessment save notice:', e));
+    })
+      .then((res) => {
+        if (res.ok) {
+          removeAssessmentFromSyncQueue(assessmentToSave.id);
+        }
+      })
+      .catch((e) => console.warn('Server assessment save notice (queued in outbox):', e));
 
+    // 6. Save to Firebase Firestore if connected
     if (db) {
       const cleanA = prepareAssessmentForFirestore(assessmentToSave);
       setDoc(doc(db, 'assessments', cleanA.id), cleanA).catch((err) => {
@@ -2026,17 +2092,17 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
     const newNotif: DataNotification = {
       id: `notif_${Date.now()}_${Math.random().toString(36).substring(2, 6)}`,
       title: 'Data Masuk: Penilaian Gedung Baru',
-      message: `Penilaian gedung "${data.buildingName}" (${data.kecamatanName || 'Kecamatan'}) berhasil dicatat ke sistem.`,
-      buildingName: data.buildingName,
-      kecamatan: data.kecamatanName,
-      desa: data.desaName,
-      damageClassification: data.damageClassification,
-      totalDamagePercent: data.totalDamagePercent,
-      rehabCost: data.roundedRehabCost,
-      assessmentId: data.id,
+      message: `Penilaian gedung "${assessmentToSave.buildingName}" (${assessmentToSave.kecamatanName || 'Kecamatan'}) berhasil dicatat ke sistem.`,
+      buildingName: assessmentToSave.buildingName,
+      kecamatan: assessmentToSave.kecamatanName,
+      desa: assessmentToSave.desaName,
+      damageClassification: assessmentToSave.damageClassification,
+      totalDamagePercent: assessmentToSave.totalDamagePercent,
+      rehabCost: assessmentToSave.roundedRehabCost,
+      assessmentId: assessmentToSave.id,
       timestamp: new Date().toISOString(),
       isRead: false,
-      surveyorName: data.createdByName || currentUser.name,
+      surveyorName: assessmentToSave.createdByName || currentUser.name,
     };
 
     setNotifications((prev) => [newNotif, ...prev]);
@@ -2046,9 +2112,9 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
     logUserActivity(
       'CREATE_ASSESSMENT',
       'Penilaian Kerusakan',
-      `Input Penilaian Baru: ${data.buildingName}`,
-      data.code || data.buildingName,
-      `Klasifikasi: ${data.damageClassification} (${Number(data.totalDamagePercent ?? 0).toFixed(1)}%) — Biaya: Rp ${Number(data.roundedRehabCost ?? 0).toLocaleString('id-ID')}`
+      `Input Penilaian Baru: ${assessmentToSave.buildingName}`,
+      assessmentToSave.code || assessmentToSave.buildingName,
+      `Klasifikasi: ${assessmentToSave.damageClassification} (${Number(assessmentToSave.totalDamagePercent ?? 0).toFixed(1)}%) — Biaya: Rp ${Number(assessmentToSave.roundedRehabCost ?? 0).toLocaleString('id-ID')}`
     );
 
     // Save directly to Google Sheet without needing manual synchronization
@@ -2064,7 +2130,7 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
           if (res.success) {
             setAssessments((prev) =>
               prev.map((a) =>
-                a.id === data.id
+                a.id === assessmentToSave.id
                   ? { ...a, googleSheetSynced: true, googleSheetSyncedAt: new Date().toISOString() }
                   : a
               )
@@ -2075,13 +2141,13 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
 
       return {
         success: true,
-        message: `Penilaian gedung "${data.buildingName}" tersimpan & langsung masuk ke Google Sheet (${assessmentToSave.targetSheetName || `Kec. ${assessmentToSave.kecamatanName}`})!`,
+        message: `✓ Penilaian gedung "${assessmentToSave.buildingName}" langsung masuk & tersimpan permanen! (Tersinkron ke Google Sheet)`,
       };
     }
 
     return {
       success: true,
-      message: `Penilaian gedung "${data.buildingName}" berhasil disimpan!`,
+      message: `✓ Penilaian gedung "${assessmentToSave.buildingName}" berhasil disimpan sekali klik!`,
     };
   };
 
@@ -2099,35 +2165,53 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
     const hasGSheet = Boolean(googleSheetConfig.webhookUrl && googleSheetConfig.webhookUrl.startsWith('http'));
     const now = new Date().toISOString();
     const updatedCode = data.code || target?.code || target?.id || id;
+    const mergedData: BuildingAssessment = {
+      ...(target || ({} as BuildingAssessment)),
+      ...data,
+      id,
+      code: updatedCode,
+      googleSheetSynced: hasGSheet ? true : (target?.googleSheetSynced ?? false),
+      googleSheetSyncedAt: hasGSheet ? now : target?.googleSheetSyncedAt,
+      updatedAt: now,
+    };
 
+    // 1. Optimistic instant React state update
     setAssessments((prev) =>
-      prev.map((a) =>
-        a.id === id
-          ? {
-              ...a,
-              ...data,
-              code: updatedCode,
-              googleSheetSynced: hasGSheet ? true : a.googleSheetSynced,
-              googleSheetSyncedAt: hasGSheet ? now : a.googleSheetSyncedAt,
-              updatedAt: now,
-            }
-          : a
-      )
+      prev.map((a) => (a.id === id ? mergedData : a))
     );
 
-    // Update on Express server for instant zero-quota persistence across devices
-    if (target) {
-      const mergedServer = { ...target, ...data, code: updatedCode, updatedAt: now };
-      fetch('/api/assessments', {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify(mergedServer),
-      }).catch((e) => console.warn('Server assessment update notice:', e));
+    // 2. Instant synchronous LocalStorage write
+    try {
+      const existingRaw = localStorage.getItem(STORAGE_KEYS.ASSESSMENTS);
+      const existingList = existingRaw ? JSON.parse(existingRaw) : [];
+      const updatedList = existingList.map((a: any) => (a.id === id ? mergedData : a));
+      localStorage.setItem(STORAGE_KEYS.ASSESSMENTS, JSON.stringify(updatedList));
+    } catch {}
+
+    // 3. Save photos permanently to IndexedDB
+    if (mergedData.photos && mergedData.photos.length > 0) {
+      savePhotosLocally(mergedData.photos, id).catch(() => {});
     }
 
-    if (db && target) {
-      const merged = { ...target, ...data, code: updatedCode, updatedAt: now };
-      const cleanA = prepareAssessmentForFirestore(merged);
+    // 4. Queue into Offline Outbox
+    queueAssessmentForSync(mergedData, 'update');
+
+    // 5. Update on Express server for instant zero-quota persistence across devices
+    fetch('/api/assessments', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify(mergedData),
+    })
+      .then((res) => {
+        if (res.ok) {
+          removeAssessmentFromSyncQueue(id);
+        }
+      })
+      .catch((e) => console.warn('Server assessment update notice (queued):', e));
+
+    // 6. Update on Firestore
+    if (db) {
+      const cleanA = prepareAssessmentForFirestore(mergedData);
       setDoc(doc(db, 'assessments', id), cleanA, { merge: true }).catch((err) => {
         if (isQuotaError(err)) setIsFirestoreQuotaExceeded(true);
         console.warn('Firebase assessment update notice:', err?.message || err);
@@ -2137,14 +2221,13 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
     logUserActivity(
       'UPDATE_ASSESSMENT',
       'Penilaian Kerusakan',
-      `Memperbarui Data Penilaian: ${target?.buildingName || id}`,
+      `Memperbarui Data Penilaian: ${mergedData.buildingName || id}`,
       updatedCode,
       'Pembaruan data kerusakan atau pengesahan tim lapangan'
     );
 
-    if (target && hasGSheet) {
-      const merged = { ...target, ...data, code: updatedCode, updatedAt: now };
-      directSaveToGoogleSheet(merged, googleSheetConfig, 'update', target?.code || target?.id).catch((e) =>
+    if (hasGSheet) {
+      directSaveToGoogleSheet(mergedData, googleSheetConfig, 'update', target?.code || target?.id).catch((e) =>
         console.error('Direct Google Sheet update error:', e)
       );
     }
@@ -2152,8 +2235,8 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
     return {
       success: true,
       message: hasGSheet
-        ? 'Data penilaian berhasil diperbarui & langsung memperbarui baris di Google Sheet.'
-        : 'Data penilaian berhasil diperbarui.',
+        ? '✓ Data penilaian berhasil diperbarui & langsung tersinkron ke Google Sheet.'
+        : '✓ Data penilaian berhasil diperbarui.',
     };
   };
 
