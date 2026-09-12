@@ -309,6 +309,35 @@ export async function deletePhotoLocally(photoId: string): Promise<void> {
 }
 
 /**
+ * Delete a photo from the server uploads directory
+ */
+export async function deletePhotoFromServer(photoId: string): Promise<boolean> {
+  if (!photoId) return false;
+  try {
+    const res = await fetch(`/api/photos/${encodeURIComponent(photoId)}`, {
+      method: 'DELETE',
+    });
+    if (res.ok) {
+      const data = await res.json();
+      return Boolean(data.success);
+    }
+    return false;
+  } catch {
+    return false;
+  }
+}
+
+/**
+ * Delete photo everywhere (IndexedDB cache + memory + server disk)
+ */
+export async function deletePhotoCompletely(photoId: string): Promise<void> {
+  await Promise.allSettled([
+    deletePhotoLocally(photoId),
+    deletePhotoFromServer(photoId),
+  ]);
+}
+
+/**
  * Delete all photos belonging to a deleted assessment from IndexedDB
  */
 export async function deletePhotosByAssessmentIdLocally(assessmentId: string): Promise<void> {

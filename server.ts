@@ -108,15 +108,20 @@ app.post('/api/assessments', (req, res) => {
 
     const existing = map.get(assessment.id);
     if (existing) {
-      // Non-destructive merge: preserve existing photos if new ones are empty
+      // Precise merge: if photos is provided in payload, always respect updated photos array
       const mergedPhotos =
-        assessment.photos && assessment.photos.length > 0
+        assessment.photos !== undefined
           ? assessment.photos
           : existing.photos || [];
+
       map.set(assessment.id, {
         ...existing,
         ...assessment,
         photos: mergedPhotos,
+        backupDriveUrl: assessment.backupDriveUrl !== undefined ? assessment.backupDriveUrl : existing.backupDriveUrl,
+        googleDriveFolderUrl: assessment.googleDriveFolderUrl !== undefined
+          ? assessment.googleDriveFolderUrl
+          : (assessment.backupDriveUrl !== undefined ? assessment.backupDriveUrl : existing.googleDriveFolderUrl),
         updatedAt: assessment.updatedAt || new Date().toISOString(),
       });
     } else {
@@ -301,6 +306,42 @@ app.post('/api/photos/upload', (req, res) => {
   } catch (err: any) {
     console.error('Error saving photo on server:', err);
     return res.status(500).json({ success: false, message: 'Gagal menyimpan foto: ' + err.message });
+  }
+});
+
+// API endpoint to delete a single physical photo file from server
+app.delete('/api/photos/:photoId', (req, res) => {
+  try {
+    const { photoId } = req.params;
+    if (!photoId) {
+      return res.status(400).json({ success: false, message: 'photoId wajib diisi' });
+    }
+
+    const cleanPhotoId = photoId.replace(/[^a-zA-Z0-9_-]/g, '_');
+    const extensions = ['jpg', 'png', 'webp', 'jpeg'];
+    let deleted = false;
+
+    for (const ext of extensions) {
+      const filePath = path.join(UPLOADS_DIR, `${cleanPhotoId}.${ext}`);
+      if (fs.existsSync(filePath)) {
+        try {
+          fs.unlinkSync(filePath);
+          deleted = true;
+        } catch (e) {
+          console.warn('Gagal unlink file foto:', filePath, e);
+        }
+      }
+    }
+
+    return res.json({
+      success: true,
+      deleted,
+      photoId,
+      message: deleted ? 'File foto fisik berhasil dihapus dari server.' : 'File foto tidak ditemukan atau sudah terhapus.',
+    });
+  } catch (err: any) {
+    console.error('Error deleting photo from server:', err);
+    return res.status(500).json({ success: false, message: 'Gagal menghapus file foto: ' + err.message });
   }
 });
 

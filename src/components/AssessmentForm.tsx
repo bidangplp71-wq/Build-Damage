@@ -23,7 +23,7 @@ import {
   formatRupiah,
 } from '../utils/puprCalculations';
 import { compressImageFile, calculatePhotosPayloadSize } from '../utils/imageCompressor';
-import { savePhotoLocally } from '../utils/photoStorage';
+import { savePhotoLocally, deletePhotoCompletely } from '../utils/photoStorage';
 import { uploadPhotoToFirebaseStorage } from '../services/firebase';
 import { uploadPhotoToServer } from '../utils/photoStorage';
 import { checkDuplicateBeforeSave, DuplicateMatchInfo } from '../utils/duplicateDetector';
@@ -868,7 +868,15 @@ export const AssessmentForm: React.FC = () => {
       // 3. Background server disk upload for multi-device & cloud access
       validPhotos.forEach((p) => {
         if (p.id && p.url) {
-          uploadPhotoToServer(p.id, targetAssId, p.url).catch(() => {});
+          uploadPhotoToServer(p.id, targetAssId, p.url)
+            .then((res) => {
+              if (res.success && res.url) {
+                setPhotos((current) =>
+                  current.map((cp) => (cp.id === p.id ? { ...cp, url: res.url! } : cp))
+                );
+              }
+            })
+            .catch(() => {});
         }
       });
     } catch (err) {
@@ -935,6 +943,8 @@ export const AssessmentForm: React.FC = () => {
       } catch {}
       return updated;
     });
+    // Completely remove photo from IndexedDB and server directory
+    deletePhotoCompletely(photoId).catch(() => {});
     showToast('Foto berhasil dihapus.', 'info');
   };
 

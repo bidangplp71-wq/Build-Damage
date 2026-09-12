@@ -207,7 +207,10 @@ export const DriveDirectory: React.FC = () => {
       }
     } else {
       // Update existing
-      const res = await updateAssessment(selectedBuildingId, { backupDriveUrl: newDriveUrl.trim() });
+      const res = await updateAssessment(selectedBuildingId, { 
+        backupDriveUrl: newDriveUrl.trim(),
+        googleDriveFolderUrl: newDriveUrl.trim() as any,
+      });
       if (res.success) {
         showToast('Tautan Google Drive untuk gedung berhasil disimpan!', 'success');
         resetForm();
@@ -220,14 +223,33 @@ export const DriveDirectory: React.FC = () => {
   };
 
   const handleUpdateInline = async (buildingId: string) => {
-    if (!tempUrl.includes('drive.google.com') && tempUrl.trim() !== '') {
+    if (tempUrl.trim() !== '' && !tempUrl.includes('drive.google.com')) {
       showToast('Harap masukkan tautan Google Drive yang valid', 'error');
       return;
     }
     setIsSaving(true);
-    const res = await updateAssessment(buildingId, { backupDriveUrl: tempUrl.trim() });
+    const cleanUrl = tempUrl.trim();
+    const res = await updateAssessment(buildingId, { 
+      backupDriveUrl: cleanUrl, 
+      googleDriveFolderUrl: cleanUrl as any 
+    });
     if (res.success) {
-      showToast('Tautan Google Drive berhasil diperbarui!', 'success');
+      showToast(cleanUrl === '' ? 'Tautan Google Drive berhasil dihapus!' : 'Tautan Google Drive berhasil diperbarui!', 'success');
+      setEditingId(null);
+    } else {
+      showToast(res.message, 'error');
+    }
+    setIsSaving(false);
+  };
+
+  const handleClearInline = async (buildingId: string) => {
+    setIsSaving(true);
+    const res = await updateAssessment(buildingId, { 
+      backupDriveUrl: '', 
+      googleDriveFolderUrl: '' as any 
+    });
+    if (res.success) {
+      showToast('Tautan Google Drive berhasil dihapus!', 'success');
       setEditingId(null);
     } else {
       showToast(res.message, 'error');
@@ -284,7 +306,10 @@ export const DriveDirectory: React.FC = () => {
           showToast(res.message, 'error');
         }
       } else {
-        const res = await updateAssessment(itemToDelete.id, { backupDriveUrl: '' });
+        const res = await updateAssessment(itemToDelete.id, { 
+          backupDriveUrl: '', 
+          googleDriveFolderUrl: '' as any,
+        });
         if (res.success) {
           showToast(`Tautan Google Drive untuk "${itemToDelete.buildingName}" berhasil dihapus.`, 'success');
           setItemToDelete(null);
@@ -712,6 +737,17 @@ export const DriveDirectory: React.FC = () => {
                           >
                             Batal
                           </button>
+                          {tempUrl && (
+                            <button 
+                              onClick={() => handleClearInline(building.id)}
+                              disabled={isSaving}
+                              className="px-2.5 py-2 text-rose-600 hover:bg-rose-100 bg-rose-50 border border-rose-200 rounded-lg text-xs font-bold flex items-center gap-1 transition-colors cursor-pointer disabled:opacity-50"
+                              title="Hapus / Kosongkan link Drive gedung ini"
+                            >
+                              <Trash2 className="w-3.5 h-3.5" />
+                              <span className="hidden sm:inline">Hapus Link</span>
+                            </button>
+                          )}
                           <button 
                             onClick={() => handleUpdateInline(building.id)}
                             disabled={isSaving}
