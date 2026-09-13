@@ -572,18 +572,12 @@ function doPost(e) {
       })).setMimeType(ContentService.MimeType.JSON);
     }
     
-    // ACTION 2: SYNC_ALL (MASS SYNC WITH MULTI-SHEET PER KECAMATAN)
+    // ACTION 2: SYNC_ALL (MASS SYNC WITH MULTI-SHEET PER KECAMATAN ONLY)
     if (action === 'sync_all') {
       var allRows = json.data || [];
       var dataByKec = json.dataByKecamatan || {};
       
-      // 1. Tulis ke Master Sheet (Rekap Semua Kecamatan)
-      if (allRows.length > 0) {
-        var masterSheet = getOrCreateSheet(ss, masterSheetName);
-        writeTableToSheet(masterSheet, allRows, "#0f172a"); // Navy Header
-      }
-      
-      // 2. Buat Sheet Khusus untuk Masing-Masing Kecamatan
+      // Tulis MURNI ke Sheet Khusus masing-masing dari 7 Kecamatan (tanpa membuat sheet rekap/ringkasan)
       var createdTabs = [];
       var kecNames = Object.keys(dataByKec);
       
@@ -597,12 +591,9 @@ function doPost(e) {
         }
       }
       
-      // 3. Buat Sheet Ringkasan Statistik Kecamatan (Dashboard Summary)
-      createStatisticsSummarySheet(ss, allRows);
-      
       return ContentService.createTextOutput(JSON.stringify({
         status: "success",
-        message: "Berhasil membuat " + createdTabs.length + " sheet kecamatan + 1 Master Rekap!",
+        message: "Berhasil menyinkronkan data ke " + createdTabs.length + " sheet kecamatan!",
         kecamatanTabs: createdTabs,
         totalRecords: allRows.length
       })).setMimeType(ContentService.MimeType.JSON);
@@ -2178,6 +2169,18 @@ export function parseExtractedRowsToAssessments(
 
     const rawCode = isRealRegCode(rawCodeCandidate) ? rawCodeCandidate : '';
 
+    // Strictly ignore non-kecamatan sheets (Rekap, Ringkasan, User logs)
+    const normSource = (sourceSheet || '').toLowerCase().trim();
+    if (
+      normSource.includes('ringkasan') ||
+      normSource.includes('rekap') ||
+      normSource.includes('pengguna') ||
+      normSource.includes('log') ||
+      normSource.includes('00_')
+    ) {
+      return;
+    }
+
     let buildingName = String(
       getVal(rowObj, [
         'Nama Bangunan', 'Nama Gedung', 'Nama Objek', 'Nama Fasilitas',
@@ -2186,6 +2189,17 @@ export function parseExtractedRowsToAssessments(
         'Penerima Bantuan', 'Nama Subjek', 'Nama Sarana', 'Bangunan', 'Nama'
       ]) || ''
     ).trim();
+
+    // Skip summary / subtotal rows
+    const testSummary = `${buildingName} ${rawCodeCandidate}`.toUpperCase();
+    if (
+      testSummary.includes('TOTAL') ||
+      testSummary.includes('JUMLAH') ||
+      testSummary.includes('REKAPITULASI') ||
+      testSummary.includes('RINGKASAN')
+    ) {
+      return;
+    }
 
     let rawKec = String(getVal(rowObj, ['Kecamatan', 'Kec', 'Nama Kecamatan']) || '').trim();
     if (!rawKec && sourceSheet && sourceSheet.startsWith('Kec ')) {

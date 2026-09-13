@@ -616,22 +616,13 @@ export const AssessmentTable: React.FC = () => {
           {googleSheetConfig.spreadsheetUrl && (
             <div className="flex items-center gap-1.5 flex-wrap">
               <button
-                onClick={handleConsolidateSheets}
-                disabled={isConsolidating || isRefreshing}
-                title="Satukan seluruh data dari 7 sheet kecamatan ke satu Sheet Rekap (REKAP_SEMUA_KECAMATAN) dan perbarui web secara terpusat"
-                className="flex items-center gap-1.5 px-3 py-2 text-xs font-bold text-teal-950 bg-teal-100/90 hover:bg-teal-200 rounded-xl border border-teal-300 transition-colors cursor-pointer shadow-2xs"
-              >
-                <Layers className={`w-3.5 h-3.5 text-teal-700 ${isConsolidating ? 'animate-spin' : ''}`} />
-                <span>{isConsolidating ? 'Menyatukan...' : 'Satukan 7 Sheet ke Rekap'}</span>
-              </button>
-              <button
                 onClick={() => syncFromGoogleSheet(true)}
                 disabled={isRefreshing || isConsolidating}
-                title="Tarik seluruh data survei dari Google Sheet Rekap mulai dari baris A2 ke bawah"
-                className="flex items-center gap-1.5 px-3 py-2 text-xs font-bold text-indigo-900 bg-indigo-50 hover:bg-indigo-100 rounded-xl border border-indigo-200 transition-colors cursor-pointer"
+                title="Tarik seluruh data survei langsung dari ke-7 Sheet Kecamatan"
+                className="flex items-center gap-1.5 px-3 py-2 text-xs font-bold text-indigo-900 bg-indigo-50 hover:bg-indigo-100 rounded-xl border border-indigo-200 transition-colors cursor-pointer shadow-2xs"
               >
                 <RefreshCw className={`w-3.5 h-3.5 text-indigo-600 ${isRefreshing ? 'animate-spin' : ''}`} />
-                <span>Tarik dari Sheet</span>
+                <span>Tarik dari 7 Sheet</span>
               </button>
               <a
                 href={googleSheetConfig.spreadsheetUrl}

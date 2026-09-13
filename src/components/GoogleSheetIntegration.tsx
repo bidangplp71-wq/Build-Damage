@@ -477,29 +477,21 @@ export const GoogleSheetIntegration: React.FC = () => {
             </div>
           </div>
 
-          {/* Preview Tab Sheet yang Akan Dibuat */}
+          {/* Preview Tab Sheet 7 Kecamatan */}
           <div className="bg-slate-50 p-5 rounded-2xl border border-slate-200/80 space-y-3">
             <div className="flex items-center justify-between">
               <div className="flex items-center gap-2">
                 <Layers className="w-4 h-4 text-blue-600" />
                 <h4 className="text-xs font-bold text-slate-900 uppercase tracking-wider">
-                  Daftar Tab Sheet di Google Spreadsheet:
+                  Daftar 7 Sheet Kecamatan di Google Spreadsheet:
                 </h4>
               </div>
               <span className="text-[11px] text-slate-500 font-medium">
-                1 Tab Ringkasan + 1 Tab Master + {kecamatans.length} Tab Kecamatan
+                {kecamatans.length} Tab Kecamatan Murni (Tanpa Tab Rekap Terpisah)
               </span>
             </div>
 
             <div className="flex flex-wrap gap-2 pt-1">
-              <div className="px-3 py-1.5 rounded-xl bg-emerald-700 text-white font-mono text-xs font-bold shadow-xs flex items-center gap-1.5">
-                <Sparkles className="w-3.5 h-3.5 text-amber-300" />
-                <span>00_RINGKASAN_KECAMATAN</span>
-              </div>
-              <div className="px-3 py-1.5 rounded-xl bg-slate-900 text-white font-mono text-xs font-bold shadow-xs flex items-center gap-1.5">
-                <Database className="w-3.5 h-3.5 text-slate-300" />
-                <span>REKAP_SEMUA_KECAMATAN</span>
-              </div>
               {kecamatans.map((kec) => {
                 const count = groupedData[kec.name]?.length || 0;
                 return (
@@ -507,7 +499,7 @@ export const GoogleSheetIntegration: React.FC = () => {
                     key={kec.id}
                     className={`px-3 py-1.5 rounded-xl border text-xs font-semibold flex items-center gap-1.5 ${
                       count > 0
-                        ? 'bg-blue-50 border-blue-300 text-blue-900'
+                        ? 'bg-blue-50 border-blue-300 text-blue-900 shadow-2xs'
                         : 'bg-white border-slate-200 text-slate-600'
                     }`}
                   >
