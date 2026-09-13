@@ -956,11 +956,14 @@ export const AssessmentForm: React.FC = () => {
           'success'
         );
       } else if (result.isFolder) {
+        if (result.folderUrl) {
+          setDriveFolderUrl(result.folderUrl);
+        }
         const msg =
           result.message ||
-          'Folder Google Drive terdeteksi. Pastikan izin berbagi disetel ke "Siapa saja yang memiliki link", atau salin daftar link foto di folder tersebut lalu tempelkan sekaligus.';
+          'Folder Google Drive terdeteksi dan telah disimpan ke arsip gedung. Untuk memuat foto satu per satu, salin daftar link foto di folder tersebut lalu tempelkan sekaligus.';
         setDriveFolderNotice(msg);
-        showToast(msg, 'warning');
+        showToast('✓ Folder Google Drive berhasil dikaitkan ke arsip gedung!', 'info');
       } else {
         showToast(result.message || 'Tidak ada foto yang dapat dimuat dari tautan tersebut.', 'error');
       }

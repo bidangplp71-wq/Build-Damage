@@ -2700,12 +2700,11 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
 
       setAssessments((prev) => {
         const map = new Map<string, BuildingAssessment>();
-        // 1. Preserve newly inputted entries created directly on the app's assessment form
+        // 1. Preserve all existing valid assessments (never drop records on sync)
         prev.forEach((p) => {
           if (
             p &&
             p.id &&
-            !p.id.startsWith('sheet_') &&
             !storedDeleted.has(p.id) &&
             !deletedAssessmentIds.current.has(p.id) &&
             (!p.code || (!storedDeleted.has(p.code) && !deletedAssessmentIds.current.has(p.code)))
@@ -2714,10 +2713,16 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
           }
         });
 
-        // 2. Set all canonical Google Sheet records from the 7 Kecamatan sheets (Exact 98 records)
+        // 2. Non-destructively merge incoming Google Sheet records
         sheetItems.forEach((s) => {
+          const existing = map.get(s.id);
+          const mergedPhotos = (s.photos && s.photos.length > 0)
+            ? s.photos
+            : (existing?.photos && existing.photos.length > 0 ? existing.photos : []);
           map.set(s.id, {
+            ...(existing || {}),
             ...s,
+            photos: mergedPhotos,
             googleSheetSynced: true,
             googleSheetSyncedAt: new Date().toISOString(),
           });

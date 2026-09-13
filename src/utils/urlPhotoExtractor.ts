@@ -44,10 +44,15 @@ export function normalizeDirectImageUrl(rawUrl: string): string {
  */
 export function isGoogleDriveFolderUrl(url: string): boolean {
   if (!url) return false;
+  const lower = url.toLowerCase();
   return (
-    url.includes('drive.google.com/drive/folders/') ||
-    url.includes('drive.google.com/drive/u/') ||
-    url.includes('drive.google.com/embeddedfolderview')
+    lower.includes('drive.google.com/drive/folders') ||
+    lower.includes('drive.google.com/drive/u/') ||
+    lower.includes('drive.google.com/embeddedfolderview') ||
+    lower.includes('drive.google.com/folderview') ||
+    lower.includes('/folders/') ||
+    lower.includes('photos.app.goo.gl') ||
+    lower.includes('photos.google.com')
   );
 }
 
@@ -227,24 +232,27 @@ export async function processInputPhotoUrl(
 
   // If it's a folder URL and we reached here with 0 extracted photos:
   // DO NOT add the folder URL as an image!
-  if (isDriveFolder) {
+  if (isDriveFolder || isGoogleDriveFolderUrl(trimmed)) {
     return {
       photos: [],
       folderUrl: trimmed,
       isFolder: true,
       totalFound: 0,
-      message: 'Folder Google Drive terdeteksi. Pastikan izin berbagi disetel ke "Siapa saja yang memiliki link" (Anyone with the link), atau salin daftar link foto di folder tersebut lalu tempelkan sekaligus.',
+      message: 'Folder Google Drive terdeteksi. Izin folder memerlukan akses Google Drive atau link foto spesifik. Silakan salin link foto di dalam folder tersebut dan tempelkan di tab "Tempel Banyak Link" atau unggah langsung file foto.',
     };
   }
 
   // Single URL
   const normalizedSingle = normalizeDirectImageUrl(trimmed);
-  if (!normalizedSingle) {
+  if (!normalizedSingle || isGoogleDriveFolderUrl(normalizedSingle) || normalizedSingle.includes('/folders/') || normalizedSingle.includes('photos.app.goo.gl')) {
     return {
       photos: [],
-      isFolder: false,
+      folderUrl: isGoogleDriveFolderUrl(trimmed) ? trimmed : undefined,
+      isFolder: isGoogleDriveFolderUrl(trimmed),
       totalFound: 0,
-      message: 'Tautan tidak valid atau tidak dapat dimuat sebagai gambar.',
+      message: isGoogleDriveFolderUrl(trimmed)
+        ? 'Folder Google Drive terdeteksi dan dikaitkan ke arsip gedung. Silakan salin link foto spesifik di dalamnya untuk menambahkan foto bangunan.'
+        : 'Tautan tidak valid atau tidak dapat dimuat langsung sebagai gambar.',
     };
   }
 

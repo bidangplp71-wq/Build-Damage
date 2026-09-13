@@ -2158,9 +2158,8 @@ export function parseExtractedRowsToAssessments(
     return { id: 'kec_3', name: 'Boawae' };
   };
 
-  const results: BuildingAssessment[] = [];
+  const resultsMap = new Map<string, BuildingAssessment>();
   const seenCodes = new Set<string>();
-  const seenSignatures = new Set<string>();
 
   const isRealRegCode = (str: string): boolean => {
     const clean = str.trim();
@@ -2232,20 +2231,33 @@ export function parseExtractedRowsToAssessments(
     const totalDamagePercent = parseNumber(getVal(rowObj, ['Tingkat Kerusakan (%)', 'Tingkat Kerusakan', '% Kerusakan', 'Persentase Kerusakan'])) || 0;
     const roundedRehabCost = parseNumber(getVal(rowObj, ['Ajuan Biaya Rehab (Rp)', 'Ajuan Biaya', 'Total Biaya', 'Estimasi Biaya', 'RAB'])) || 0;
 
-    // Unique registration code and ID generation (Never drop survey rows, record all 98 items)
+    const nikPemilik = String(getVal(rowObj, ['NIK Pemilik', 'NIK', 'NIK 16 Digit']) || '0');
+    const noKkPemilik = String(getVal(rowObj, ['No KK Pemilik', 'No KK', 'Nomor KK', 'No. KK']) || '0');
+
+    // Deterministic deduplication key across Master and Kecamatan sheets
+    const normCode = rawCode ? rawCode.toUpperCase() : '';
+    const cleanBuilding = buildingName.toLowerCase().replace(/\s*\(baris\s+\d+\)/i, '').trim();
+    const cleanKec = kecInfo.name.toLowerCase().trim();
+    const cleanDesa = desaName.toLowerCase().trim();
+    const cleanNik = (nikPemilik && nikPemilik !== '0') ? nikPemilik.trim() : '';
+
+    const dedupeKey = normCode
+      ? `code:${normCode}`
+      : `sig:${cleanKec}::${cleanDesa}::${cleanBuilding}${cleanNik ? `::${cleanNik}` : ''}`;
+
+    // Registration code assignment
     let code = rawCode;
     if (code) {
       const codeUpper = code.toUpperCase();
-      if (seenCodes.has(codeUpper)) {
-        code = `${code}-${index + 1}`;
-      }
-      seenCodes.add(code.toUpperCase());
+      seenCodes.add(codeUpper);
     } else {
       code = `REG-PUPR-2026-${String(index + 1).padStart(4, '0')}`;
     }
 
-    const cleanSheet = (sourceSheet || 'sheet').toLowerCase().replace(/[^a-z0-9]/g, '_');
-    const id = `sheet_${cleanSheet}_r${sheetRowNumber}_i${index + 1}`;
+    // Stable deterministic ID
+    const stableId = normCode
+      ? `sheet_reg_${normCode.toLowerCase().replace(/[^a-z0-9]/g, '_')}`
+      : `sheet_${cleanKec.replace(/[^a-z0-9]/g, '_')}_${(cleanDesa ? cleanDesa.replace(/[^a-z0-9]/g, '_') + '_' : '')}${cleanBuilding.replace(/[^a-z0-9]/g, '_').slice(0, 30)}`;
 
     const numberOfFloors = parseNumber(getVal(rowObj, ['Jumlah Tingkat', 'Jumlah Lantai', 'Tingkat', 'Lantai'])) || 1;
     const yearBuilt = parseNumber(getVal(rowObj, ['Tahun Dibangun', 'Tahun Pembangunan', 'Tahun'])) || new Date().getFullYear();
@@ -2289,15 +2301,13 @@ export function parseExtractedRowsToAssessments(
     // Match canonical desaId from name
     let matchedDesaId = '';
     if (desaName) {
-      const cleanDesa = desaName.toLowerCase().replace(/^(desa|kelurahan)\s+/i, '').trim();
+      const cleanDesaName = desaName.toLowerCase().replace(/^(desa|kelurahan)\s+/i, '').trim();
       const found = INITIAL_DESA.find(
-        (d) => d.name.toLowerCase() === cleanDesa || d.name.toLowerCase() === desaName.toLowerCase()
+        (d) => d.name.toLowerCase() === cleanDesaName || d.name.toLowerCase() === desaName.toLowerCase()
       );
       if (found) matchedDesaId = found.id;
     }
     const desaId = matchedDesaId || `desa_${desaName.toLowerCase().replace(/\s+/g, '_') || 'umum'}`;
-    const nikPemilik = String(getVal(rowObj, ['NIK Pemilik', 'NIK', 'NIK 16 Digit']) || '0');
-    const noKkPemilik = String(getVal(rowObj, ['No KK Pemilik', 'No KK', 'Nomor KK', 'No. KK']) || '0');
 
     const headName = String(getVal(rowObj, ['Nama Kepala Dinas', 'Kepala Dinas', 'Kadis']) || '');
     const headNip = String(getVal(rowObj, ['NIP Kepala Dinas', 'NIP Kadis', 'NIP']) || '');
@@ -2311,9 +2321,7 @@ export function parseExtractedRowsToAssessments(
     if (rawComponentsJson && typeof rawComponentsJson === 'string' && rawComponentsJson.trim().startsWith('[')) {
       try {
         parsedComponents = JSON.parse(rawComponentsJson);
-      } catch (e) {
-        // Ignored
-      }
+      } catch (e) {}
     }
 
     const rawPhotosJson = getVal(rowObj, ['Foto JSON', 'Daftar Foto JSON', 'Photos JSON', 'Foto']);
@@ -2321,13 +2329,42 @@ export function parseExtractedRowsToAssessments(
     if (rawPhotosJson && typeof rawPhotosJson === 'string' && rawPhotosJson.trim().startsWith('[')) {
       try {
         parsedPhotos = JSON.parse(rawPhotosJson);
-      } catch (e) {
-        // Ignored
-      }
+      } catch (e) {}
     }
 
-    results.push({
-      id,
+    // Check if item already exists in resultsMap (from Master tab or another Kecamatan tab)
+    const existing = resultsMap.get(dedupeKey);
+    if (existing) {
+      // Merge records non-destructively: preserve photos, components, notes, and costs
+      const mergedPhotos = (parsedPhotos && parsedPhotos.length > 0)
+        ? parsedPhotos
+        : (existing.photos && existing.photos.length > 0 ? existing.photos : []);
+      const mergedComponents = (parsedComponents && parsedComponents.length > 0)
+        ? parsedComponents
+        : existing.components;
+      const mergedDriveUrl = googleDriveFolderUrl || existing.googleDriveFolderUrl;
+      const mergedBackupUrl = backupDriveUrl || existing.backupDriveUrl;
+      const mergedNotes = verificationNotes || existing.verificationNotes;
+      const mergedVerifiedBy = verifiedBy || existing.verifiedBy;
+
+      resultsMap.set(dedupeKey, {
+        ...existing,
+        totalFloorAreaM2: totalFloorAreaM2 || existing.totalFloorAreaM2,
+        totalDamagePercent: totalDamagePercent || existing.totalDamagePercent,
+        totalRehabCost: roundedRehabCost || existing.totalRehabCost,
+        roundedRehabCost: roundedRehabCost || existing.roundedRehabCost,
+        photos: mergedPhotos,
+        components: mergedComponents,
+        googleDriveFolderUrl: mergedDriveUrl,
+        backupDriveUrl: mergedBackupUrl,
+        verificationNotes: mergedNotes,
+        verifiedBy: mergedVerifiedBy,
+      });
+      return;
+    }
+
+    const newAssessment: BuildingAssessment = {
+      id: stableId,
       code,
       buildingName,
       buildingCategory: (getVal(rowObj, ['Kategori / Fungsi Bangunan', 'Kategori', 'Fungsi Bangunan']) as any) || 'Gedung Pemerintah',
@@ -2384,10 +2421,12 @@ export function parseExtractedRowsToAssessments(
       createdByName: String(getVal(rowObj, ['Surveyor / Petugas', 'Surveyor', 'Petugas']) || 'Surveyor Lapangan'),
       createdAt: disasterDate ? `${disasterDate}T08:00:00.000Z` : new Date().toISOString(),
       updatedAt: lastUpdated,
-    });
+    };
+
+    resultsMap.set(dedupeKey, newAssessment);
   });
 
-  return results;
+  return Array.from(resultsMap.values());
 }
 
 /**
