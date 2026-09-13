@@ -2746,35 +2746,76 @@ export async function fetchAssessmentsFromGoogleSheet(
     }
   };
 
-  // 7 Kecamatan definitions with comprehensive alias matching
+  // Function to detect if Google GViz returned the multi-kecamatan Master Rekap fallback sheet
+  const isMasterRekapFallback = (parsedRows: ExtractedRow[], currentKecName: string): boolean => {
+    if (!parsedRows || parsedRows.length === 0) return false;
+    const distinctOtherKecs = new Set<string>();
+    const currentNorm = currentKecName.toLowerCase().trim();
+
+    const allOtherKecNames = [
+      'aesesa',
+      'aesesa selatan',
+      'boawae',
+      'mauponggo',
+      'nangaroro',
+      'keo tengah',
+      'wolowae',
+    ].filter((k) => {
+      if (currentNorm === 'aesesa') return k !== 'aesesa';
+      if (currentNorm === 'aesesa selatan') return k !== 'aesesa selatan';
+      return k !== currentNorm;
+    });
+
+    parsedRows.forEach((r) => {
+      const rawKec = String(
+        getVal(r.rowObj, ['Kecamatan', 'Kec', 'Wilayah Kecamatan', 'Nama Kecamatan']) || ''
+      ).toLowerCase().trim();
+
+      if (rawKec) {
+        for (const other of allOtherKecNames) {
+          if (other === 'aesesa' && rawKec.includes('aesesa selatan')) continue;
+          if (other === 'aesesa selatan' && !rawKec.includes('selatan')) continue;
+          if (rawKec.includes(other)) {
+            distinctOtherKecs.add(other);
+          }
+        }
+      }
+    });
+
+    // If 3 or more DIFFERENT kecamatans appear in one tab, it is definitely the multi-kecamatan Rekap sheet fallback
+    return distinctOtherKecs.size >= 3;
+  };
+
+  // 7 Kecamatan definitions strictly with 'Kec.' / 'Kec' prefixes
+  // (No bare aliases without Kec to prevent Google Sheets from falling back to the master rekap tab)
   const kecamatanTabGroups: { name: string; aliases: string[] }[] = [
     {
       name: 'Aesesa',
-      aliases: ['Kec. Aesesa', 'Aesesa', 'Kec Aesesa', 'AESESA', 'KEC. AESESA', 'KECAMATAN AESESA', 'Kecamatan Aesesa', 'Kec.Aesesa'],
+      aliases: ['Kec. Aesesa', 'Kec Aesesa', 'Kec.Aesesa', 'KEC. AESESA', 'KECAMATAN AESESA', 'KEC AESESA'],
     },
     {
       name: 'Aesesa Selatan',
-      aliases: ['Kec. Aesesa Selatan', 'Aesesa Selatan', 'Kec Aesesa Selatan', 'AESESA SELATAN', 'KEC. AESESA SELATAN', 'KECAMATAN AESESA SELATAN', 'Kecamatan Aesesa Selatan', 'Kec.Aesesa Selatan', 'Aesesa-Selatan'],
+      aliases: ['Kec. Aesesa Selatan', 'Kec Aesesa Selatan', 'Kec.Aesesa Selatan', 'KEC. AESESA SELATAN', 'KECAMATAN AESESA SELATAN', 'KEC AESESA SELATAN'],
     },
     {
       name: 'Boawae',
-      aliases: ['Kec. Boawae', 'Boawae', 'Kec Boawae', 'BOAWAE', 'KEC. BOAWAE', 'KECAMATAN BOAWAE', 'Kecamatan Boawae', 'Kec.Boawae'],
+      aliases: ['Kec. Boawae', 'Kec Boawae', 'Kec.Boawae', 'KEC. BOAWAE', 'KECAMATAN BOAWAE', 'KEC BOAWAE'],
     },
     {
       name: 'Mauponggo',
-      aliases: ['Kec. Mauponggo', 'Mauponggo', 'Kec Mauponggo', 'MAUPONGGO', 'KEC. MAUPONGGO', 'KECAMATAN MAUPONGGO', 'Kecamatan Mauponggo', 'Kec.Mauponggo'],
+      aliases: ['Kec. Mauponggo', 'Kec Mauponggo', 'Kec.Mauponggo', 'KEC. MAUPONGGO', 'KECAMATAN MAUPONGGO', 'KEC MAUPONGGO'],
     },
     {
       name: 'Nangaroro',
-      aliases: ['Kec. Nangaroro', 'Nangaroro', 'Kec Nangaroro', 'NANGARORO', 'KEC. NANGARORO', 'KECAMATAN NANGARORO', 'Kecamatan Nangaroro', 'Kec.Nangaroro'],
+      aliases: ['Kec. Nangaroro', 'Kec Nangaroro', 'Kec.Nangaroro', 'KEC. NANGARORO', 'KECAMATAN NANGARORO', 'KEC NANGARORO'],
     },
     {
       name: 'Keo Tengah',
-      aliases: ['Kec. Keo Tengah', 'Keo Tengah', 'Kec Keo Tengah', 'KEO TENGAH', 'KEC. KEO TENGAH', 'KECAMATAN KEO TENGAH', 'Kecamatan Keo Tengah', 'Kec.Keo Tengah', 'Keo-Tengah'],
+      aliases: ['Kec. Keo Tengah', 'Kec Keo Tengah', 'Kec.Keo Tengah', 'KEC. KEO TENGAH', 'KECAMATAN KEO TENGAH', 'KEC KEO TENGAH'],
     },
     {
       name: 'Wolowae',
-      aliases: ['Kec. Wolowae', 'Wolowae', 'Kec Wolowae', 'WOLOWAE', 'KEC. WOLOWAE', 'KECAMATAN WOLOWAE', 'Kecamatan Wolowae', 'Kec.Wolowae'],
+      aliases: ['Kec. Wolowae', 'Kec Wolowae', 'Kec.Wolowae', 'KEC. WOLOWAE', 'KECAMATAN WOLOWAE', 'KEC WOLOWAE'],
     },
   ];
 
@@ -2828,21 +2869,22 @@ export async function fetchAssessmentsFromGoogleSheet(
 
     const kecamatanResults = await Promise.all(
       kecamatanTabGroups.map(async (group) => {
-        // If we already know the exact tab name that works, test it first
+        // If we already know the exact tab name that works and starts with Kec, test it first
         const knownAlias = confirmedTabs[group.name];
-        const initialAliases = knownAlias
-          ? [knownAlias, `Kec. ${group.name}`, group.name]
-          : [`Kec. ${group.name}`, group.name];
+        const validKnown = knownAlias && knownAlias.toLowerCase().startsWith('kec') ? knownAlias : null;
+        const initialAliases = validKnown
+          ? [validKnown, `Kec. ${group.name}`, `Kec ${group.name}`]
+          : [`Kec. ${group.name}`, `Kec ${group.name}`, `KEC. ${group.name.toUpperCase()}`];
 
-        const prioritizedAliases = Array.from(new Set([
-          ...initialAliases,
-          ...group.aliases,
-        ]));
+        const prioritizedAliases = Array.from(
+          new Set([...initialAliases, ...group.aliases])
+        ).filter((a) => a.toLowerCase().startsWith('kec'));
 
         // Check top 2 aliases in parallel first
         const probeTop = prioritizedAliases.slice(0, 2);
 
         const fetchSingle = async (alias: string) => {
+          if (!alias.toLowerCase().startsWith('kec')) return null;
           const gvizUrl = `https://docs.google.com/spreadsheets/d/${spreadsheetId}/gviz/tq?sheet=${encodeURIComponent(alias)}&_t=${cacheBuster}`;
           try {
             const controller = new AbortController();
@@ -2854,7 +2896,7 @@ export async function fetchAssessmentsFromGoogleSheet(
               const text = await res.text();
               if (text && text.includes('google.visualization.Query.setResponse')) {
                 const parsedRows = parseGvizResponseToRows(text, alias);
-                if (parsedRows.length > 0) {
+                if (parsedRows.length > 0 && !isMasterRekapFallback(parsedRows, group.name)) {
                   return { rows: parsedRows, matchedAlias: alias };
                 }
               }

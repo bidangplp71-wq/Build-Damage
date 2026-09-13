@@ -627,14 +627,59 @@ let serverKecamatanCache: ServerKecamatanCache | null = null;
 const SERVER_KECAMATAN_CACHE_TTL = 30000; // 30 seconds
 
 const KECAMATAN_SPECS = [
-  { name: 'Aesesa', aliases: ['Kec. Aesesa', 'Aesesa', 'Kec Aesesa', 'AESESA'] },
-  { name: 'Aesesa Selatan', aliases: ['Kec. Aesesa Selatan', 'Aesesa Selatan', 'Kec Aesesa Selatan', 'AESESA SELATAN'] },
-  { name: 'Boawae', aliases: ['Kec. Boawae', 'Boawae', 'Kec Boawae', 'BOAWAE'] },
-  { name: 'Mauponggo', aliases: ['Kec. Mauponggo', 'Mauponggo', 'Kec Mauponggo', 'MAUPONGGO'] },
-  { name: 'Nangaroro', aliases: ['Kec. Nangaroro', 'Nangaroro', 'Kec Nangaroro', 'NANGARORO'] },
-  { name: 'Keo Tengah', aliases: ['Kec. Keo Tengah', 'Keo Tengah', 'Kec Keo Tengah', 'KEO TENGAH'] },
-  { name: 'Wolowae', aliases: ['Kec. Wolowae', 'Wolowae', 'Kec Wolowae', 'WOLOWAE'] },
+  { name: 'Aesesa', aliases: ['Kec. Aesesa', 'Kec Aesesa', 'Kec.Aesesa', 'KEC. AESESA', 'KECAMATAN AESESA', 'KEC AESESA'] },
+  { name: 'Aesesa Selatan', aliases: ['Kec. Aesesa Selatan', 'Kec Aesesa Selatan', 'Kec.Aesesa Selatan', 'KEC. AESESA SELATAN', 'KECAMATAN AESESA SELATAN', 'KEC AESESA SELATAN'] },
+  { name: 'Boawae', aliases: ['Kec. Boawae', 'Kec Boawae', 'Kec.Boawae', 'KEC. BOAWAE', 'KECAMATAN BOAWAE', 'KEC BOAWAE'] },
+  { name: 'Mauponggo', aliases: ['Kec. Mauponggo', 'Kec Mauponggo', 'Kec.Mauponggo', 'KEC. MAUPONGGO', 'KECAMATAN MAUPONGGO', 'KEC MAUPONGGO'] },
+  { name: 'Nangaroro', aliases: ['Kec. Nangaroro', 'Kec Nangaroro', 'Kec.Nangaroro', 'KEC. NANGARORO', 'KECAMATAN NANGARORO', 'KEC NANGARORO'] },
+  { name: 'Keo Tengah', aliases: ['Kec. Keo Tengah', 'Kec Keo Tengah', 'Kec.Keo Tengah', 'KEC. KEO TENGAH', 'KECAMATAN KEO TENGAH', 'KEC KEO TENGAH'] },
+  { name: 'Wolowae', aliases: ['Kec. Wolowae', 'Kec Wolowae', 'Kec.Wolowae', 'KEC. WOLOWAE', 'KECAMATAN WOLOWAE', 'KEC WOLOWAE'] },
 ];
+
+function isMasterRekapFallbackServer(
+  parsedRows: Array<{ rowObj: Record<string, any> }>,
+  currentKecName: string
+): boolean {
+  if (!parsedRows || parsedRows.length === 0) return false;
+  const distinctOtherKecs = new Set<string>();
+  const currentNorm = currentKecName.toLowerCase().trim();
+
+  const allOtherKecNames = [
+    'aesesa',
+    'aesesa selatan',
+    'boawae',
+    'mauponggo',
+    'nangaroro',
+    'keo tengah',
+    'wolowae',
+  ].filter((k) => {
+    if (currentNorm === 'aesesa') return k !== 'aesesa';
+    if (currentNorm === 'aesesa selatan') return k !== 'aesesa selatan';
+    return k !== currentNorm;
+  });
+
+  parsedRows.forEach((r) => {
+    const rawKec = String(
+      r.rowObj['Kecamatan'] ||
+      r.rowObj['Kec'] ||
+      r.rowObj['Wilayah Kecamatan'] ||
+      r.rowObj['Nama Kecamatan'] ||
+      ''
+    ).toLowerCase().trim();
+
+    if (rawKec) {
+      for (const other of allOtherKecNames) {
+        if (other === 'aesesa' && rawKec.includes('aesesa selatan')) continue;
+        if (other === 'aesesa selatan' && !rawKec.includes('selatan')) continue;
+        if (rawKec.includes(other)) {
+          distinctOtherKecs.add(other);
+        }
+      }
+    }
+  });
+
+  return distinctOtherKecs.size >= 3;
+}
 
 function parseServerGvizTextToRows(rawText: string, sheetName: string): Array<{ rowObj: Record<string, any>; sheetRowNumber: number; sourceSheet: string }> {
   if (!rawText || !rawText.includes('google.visualization.Query.setResponse')) return [];
@@ -689,10 +734,14 @@ async function fetchKecamatanRowsOnServer(
   kec: { name: string; aliases: string[] },
   cacheBuster: number
 ): Promise<{ success: boolean; rows: Array<{ rowObj: Record<string, any>; sheetRowNumber: number; sourceSheet: string }>; matchedTab?: string }> {
-  const prioritized = [`Kec. ${kec.name}`, kec.name, ...kec.aliases.filter(a => a !== `Kec. ${kec.name}` && a !== kec.name)];
+  const prioritized = Array.from(
+    new Set([`Kec. ${kec.name}`, `Kec ${kec.name}`, ...kec.aliases])
+  ).filter((a) => a.toLowerCase().startsWith('kec'));
+
   const probeTopTwo = prioritized.slice(0, 2);
 
   const fetchSingleAlias = async (alias: string) => {
+    if (!alias.toLowerCase().startsWith('kec')) return null;
     const url = `https://docs.google.com/spreadsheets/d/${spreadsheetId}/gviz/tq?sheet=${encodeURIComponent(alias)}&_t=${cacheBuster}`;
     const controller = new AbortController();
     const timeout = setTimeout(() => controller.abort(), 12000);
@@ -702,7 +751,7 @@ async function fetchKecamatanRowsOnServer(
       if (!resp.ok) return null;
       const text = await resp.text();
       const parsed = parseServerGvizTextToRows(text, alias);
-      if (parsed.length === 0) return null;
+      if (parsed.length === 0 || isMasterRekapFallbackServer(parsed, kec.name)) return null;
 
       return { rows: parsed, matchedTab: alias };
     } catch {
