@@ -21,6 +21,9 @@ import {
   Info,
   ExternalLink,
   FileSpreadsheet,
+  Wand2,
+  Sparkles,
+  RefreshCw,
 } from 'lucide-react';
 import { PhotoViewerModal } from './PhotoViewerModal';
 
@@ -46,6 +49,7 @@ export const DuplicateAuditModal: React.FC<DuplicateAuditModalProps> = ({
   const {
     deleteAssessment,
     purgeAllDuplicates,
+    autoFixDuplicateCodes,
     setSelectedAssessmentForDetail,
     setSelectedAssessmentForEdit,
     setActiveTab,
@@ -56,6 +60,7 @@ export const DuplicateAuditModal: React.FC<DuplicateAuditModalProps> = ({
   const [activeGroupIndex, setActiveGroupIndex] = useState(0);
   const [itemToDelete, setItemToDelete] = useState<BuildingAssessment | null>(null);
   const [showPurgeAllConfirm, setShowPurgeAllConfirm] = useState(false);
+  const [isFixingCodes, setIsFixingCodes] = useState(false);
   const [photoViewerAssessment, setPhotoViewerAssessment] = useState<BuildingAssessment | null>(null);
 
   if (!isOpen) return null;
@@ -80,6 +85,23 @@ export const DuplicateAuditModal: React.FC<DuplicateAuditModalProps> = ({
     setShowPurgeAllConfirm(false);
     if (res.success) {
       onClose();
+    }
+  };
+
+  const handleAutoFixCodes = () => {
+    setIsFixingCodes(true);
+    try {
+      const res = autoFixDuplicateCodes();
+      if (res.fixedCount > 0) {
+        showToast(res.message, 'success');
+        if (duplicateGroups.length <= 1) {
+          onClose();
+        }
+      } else {
+        showToast(res.message, 'info');
+      }
+    } finally {
+      setIsFixingCodes(false);
     }
   };
 
@@ -131,19 +153,30 @@ export const DuplicateAuditModal: React.FC<DuplicateAuditModalProps> = ({
             <div>
               <h2 className="text-xl font-bold tracking-tight">Audit & Verifikasi Data Ganda (Duplikat)</h2>
               <p className="text-xs text-amber-100 font-medium">
-                Pemeriksaan Survei Gedung yang Terindikasi Diinput Berulang Kali oleh Surveyor
+                Deteksi No. Registrasi Ganda & Pemeriksaan Survei Berulang
               </p>
             </div>
           </div>
           
           <div className="flex items-center gap-2.5">
+            {/* 1-Click Auto Fix Registration Codes */}
+            <button
+              onClick={handleAutoFixCodes}
+              disabled={isFixingCodes}
+              className="px-3.5 py-1.5 bg-emerald-600 hover:bg-emerald-700 text-white text-xs font-bold rounded-xl shadow-md transition-transform active:scale-95 flex items-center gap-1.5 cursor-pointer border border-emerald-400/50 disabled:opacity-50"
+              title="Otomatis terbitkan Nomor Registrasi baru yang unik untuk seluruh data yang nomor registrasinya ganda"
+            >
+              <Wand2 className={`w-3.5 h-3.5 ${isFixingCodes ? 'animate-spin' : ''}`} />
+              <span>{isFixingCodes ? 'Memperbaiki...' : 'Perbaiki No. Reg Otomatis'}</span>
+            </button>
+
             {duplicateGroups.length > 0 && (currentUser.role === 'super_admin' || currentUser.role === 'admin') && (
               <button
                 onClick={() => setShowPurgeAllConfirm(true)}
                 className="px-3.5 py-1.5 bg-rose-600 hover:bg-rose-700 text-white text-xs font-bold rounded-xl shadow-md transition-transform active:scale-95 flex items-center gap-1.5 cursor-pointer border border-rose-400/40"
               >
                 <Trash2 className="w-3.5 h-3.5" />
-                <span>Bersihkan Semua Duplikat</span>
+                <span>Hapus Duplikat</span>
               </button>
             )}
             <button
@@ -263,6 +296,32 @@ export const DuplicateAuditModal: React.FC<DuplicateAuditModalProps> = ({
                         Tandai Sah (Bukan Duplikat)
                       </button>
                     </div>
+                  </div>
+
+                  {/* Auto-Fix Duplicate Code Banner */}
+                  <div className="mb-4 p-3.5 rounded-xl bg-gradient-to-r from-emerald-50 via-teal-50 to-emerald-50 border border-emerald-300 text-emerald-950 text-xs flex flex-col sm:flex-row items-start sm:items-center justify-between gap-3 shadow-2xs">
+                    <div className="flex items-center gap-2.5">
+                      <div className="w-8 h-8 rounded-lg bg-emerald-600 text-white flex items-center justify-center shrink-0 shadow-2xs">
+                        <Sparkles className="w-4 h-4" />
+                      </div>
+                      <div>
+                        <div className="font-bold text-emerald-900">
+                          No. Registrasi Sama Karena Belum Diurutkan Ulang?
+                        </div>
+                        <p className="text-[11px] text-emerald-800">
+                          Sistem mendeteksi no. registrasi yang ganda dan menerbitkan nomor registrasi baru yang unik secara otomatis tanpa menghapus data fisik survei.
+                        </p>
+                      </div>
+                    </div>
+                    <button
+                      onClick={handleAutoFixCodes}
+                      disabled={isFixingCodes}
+                      className="px-3.5 py-1.5 bg-emerald-700 hover:bg-emerald-800 text-white font-bold text-xs rounded-xl shadow-xs transition-transform active:scale-95 flex items-center gap-1.5 shrink-0 cursor-pointer disabled:opacity-50"
+                      title="Klik untuk membuat no registrasi baru secara otomatis"
+                    >
+                      <Wand2 className={`w-3.5 h-3.5 ${isFixingCodes ? 'animate-spin' : ''}`} />
+                      <span>{isFixingCodes ? 'Memproses...' : 'Perbaiki No. Reg Otomatis'}</span>
+                    </button>
                   </div>
 
                   {/* Informational Callout regarding Municipal/Village multiple building ownership */}

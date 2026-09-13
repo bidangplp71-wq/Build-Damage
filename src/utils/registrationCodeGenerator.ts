@@ -89,6 +89,169 @@ export function generateNextRegistrationCode(
 }
 
 /**
+ * Derives the standard prefix for an assessment based on kecamatan or PUPR convention
+ */
+export function getKecamatanCodePrefix(
+  assessment: Partial<BuildingAssessment>,
+  year: number = new Date().getFullYear()
+): string {
+  const kecName = (assessment.kecamatanName || assessment.sourceSheet || assessment.targetSheetName || '')
+    .toUpperCase()
+    .replace(/^KEC\.?\s*/i, '')
+    .trim();
+
+  let prefix = 'PUPR';
+  if (kecName.includes('AESESA SELATAN') || kecName.includes('ASEL')) {
+    prefix = 'ASS';
+  } else if (kecName.includes('AESESA')) {
+    prefix = 'AES';
+  } else if (kecName.includes('BOAWAE')) {
+    prefix = 'BOA';
+  } else if (kecName.includes('MAUPONGGO')) {
+    prefix = 'MPO';
+  } else if (kecName.includes('NANGARORO')) {
+    prefix = 'NGA';
+  } else if (kecName.includes('KEO TENGAH') || kecName.includes('KEO')) {
+    prefix = 'KEO';
+  } else if (kecName.includes('WOLOWAE')) {
+    prefix = 'WLW';
+  } else if (kecName.length >= 3) {
+    prefix = kecName.replace(/[^A-Z]/g, '').slice(0, 3);
+  }
+
+  return `REG-${prefix}-${year}-`;
+}
+
+/**
+ * Automatically detects and fixes duplicate or conflicting registration codes across all assessments.
+ * The first assessment keeps its registration code. Any subsequent assessment with the same code
+ * gets assigned a brand-new, unique sequential registration code.
+ */
+export function autoFixDuplicateRegistrationCodes(
+  assessments: BuildingAssessment[],
+  customYear?: number
+): {
+  updatedAssessments: BuildingAssessment[];
+  fixedCount: number;
+  fixedItems: Array<{
+    id: string;
+    buildingName: string;
+    oldCode: string;
+    newCode: string;
+    sourceSheet?: string;
+  }>;
+} {
+  const currentYear = customYear || new Date().getFullYear();
+  const seenCodes = new Set<string>();
+  const invalidCodes = new Set([
+    '',
+    '0',
+    '-',
+    '--',
+    '---',
+    'none',
+    'tidak ada',
+    'belum ada',
+    'null',
+    'undefined',
+    'tanpa kode',
+    'tanpa no reg',
+    'reg',
+    'reg-',
+    'reg--',
+    'reg-preview',
+  ]);
+
+  const fixedItems: Array<{
+    id: string;
+    buildingName: string;
+    oldCode: string;
+    newCode: string;
+    sourceSheet?: string;
+  }> = [];
+
+  // 1. First pass: Register all valid, non-duplicate codes
+  const codeCounts = new Map<string, number>();
+  assessments.forEach((a) => {
+    const rawCode = (a.code || '').trim().toUpperCase();
+    if (rawCode && !invalidCodes.has(rawCode.toLowerCase()) && rawCode.length >= 3) {
+      codeCounts.set(rawCode, (codeCounts.get(rawCode) || 0) + 1);
+    }
+  });
+
+  // Track the highest sequence per prefix to generate sequential codes cleanly
+  const maxSeqPerPrefix = new Map<string, number>();
+
+  assessments.forEach((a) => {
+    const rawCode = (a.code || '').trim().toUpperCase();
+    if (!rawCode) return;
+    const match = rawCode.match(/^REG-([A-Z0-9]+)-(\d{4})-(\d+)$/i);
+    if (match) {
+      const prefix = `REG-${match[1].toUpperCase()}-${match[2]}-`;
+      const seq = parseInt(match[3], 10);
+      if (!isNaN(seq)) {
+        const currentMax = maxSeqPerPrefix.get(prefix) || 0;
+        if (seq > currentMax) {
+          maxSeqPerPrefix.set(prefix, seq);
+        }
+      }
+    }
+  });
+
+  const updatedAssessments = assessments.map((assessment) => {
+    const rawCode = (assessment.code || '').trim();
+    const upperCode = rawCode.toUpperCase();
+    const isInvalid = !rawCode || invalidCodes.has(rawCode.toLowerCase()) || rawCode.length < 3;
+
+    // If valid and hasn't been seen yet, keep it!
+    if (!isInvalid && !seenCodes.has(upperCode)) {
+      seenCodes.add(upperCode);
+      return assessment;
+    }
+
+    // It is a duplicate or invalid/missing registration code! Generate a new unique code.
+    let basePrefix = getKecamatanCodePrefix(assessment, currentYear);
+
+    // If original code was like REG-PUPR-2026-0001 or REG-AES-2026-0001, try to preserve the prefix
+    const originalPrefixMatch = upperCode.match(/^REG-([A-Z0-9]+)-(\d{4})-/i);
+    if (originalPrefixMatch) {
+      basePrefix = `REG-${originalPrefixMatch[1].toUpperCase()}-${originalPrefixMatch[2]}-`;
+    }
+
+    let nextSeq = (maxSeqPerPrefix.get(basePrefix) || 0) + 1;
+    let candidateCode = `${basePrefix}${String(nextSeq).padStart(4, '0')}`;
+
+    while (seenCodes.has(candidateCode.toUpperCase())) {
+      nextSeq++;
+      candidateCode = `${basePrefix}${String(nextSeq).padStart(4, '0')}`;
+    }
+
+    maxSeqPerPrefix.set(basePrefix, nextSeq);
+    seenCodes.add(candidateCode.toUpperCase());
+
+    fixedItems.push({
+      id: assessment.id,
+      buildingName: assessment.buildingName,
+      oldCode: rawCode || '(Kosong / Tidak Valid)',
+      newCode: candidateCode,
+      sourceSheet: assessment.sourceSheet || (assessment.kecamatanName ? `Kec. ${assessment.kecamatanName}` : undefined),
+    });
+
+    return {
+      ...assessment,
+      code: candidateCode,
+      updatedAt: new Date().toISOString(),
+    };
+  });
+
+  return {
+    updatedAssessments,
+    fixedCount: fixedItems.length,
+    fixedItems,
+  };
+}
+
+/**
  * Validates if a registration code is unique among assessments
  */
 export function isRegistrationCodeUnique(

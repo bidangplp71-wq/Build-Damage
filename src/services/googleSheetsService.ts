@@ -2257,18 +2257,54 @@ export function parseExtractedRowsToAssessments(
     // Each row in each kecamatan sheet is an independent building survey record
     const dedupeKey = `row:${cleanSheet}::r${sheetRowNumber}`;
 
-    // Registration code assignment
+    // Registration code assignment: automatically guarantee 100% uniqueness even if surveyor did not resequence
     let code = rawCode;
-    if (code) {
-      const codeUpper = code.toUpperCase();
-      seenCodes.add(codeUpper);
+    const invalidCodes = new Set([
+      '',
+      '0',
+      '-',
+      '--',
+      '---',
+      'none',
+      'tidak ada',
+      'belum ada',
+      'null',
+      'undefined',
+      'tanpa kode',
+      'tanpa no reg',
+      'reg',
+      'reg-',
+      'reg--',
+      'reg-preview',
+    ]);
+    const isInvalid = !code || invalidCodes.has(code.toLowerCase().trim()) || code.trim().length < 3;
+
+    if (!isInvalid && !seenCodes.has(code.toUpperCase().trim())) {
+      code = code.trim();
+      seenCodes.add(code.toUpperCase());
     } else {
+      // If code was missing, invalid, or DUPLICATED from an earlier row, generate a unique sequential code
       const rowNumCol = getVal(rowObj, ['No', 'Nomor', 'No.', 'No Urut']);
-      const seq = rowNumCol && /^\d+$/.test(String(rowNumCol).trim())
-        ? String(rowNumCol).trim().padStart(4, '0')
-        : String(sheetRowNumber).padStart(4, '0');
-      const kecPrefix = kecInfo.name.toUpperCase().replace(/[^A-Z]/g, '').slice(0, 3) || 'NGK';
-      code = `REG-${kecPrefix}-2026-${seq}`;
+      let seqNum = rowNumCol && /^\d+$/.test(String(rowNumCol).trim())
+        ? parseInt(String(rowNumCol).trim(), 10)
+        : (sheetRowNumber > 0 ? sheetRowNumber : index + 1);
+
+      let kecPrefix = kecInfo.name.toUpperCase().replace(/[^A-Z]/g, '').slice(0, 3) || 'PUP';
+      if (kecInfo.name.toUpperCase().includes('AESESA SELATAN')) kecPrefix = 'ASS';
+      else if (kecInfo.name.toUpperCase().includes('AESESA')) kecPrefix = 'AES';
+      else if (kecInfo.name.toUpperCase().includes('BOAWAE')) kecPrefix = 'BOA';
+      else if (kecInfo.name.toUpperCase().includes('MAUPONGGO')) kecPrefix = 'MPO';
+      else if (kecInfo.name.toUpperCase().includes('NANGARORO')) kecPrefix = 'NGA';
+      else if (kecInfo.name.toUpperCase().includes('KEO TENGAH')) kecPrefix = 'KEO';
+      else if (kecInfo.name.toUpperCase().includes('WOLOWAE')) kecPrefix = 'WLW';
+
+      let candidate = `REG-${kecPrefix}-2026-${String(seqNum).padStart(4, '0')}`;
+      while (seenCodes.has(candidate.toUpperCase())) {
+        seqNum++;
+        candidate = `REG-${kecPrefix}-2026-${String(seqNum).padStart(4, '0')}`;
+      }
+      code = candidate;
+      seenCodes.add(code.toUpperCase());
     }
 
     // Stable deterministic ID unique per physical row in the sheet

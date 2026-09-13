@@ -63,7 +63,7 @@ import {
   deduplicateAssessmentsList, 
   reconcileAndMergeAssessments 
 } from '../utils/duplicateDetector';
-import { generateNextRegistrationCode } from '../utils/registrationCodeGenerator';
+import { generateNextRegistrationCode, autoFixDuplicateRegistrationCodes } from '../utils/registrationCodeGenerator';
 import {
   queueAssessmentForSync,
   removeAssessmentFromSyncQueue,
@@ -100,6 +100,18 @@ interface AppContextType {
   updateAssessment: (id: string, data: Partial<BuildingAssessment>) => Promise<{ success: boolean; message: string }>;
   deleteAssessment: (id: string, bypassAuth?: boolean) => { success: boolean; message: string };
   purgeAllDuplicates: () => { success: boolean; count: number; message: string };
+  autoFixDuplicateCodes: () => {
+    success: boolean;
+    fixedCount: number;
+    message: string;
+    fixedItems: Array<{
+      id: string;
+      buildingName: string;
+      oldCode: string;
+      newCode: string;
+      sourceSheet?: string;
+    }>;
+  };
   verifyAssessment: (id: string, status: VerificationStatus, notes: string) => Promise<{ success: boolean; message: string }>;
   syncAssessmentToSheet: (id: string) => Promise<{ success: boolean; message: string }>;
   syncAllToSheet: () => Promise<{ success: boolean; message: string; count?: number }>;
@@ -2382,6 +2394,77 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
     };
   };
 
+  // Automatically detects duplicate/conflicting registration codes across all assessments and assigns new unique sequential codes
+  const autoFixDuplicateCodes = (): {
+    success: boolean;
+    fixedCount: number;
+    message: string;
+    fixedItems: Array<{
+      id: string;
+      buildingName: string;
+      oldCode: string;
+      newCode: string;
+      sourceSheet?: string;
+    }>;
+  } => {
+    try {
+      const { updatedAssessments, fixedCount, fixedItems } = autoFixDuplicateRegistrationCodes(assessments);
+      if (fixedCount > 0) {
+        setAssessments(updatedAssessments);
+        try {
+          localStorage.setItem(STORAGE_KEYS.ASSESSMENTS, JSON.stringify(updatedAssessments));
+        } catch {}
+
+        if (typeof BroadcastChannel !== 'undefined') {
+          try {
+            const ch = new BroadcastChannel('sipandu_pupr_sync_channel');
+            ch.postMessage({ type: 'UPDATE_ALL_ASSESSMENTS', payload: updatedAssessments });
+            ch.close();
+          } catch {}
+        }
+
+        if (db && !isFirestoreQuotaExceeded) {
+          fixedItems.forEach((item) => {
+            const full = updatedAssessments.find((a) => a.id === item.id);
+            if (full) {
+              const clean = prepareAssessmentForFirestore(full);
+              setDoc(doc(db, 'assessments', clean.id), clean, { merge: true }).catch(() => {});
+            }
+          });
+        }
+
+        logUserActivity(
+          'UPDATE_ASSESSMENT',
+          'Penilaian Kerusakan',
+          `Auto-Fix Nomor Registrasi: Menghasilkan ${fixedCount} no. registrasi baru untuk mengatasi kode ganda/kosong`,
+          `${fixedCount} data bangunan`,
+          `Dijalankan otomatis oleh ${currentUser.name}`
+        );
+
+        return {
+          success: true,
+          fixedCount,
+          fixedItems,
+          message: `Berhasil memperbaiki ${fixedCount} nomor registrasi ganda dan menerbitkan nomor registrasi baru secara otomatis!`,
+        };
+      }
+
+      return {
+        success: true,
+        fixedCount: 0,
+        fixedItems: [],
+        message: 'Semua data bangunan sudah memiliki nomor registrasi yang unik & valid.',
+      };
+    } catch (err: any) {
+      return {
+        success: false,
+        fixedCount: 0,
+        fixedItems: [],
+        message: 'Gagal memperbaiki nomor registrasi: ' + (err?.message || 'Terjadi kesalahan sistem'),
+      };
+    }
+  };
+
   /**
    * Automatic photo recovery engine:
    * Scans local IndexedDB and server to restore any photos that have empty URLs in Firestore.
@@ -3114,6 +3197,7 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
         updateAssessment,
         deleteAssessment,
         purgeAllDuplicates,
+        autoFixDuplicateCodes,
         verifyAssessment,
         syncAssessmentToSheet,
         syncAllToSheet,
