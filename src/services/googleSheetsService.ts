@@ -2239,11 +2239,17 @@ export function parseExtractedRowsToAssessments(
     const cleanBuilding = buildingName.toLowerCase().replace(/\s*\(baris\s+\d+\)/i, '').trim();
     const cleanKec = kecInfo.name.toLowerCase().trim();
     const cleanDesa = desaName.toLowerCase().trim();
-    const cleanNik = (nikPemilik && nikPemilik !== '0') ? nikPemilik.trim() : '';
+    const cleanNik = (nikPemilik && nikPemilik !== '0' && nikPemilik.length >= 10) ? nikPemilik.trim() : '';
 
+    // If an official registration code was explicitly provided in the sheet: dedupe by that code.
+    // If a valid NIK is provided (>= 10 digits): dedupe by NIK + kecamatan.
+    // Otherwise: preserve every distinct physical row from each sheet so multiple houses in the same village
+    // (e.g. "Rumah Tinggal", "Rumah Warga") are NEVER collapsed or lost!
     const dedupeKey = normCode
       ? `code:${normCode}`
-      : `sig:${cleanKec}::${cleanDesa}::${cleanBuilding}${cleanNik ? `::${cleanNik}` : ''}`;
+      : cleanNik
+        ? `nik:${cleanNik}::${cleanKec}::${cleanDesa}`
+        : `row:${(sourceSheet || 'sheet').toLowerCase()}::r${sheetRowNumber}::${cleanBuilding.slice(0, 30)}`;
 
     // Registration code assignment
     let code = rawCode;
@@ -2251,13 +2257,18 @@ export function parseExtractedRowsToAssessments(
       const codeUpper = code.toUpperCase();
       seenCodes.add(codeUpper);
     } else {
-      code = `REG-PUPR-2026-${String(index + 1).padStart(4, '0')}`;
+      const rowNumCol = getVal(rowObj, ['No', 'Nomor', 'No.', 'No Urut']);
+      const seq = rowNumCol && /^\d+$/.test(String(rowNumCol).trim())
+        ? String(rowNumCol).trim().padStart(4, '0')
+        : String(sheetRowNumber).padStart(4, '0');
+      const kecPrefix = kecInfo.name.toUpperCase().replace(/[^A-Z]/g, '').slice(0, 3) || 'NGK';
+      code = `REG-${kecPrefix}-2026-${seq}`;
     }
 
     // Stable deterministic ID
     const stableId = normCode
       ? `sheet_reg_${normCode.toLowerCase().replace(/[^a-z0-9]/g, '_')}`
-      : `sheet_${cleanKec.replace(/[^a-z0-9]/g, '_')}_${(cleanDesa ? cleanDesa.replace(/[^a-z0-9]/g, '_') + '_' : '')}${cleanBuilding.replace(/[^a-z0-9]/g, '_').slice(0, 30)}`;
+      : `sheet_${(sourceSheet || 'data').toLowerCase().replace(/[^a-z0-9]/g, '_')}_r${sheetRowNumber}_${cleanKec.replace(/[^a-z0-9]/g, '_')}_${cleanBuilding.replace(/[^a-z0-9]/g, '_').slice(0, 20)}`;
 
     const numberOfFloors = parseNumber(getVal(rowObj, ['Jumlah Tingkat', 'Jumlah Lantai', 'Tingkat', 'Lantai'])) || 1;
     const yearBuilt = parseNumber(getVal(rowObj, ['Tahun Dibangun', 'Tahun Pembangunan', 'Tahun'])) || new Date().getFullYear();
@@ -2779,23 +2790,17 @@ export async function fetchAssessmentsFromGoogleSheet(
         const json = await serverResp.json();
         if (json.success && Array.isArray(json.rows) && json.rows.length > 0) {
           const parsed = parseExtractedRowsToAssessments(json.rows);
-          // Strictly ensure only data from the 7 kecamatan is accepted
-          const strictly7KecData = parsed.filter((item) => {
-            const kec = (item.kecamatanName || '').toLowerCase();
-            return ['aesesa', 'boawae', 'mauponggo', 'nangaroro', 'keo tengah', 'wolowae'].some((k) => kec.includes(k));
-          });
-
-          if (strictly7KecData.length > 0) {
+          if (parsed.length > 0) {
             memoryAssessmentsCache = {
               spreadsheetId,
-              data: strictly7KecData,
+              data: parsed,
               timestamp: Date.now(),
             };
             return {
               success: true,
-              data: strictly7KecData,
-              totalRows: strictly7KecData.length,
-              message: `Berhasil memuat cepat seluruh ${strictly7KecData.length} data penilaian dari 7 sheet kecamatan!`,
+              data: parsed,
+              totalRows: parsed.length,
+              message: `Berhasil memuat cepat seluruh ${parsed.length} data penilaian secara serentak dari spreadsheet!`,
             };
           }
         }
@@ -2931,24 +2936,27 @@ export async function fetchAssessmentsFromGoogleSheet(
     // Deduplicate and parse all aggregated rows
     const parsedData = parseExtractedRowsToAssessments(allExtractedRows);
 
-    // Strictly ensure only data belonging to the 7 kecamatan is retained
-    const strictly7KecData = parsedData.filter((item) => {
-      const kec = (item.kecamatanName || '').toLowerCase();
-      return ['aesesa', 'boawae', 'mauponggo', 'nangaroro', 'keo tengah', 'wolowae'].some((k) => kec.includes(k));
-    });
+    if (parsedData.length > 0) {
+      // Save to high-speed in-memory cache
+      memoryAssessmentsCache = {
+        spreadsheetId,
+        data: parsedData,
+        timestamp: Date.now(),
+      };
 
-    // Save to high-speed in-memory cache
-    memoryAssessmentsCache = {
-      spreadsheetId,
-      data: strictly7KecData,
-      timestamp: Date.now(),
-    };
+      return {
+        success: true,
+        data: parsedData,
+        totalRows: parsedData.length,
+        message: `Berhasil memuat seluruh ${parsedData.length} data penilaian gedung secara cepat dan serentak!`,
+      };
+    }
 
     return {
       success: true,
-      data: strictly7KecData,
-      totalRows: strictly7KecData.length,
-      message: `Berhasil memuat seluruh ${strictly7KecData.length} data penilaian gedung secara cepat dari ke-7 sheet kecamatan!`,
+      data: [],
+      totalRows: 0,
+      message: 'Tidak ditemukan baris data penilaian yang valid.',
     };
   } catch (err: any) {
     console.warn('fetchAssessmentsFromGoogleSheet notice:', err?.message || err);

@@ -3122,33 +3122,7 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
     setFirebaseShieldConfig((prev) => ({ ...prev, ...config }));
   };
 
-  const deduplicatedAssessments = useMemo(() => {
-    const duplicateGroups = detectAllDuplicateGroups(assessments);
-    if (duplicateGroups.length === 0) return assessments;
-    
-    // Automatically hide duplicates globally so they never appear to any user role
-    const hiddenIds = new Set<string>();
-    duplicateGroups.forEach((group) => {
-      // Sort to keep the best one as primary (verified first, most photos, newest)
-      const sorted = [...group.items].sort((a, b) => {
-        const aVer = a.verificationStatus === 'Terverifikasi' ? 1 : 0;
-        const bVer = b.verificationStatus === 'Terverifikasi' ? 1 : 0;
-        if (aVer !== bVer) return bVer - aVer;
-        const aPhotos = a.photos?.length || 0;
-        const bPhotos = b.photos?.length || 0;
-        if (aPhotos !== bPhotos) return bPhotos - aPhotos;
-        const aTime = new Date(a.updatedAt || a.createdAt || 0).getTime();
-        const bTime = new Date(b.updatedAt || b.createdAt || 0).getTime();
-        return bTime - aTime;
-      });
-      // Hide all except the primary (index 0)
-      for (let i = 1; i < sorted.length; i++) {
-        hiddenIds.add(sorted[i].id);
-      }
-    });
-    return assessments.filter((a) => !hiddenIds.has(a.id));
-  }, [assessments]);
-
+  // Full collection of building assessments (never hide valid records)
   return (
     <AppContext.Provider
       value={{
@@ -3173,7 +3147,7 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
         lockSession,
         unlockSession,
 
-        assessments: deduplicatedAssessments,
+        assessments,
         addAssessment,
         updateAssessment,
         deleteAssessment,

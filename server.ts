@@ -772,6 +772,27 @@ async function fetchKecamatanRowsOnServer(
   return { success: false, rows: [] };
 }
 
+async function fetchSheetRowsOnServer(
+  spreadsheetId: string,
+  sheetName: string,
+  cacheBuster: number
+): Promise<{ success: boolean; rows: Array<{ rowObj: Record<string, any>; sheetRowNumber: number; sourceSheet: string }>; matchedTab?: string }> {
+  const url = `https://docs.google.com/spreadsheets/d/${spreadsheetId}/gviz/tq?sheet=${encodeURIComponent(sheetName)}&_t=${cacheBuster}`;
+  const controller = new AbortController();
+  const timeout = setTimeout(() => controller.abort(), 5500);
+  try {
+    const resp = await fetch(url, { signal: controller.signal });
+    clearTimeout(timeout);
+    if (!resp.ok) return { success: false, rows: [] };
+    const text = await resp.text();
+    const parsed = parseServerGvizTextToRows(text, sheetName);
+    return { success: parsed.length > 0, rows: parsed, matchedTab: sheetName };
+  } catch {
+    clearTimeout(timeout);
+    return { success: false, rows: [] };
+  }
+}
+
 const handleKecamatanRawFetch = async (req: express.Request, res: express.Response) => {
   try {
     const spreadsheetUrl = (req.body?.spreadsheetUrl || req.query?.spreadsheetUrl || getGoogleSheetConfig().spreadsheetUrl || '').toString().trim();
@@ -799,15 +820,37 @@ const handleKecamatanRawFetch = async (req: express.Request, res: express.Respon
     }
 
     const cacheBuster = Date.now();
-    // Concurrently fetch all 7 kecamatan sheets using Cloud Run's high-speed datacenter connection
-    const results = await Promise.all(
+    // 1. Concurrently fetch all 7 kecamatan sheets
+    const kecPromise = Promise.all(
       KECAMATAN_SPECS.map(kec => fetchKecamatanRowsOnServer(spreadsheetId, kec, cacheBuster))
     );
+
+    // 2. Concurrently fetch master sheet candidates (e.g. configured sheetName, REKAP_SEMUA_KECAMATAN)
+    const masterCandidates = Array.from(new Set([
+      (getGoogleSheetConfig().sheetName || 'REKAP_SEMUA_KECAMATAN').trim(),
+      'REKAP_SEMUA_KECAMATAN',
+      'Data_Penilaian_Kerusakan_PUPR',
+      'Data',
+    ])).filter(Boolean);
+
+    const masterPromise = Promise.all(
+      masterCandidates.map(sheetName => fetchSheetRowsOnServer(spreadsheetId, sheetName, cacheBuster))
+    );
+
+    const [kecResults, masterResults] = await Promise.all([kecPromise, masterPromise]);
 
     const allRows: Array<{ rowObj: Record<string, any>; sheetRowNumber: number; sourceSheet: string }> = [];
     const scannedSheets: string[] = [];
 
-    results.forEach((r, idx) => {
+    // Prioritize master sheet rows if present, or combine with kecamatan sheets
+    masterResults.forEach((m) => {
+      if (m.success && m.rows.length > 0) {
+        allRows.push(...m.rows);
+        scannedSheets.push(m.matchedTab || 'Master');
+      }
+    });
+
+    kecResults.forEach((r, idx) => {
       if (r.success && r.rows.length > 0) {
         allRows.push(...r.rows);
         scannedSheets.push(r.matchedTab || KECAMATAN_SPECS[idx].name);
@@ -828,11 +871,11 @@ const handleKecamatanRawFetch = async (req: express.Request, res: express.Respon
       rows: allRows,
       scannedSheets,
       cached: false,
-      message: `Berhasil memuat ${allRows.length} baris data murni dari ke-7 sheet kecamatan.`,
+      message: `Berhasil memuat ${allRows.length} baris data murni secara serentak dari spreadsheet.`,
     });
   } catch (err: any) {
-    console.error('Error fetching kecamatan sheets on server:', err);
-    return res.status(500).json({ success: false, message: 'Gagal membaca sheet kecamatan: ' + err.message, rows: [] });
+    console.error('Error fetching sheets on server:', err);
+    return res.status(500).json({ success: false, message: 'Gagal membaca spreadsheet: ' + err.message, rows: [] });
   }
 };
 

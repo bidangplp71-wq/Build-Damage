@@ -81,9 +81,18 @@ export const AssessmentTable: React.FC = () => {
   const [selectedVerification, setSelectedVerification] = useState('');
   const [isRefreshing, setIsRefreshing] = useState(false);
 
-  // Pagination State
+  // Pagination State - defaults to 200 so 179+ rows display all at once
   const [currentPage, setCurrentPage] = useState(1);
-  const [pageSize, setPageSize] = useState(10);
+  const [pageSize, setPageSize] = useState<number>(() => {
+    try {
+      const saved = localStorage.getItem('sipandu_table_page_size');
+      if (saved) {
+        const num = Number(saved);
+        if (!isNaN(num) && num > 0) return num;
+      }
+    } catch {}
+    return 200;
+  });
 
   // Delete modal confirmation
   const [itemToDelete, setItemToDelete] = useState<BuildingAssessment | null>(null);
@@ -550,6 +559,28 @@ export const AssessmentTable: React.FC = () => {
               <span>Audit Data Ganda ({duplicateGroups.length})</span>
             </button>
           )}
+
+          {/* Quick toggle: Tampilkan Semua Sekaligus */}
+          <button
+            onClick={() => {
+              const isShowingAll = pageSize >= filteredAssessments.length && pageSize >= 200;
+              const newSize = isShowingAll ? 25 : Math.max(filteredAssessments.length, 500);
+              setPageSize(newSize);
+              setCurrentPage(1);
+              try {
+                localStorage.setItem('sipandu_table_page_size', String(newSize));
+              } catch {}
+            }}
+            title="Tampilkan seluruh data penilaian secara langsung tanpa terpecah halaman"
+            className={`flex items-center gap-1.5 px-3 py-2 text-xs font-bold rounded-xl border transition-colors cursor-pointer shadow-2xs ${
+              pageSize >= filteredAssessments.length && pageSize >= 100
+                ? 'bg-blue-600 hover:bg-blue-700 text-white border-blue-700'
+                : 'bg-white hover:bg-slate-100 text-slate-700 border-slate-300'
+            }`}
+          >
+            <Layers className="w-3.5 h-3.5" />
+            <span>{pageSize >= filteredAssessments.length && pageSize >= 100 ? `Tampil Sekaligus (${filteredAssessments.length})` : 'Tampilkan Sekaligus'}</span>
+          </button>
 
           {/* Refresh button */}
           <button
@@ -1263,17 +1294,23 @@ export const AssessmentTable: React.FC = () => {
           <div className="flex items-center gap-2">
             <span>Tampilkan per halaman:</span>
             <select
-              value={pageSize}
+              value={pageSize >= filteredAssessments.length && pageSize >= 200 ? 1000 : pageSize}
               onChange={(e) => {
-                setPageSize(Number(e.target.value));
+                const val = Number(e.target.value);
+                setPageSize(val);
                 setCurrentPage(1);
+                try {
+                  localStorage.setItem('sipandu_table_page_size', String(val));
+                } catch {}
               }}
               className="px-2 py-1 rounded-lg border border-slate-200 bg-white font-medium text-slate-700"
             >
-              <option value={5}>5 Baris</option>
               <option value={10}>10 Baris</option>
               <option value={25}>25 Baris</option>
               <option value={50}>50 Baris</option>
+              <option value={100}>100 Baris</option>
+              <option value={200}>200 Baris</option>
+              <option value={1000}>Tampilkan Semua Sekaligus ({filteredAssessments.length} Data)</option>
             </select>
             <span className="text-slate-400">&bull;</span>
             <span>
