@@ -2612,21 +2612,22 @@ export async function fetchAssessmentsFromGoogleSheet(
   ];
 
   const isExcludedRekapSheet = (name: string): boolean => {
-    if (!name) return false;
+    if (!name) return true;
     const clean = name.trim().toUpperCase().replace(/[\s_-]+/g, '_');
-    const exactExcluded = [
-      'DATA_PENILAIAN_KERUSAKAN_PUPR',
-      'REKAP_SEMUA_KECAMATAN',
-      'REKAPITULASI',
-      'REKAP',
-      'DAFTAR_PENGGUNA',
-      'LOG_AKSES_PENGGUNA',
-      'DUKCAPIL',
-      'REFERENSI',
-      'SHEET_REKAP',
-      'DATA_REKAP',
-    ];
-    return exactExcluded.some((ex) => clean === ex || clean.startsWith(ex + '_') || clean.endsWith('_' + ex));
+    // Reject any sheet that does not start with Kec / KEC
+    if (!name.trim().toLowerCase().startsWith('kec')) return true;
+    // Reject summary/rekap sheets explicitly
+    if (
+      clean.includes('REKAP') ||
+      clean.includes('RINGKASAN') ||
+      clean.includes('DATA_PENILAIAN') ||
+      clean.includes('PENGGUNA') ||
+      clean.includes('DUKCAPIL') ||
+      clean.includes('REFERENSI')
+    ) {
+      return true;
+    }
+    return false;
   };
 
   // Helper function to parse GViz JSON response into ExtractedRow[]

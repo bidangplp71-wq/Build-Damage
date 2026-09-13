@@ -78,37 +78,18 @@ app.use('/uploads', express.static(path.join(process.cwd(), 'uploads')));
 // ASSESSMENTS API (Zero-quota Cloud Persistence)
 // ==========================================
 
-// Safe deduplication for server-stored assessments
+// Safe deduplication for server-stored assessments strictly by ID to preserve all rows
 function deduplicateServerAssessments(list: any[]): any[] {
   if (!Array.isArray(list) || list.length <= 1) return list || [];
   const result: any[] = [];
   const seenIdMap = new Map<string, number>();
-  const seenCodeMap = new Map<string, number>();
-  const seenSheetRowMap = new Map<string, number>();
-  const seenNikMap = new Map<string, number>();
 
   for (const item of list) {
     if (!item || !item.id) continue;
 
-    const normCode = item.code ? String(item.code).toLowerCase().replace(/[^a-z0-9]/g, '').trim() : '';
-    const normNik = item.nikPemilik && item.nikPemilik !== '0' && String(item.nikPemilik).length >= 10
-      ? String(item.nikPemilik).trim()
-      : '';
-    const normKec = item.kecamatanName || item.kecamatanId ? String(item.kecamatanName || item.kecamatanId).toLowerCase().trim() : '';
-    const nikKey = normNik && normKec ? `${normNik}::${normKec}` : '';
-    const sheetRowKey = item.sourceSheet && item.sheetRowNumber
-      ? `${String(item.sourceSheet).toLowerCase().trim()}::r${item.sheetRowNumber}`
-      : '';
-
     let matchIdx = -1;
     if (seenIdMap.has(item.id)) {
       matchIdx = seenIdMap.get(item.id)!;
-    } else if (normCode && seenCodeMap.has(normCode)) {
-      matchIdx = seenCodeMap.get(normCode)!;
-    } else if (sheetRowKey && seenSheetRowMap.has(sheetRowKey)) {
-      matchIdx = seenSheetRowMap.get(sheetRowKey)!;
-    } else if (nikKey && seenNikMap.has(nikKey)) {
-      matchIdx = seenNikMap.get(nikKey)!;
     }
 
     if (matchIdx !== -1) {
@@ -125,9 +106,6 @@ function deduplicateServerAssessments(list: any[]): any[] {
       const newIdx = result.length;
       result.push(item);
       seenIdMap.set(item.id, newIdx);
-      if (normCode) seenCodeMap.set(normCode, newIdx);
-      if (sheetRowKey) seenSheetRowMap.set(sheetRowKey, newIdx);
-      if (nikKey) seenNikMap.set(nikKey, newIdx);
     }
   }
   return result;
@@ -705,6 +683,18 @@ function isMasterRekapFallbackServer(
 
 function parseServerGvizTextToRows(rawText: string, sheetName: string): Array<{ rowObj: Record<string, any>; sheetRowNumber: number; sourceSheet: string }> {
   if (!rawText || !rawText.includes('google.visualization.Query.setResponse')) return [];
+  if (!sheetName || !sheetName.toLowerCase().startsWith('kec')) return [];
+  const clean = sheetName.trim().toUpperCase().replace(/[\s_-]+/g, '_');
+  if (
+    clean.includes('REKAP') ||
+    clean.includes('RINGKASAN') ||
+    clean.includes('DATA_PENILAIAN') ||
+    clean.includes('PENGGUNA') ||
+    clean.includes('DUKCAPIL') ||
+    clean.includes('REFERENSI')
+  ) {
+    return [];
+  }
   try {
     const match = rawText.match(/google\.visualization\.Query\.setResponse\(([\s\S]+)\);?/);
     if (!match || !match[1]) return [];
