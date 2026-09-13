@@ -63,8 +63,7 @@ export function calculateTextSimilarity(str1: string, str2: string): number {
 
 /**
  * Check if a single record matches an existing assessment as a duplicate
- * Strict verification: Never falsely flag distinct school classrooms/buildings,
- * separate survey rows in the spreadsheet, or different properties in the same village.
+ * Strictly identifies duplicates ONLY by Registration Number (No. Registrasi / code)
  */
 export function checkDuplicateSingle(
   target: Partial<BuildingAssessment>,
@@ -78,62 +77,19 @@ export function checkDuplicateSingle(
     return null;
   }
 
-  // 1. Same source sheet and same row number is an absolute duplicate
-  const tSheet = (target as any).sourceSheet ? String((target as any).sourceSheet).trim().toLowerCase() : '';
-  const cSheet = (candidate as any).sourceSheet ? String((candidate as any).sourceSheet).trim().toLowerCase() : '';
-  const tRow = (target as any).sheetRowNumber ? Number((target as any).sheetRowNumber) : 0;
-  const cRow = (candidate as any).sheetRowNumber ? Number((candidate as any).sheetRowNumber) : 0;
+  // Exact same registration code (No. Registrasi)
+  const tCode = normalizeString(target.code);
+  const cCode = normalizeString(candidate.code);
 
-  if (tSheet && cSheet && tRow > 0 && cRow > 0 && tSheet === cSheet && tRow === cRow) {
+  if (tCode && cCode && tCode === cCode) {
     return {
       assessment: candidate,
       reason: 'SAME_CODE',
       similarityScore: 100,
-      description: `Data berasal dari baris Google Sheet yang sama (${(candidate as any).sourceSheet || 'Sheet'} baris ke-${(candidate as any).sheetRowNumber || ''}).`,
+      description: `Nomor Registrasi "${candidate.code}" sama persis. Keputusan validasi/penghapusan ditentukan oleh tim verifikator.`,
     };
   }
 
-  // 2. Exact same registration code
-  const tCode = normalizeString(target.code);
-  const cCode = normalizeString(candidate.code);
-  if (tCode && cCode) {
-    if (tCode === cCode) {
-      return {
-        assessment: candidate,
-        reason: 'SAME_CODE',
-        similarityScore: 100,
-        description: `Kode registrasi bangunan "${candidate.code}" sama persis.`,
-      };
-    } else {
-      // Distinct registration codes mean distinct registered survey entries
-      return null;
-    }
-  }
-
-  // 3. Exact same NIK Pemilik (min 10 digits, not '0') in the same village with the exact same building name
-  const tNik = (target.nikPemilik && target.nikPemilik !== '0' && String(target.nikPemilik).length >= 10)
-    ? String(target.nikPemilik).trim()
-    : '';
-  const cNik = (candidate.nikPemilik && candidate.nikPemilik !== '0' && String(candidate.nikPemilik).length >= 10)
-    ? String(candidate.nikPemilik).trim()
-    : '';
-
-  if (tNik && cNik && tNik === cNik) {
-    const tKec = normalizeString(target.kecamatanName || target.kecamatanId);
-    const cKec = normalizeString(candidate.kecamatanName || candidate.kecamatanId);
-    const isSameKec = Boolean(tKec && cKec && (tKec === cKec || target.kecamatanId === candidate.kecamatanId));
-
-    if (isSameKec) {
-      return {
-        assessment: candidate,
-        reason: 'SAME_NIK',
-        similarityScore: 100,
-        description: `NIK Pemilik (${candidate.nikPemilik}) dan wilayah kecamatan (${candidate.kecamatanName || 'Kecamatan'}) sama persis.`,
-      };
-    }
-  }
-
-  // Distinct rows from the spreadsheet with different row numbers, different codes, or different buildings are NOT duplicates
   return null;
 }
 
