@@ -121,9 +121,19 @@ export const AssessmentTable: React.FC = () => {
     }
   });
 
-  const handleIgnoreDuplicatePair = (pairKey: string) => {
+  const handleIgnoreDuplicatePair = (idAOrPairKey: string, idB?: string) => {
     setIgnoredDuplicatePairs((prev) => {
-      const updated = prev.includes(pairKey) ? prev : [...prev, pairKey];
+      const keysToAdd: string[] = [];
+      if (idB) {
+        keysToAdd.push(`${idAOrPairKey}:::${idB}`);
+        keysToAdd.push(`${idB}:::${idAOrPairKey}`);
+        keysToAdd.push([idAOrPairKey, idB].sort().join(':::'));
+        keysToAdd.push(idAOrPairKey);
+        keysToAdd.push(idB);
+      } else {
+        keysToAdd.push(idAOrPairKey);
+      }
+      const updated = Array.from(new Set([...prev, ...keysToAdd]));
       try {
         localStorage.setItem('sipandu_ignored_duplicates', JSON.stringify(updated));
       } catch {}
@@ -1034,6 +1044,20 @@ export const AssessmentTable: React.FC = () => {
                       </div>
                       <div className="text-[11px] text-slate-500">
                         {item.desaName}
+                      </div>
+                      <div className="mt-1">
+                        <span
+                          className="inline-flex items-center gap-1 px-1.5 py-0.5 rounded bg-blue-50 text-blue-900 border border-blue-200 text-[10px] font-semibold"
+                          title={`Asal Tab Google Sheet: ${item.sourceSheet || (`Kec. ` + item.kecamatanName)}${item.sheetRowNumber ? ` (Baris ke-${item.sheetRowNumber})` : ''}`}
+                        >
+                          <FileSpreadsheet className="w-3 h-3 text-blue-600 shrink-0" />
+                          <span className="truncate max-w-[130px]">{item.sourceSheet || `Kec. ${item.kecamatanName}`}</span>
+                          {item.sheetRowNumber && (
+                            <span className="font-mono text-blue-700 bg-blue-100/70 px-1 rounded text-[9px]">
+                              #{item.sheetRowNumber}
+                            </span>
+                          )}
+                        </span>
                       </div>
                     </td>
 

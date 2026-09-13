@@ -440,6 +440,7 @@ export interface BuildingAssessment {
   googleDriveFolderUrl?: string; // Link URL folder dokumentasi foto gedung di Google Drive
   targetSheetName?: string; // Nama sheet tab tujuan spesifik di Google Sheet (misal: 'Kec. Aesesa')
   sourceSheet?: string; // Nama sheet tab asal dari mana data dibaca di Google Sheet
+  sheetRowNumber?: number; // Nomor baris asal di tab Google Sheet
 
   createdBy: string;
   createdByName: string;

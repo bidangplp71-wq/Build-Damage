@@ -63,7 +63,7 @@ export function calculateTextSimilarity(str1: string, str2: string): number {
 
 /**
  * Check if a single record matches an existing assessment as a duplicate
- * Strictly identifies duplicates ONLY by Registration Number (No. Registrasi / code)
+ * Strictly identifies duplicates ONLY by valid Registration Number (No. Registrasi / code)
  */
 export function checkDuplicateSingle(
   target: Partial<BuildingAssessment>,
@@ -81,7 +81,32 @@ export function checkDuplicateSingle(
   const tCode = normalizeString(target.code);
   const cCode = normalizeString(candidate.code);
 
-  if (tCode && cCode && tCode === cCode) {
+  const invalidCodes = new Set([
+    '',
+    '0',
+    '-',
+    '--',
+    '---',
+    'none',
+    'tidak ada',
+    'belum ada',
+    'null',
+    'undefined',
+    'tanpa kode',
+    'tanpa no reg',
+    'reg',
+    'reg-',
+    'reg--',
+  ]);
+
+  if (
+    tCode &&
+    cCode &&
+    tCode === cCode &&
+    !invalidCodes.has(tCode) &&
+    !invalidCodes.has(cCode) &&
+    tCode.length >= 3
+  ) {
     return {
       assessment: candidate,
       reason: 'SAME_CODE',
@@ -139,18 +164,28 @@ export function detectAllDuplicateGroups(
 
   for (let i = 0; i < assessments.length; i++) {
     const a = assessments[i];
-    if (visited.has(a.id)) continue;
+    if (!a || !a.id || visited.has(a.id)) continue;
+    if (ignoredSet.has(a.id)) continue;
 
     const cluster: BuildingAssessment[] = [a];
-    let highestReason: DuplicateMatchReason = 'HIGH_SIMILARITY_NAME';
+    let highestReason: DuplicateMatchReason = 'SAME_CODE';
     let maxScore = 0;
 
     for (let j = i + 1; j < assessments.length; j++) {
       const b = assessments[j];
-      if (visited.has(b.id)) continue;
+      if (!b || !b.id || visited.has(b.id)) continue;
+      if (ignoredSet.has(b.id)) continue;
 
-      const pairKey = [a.id, b.id].sort().join(':::');
-      if (ignoredSet.has(pairKey)) continue;
+      const pairKey1 = `${a.id}:::${b.id}`;
+      const pairKey2 = `${b.id}:::${a.id}`;
+      const pairKeySorted = [a.id, b.id].sort().join(':::');
+      if (
+        ignoredSet.has(pairKey1) ||
+        ignoredSet.has(pairKey2) ||
+        ignoredSet.has(pairKeySorted)
+      ) {
+        continue;
+      }
 
       const match = checkDuplicateSingle(a, b);
       if (match) {
@@ -169,7 +204,7 @@ export function detectAllDuplicateGroups(
         primaryKey: `${a.buildingName} (${a.desaName})`,
         items: cluster,
         highestReason,
-        matchScore: maxScore || 90,
+        matchScore: maxScore || 100,
       });
     }
   }

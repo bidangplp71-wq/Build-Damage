@@ -302,6 +302,19 @@ export const AssessmentDetailModal: React.FC<Props> = ({ assessment, onClose }) 
                   <span className="font-semibold text-slate-600">Lokasi Administratif</span>
                   <span className="col-span-2 font-bold text-slate-950">: Kec. {assessment.kecamatanName}, {assessment.desaName}</span>
                 </div>
+                <div className="grid grid-cols-3">
+                  <span className="font-semibold text-slate-600">Asal Tab Sheet</span>
+                  <span className="col-span-2 font-medium text-blue-900 flex items-center gap-1">
+                    : <span className="bg-blue-50 text-blue-800 border border-blue-200 px-1.5 py-0.5 rounded text-[11px] font-bold">
+                      {assessment.sourceSheet || `Kec. ${assessment.kecamatanName}`}
+                    </span>
+                    {assessment.sheetRowNumber && (
+                      <span className="text-[11px] font-mono text-slate-600">
+                        (Baris #{assessment.sheetRowNumber})
+                      </span>
+                    )}
+                  </span>
+                </div>
               </div>
             </div>
 
