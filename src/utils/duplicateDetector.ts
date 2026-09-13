@@ -63,6 +63,8 @@ export function calculateTextSimilarity(str1: string, str2: string): number {
 
 /**
  * Check if a single record matches an existing assessment as a duplicate
+ * Strict verification: Never falsely flag distinct school classrooms/buildings,
+ * different homeowner properties in the same village, or separate spreadsheet rows.
  */
 export function checkDuplicateSingle(
   target: Partial<BuildingAssessment>,
@@ -87,7 +89,7 @@ export function checkDuplicateSingle(
         description: `Kode registrasi bangunan "${candidate.code}" sama persis.`,
       };
     } else {
-      // Different official PUPR registration codes mean distinct registered survey entries!
+      // Distinct official registration codes (REG-...) are always distinct surveys
       return null;
     }
   }
@@ -100,37 +102,60 @@ export function checkDuplicateSingle(
   const cDesa = normalizeString(candidate.desaName || candidate.desaId);
   const isSameDesa = Boolean(tDesa && cDesa && (tDesa === cDesa || target.desaId === candidate.desaId));
 
-  // Location must match or be closely related for name matching
-  if (isSameDesa || (isSameKec && (!tDesa || !cDesa))) {
+  // Must be in the exact same village & subdistrict
+  if (isSameDesa && isSameKec) {
     const tName = normalizeString(target.buildingName);
     const cName = normalizeString(candidate.buildingName);
 
-    if (tName && cName) {
-      // Exact building name
-      if (tName === cName) {
+    if (tName && cName && tName === cName) {
+      // Check owner / NIK identity
+      const tNik = (target.nikPemilik && target.nikPemilik !== '0' && String(target.nikPemilik).length >= 10)
+        ? String(target.nikPemilik).trim()
+        : '';
+      const cNik = (candidate.nikPemilik && candidate.nikPemilik !== '0' && String(candidate.nikPemilik).length >= 10)
+        ? String(candidate.nikPemilik).trim()
+        : '';
+
+      const tOwner = normalizeString(target.namaPemilikRumah || target.namaPemilikGedung || target.ownerAgency);
+      const cOwner = normalizeString(candidate.namaPemilikRumah || candidate.namaPemilikGedung || candidate.ownerAgency);
+
+      // If NIK is provided and matches exactly
+      if (tNik && cNik && tNik === cNik) {
         return {
           assessment: candidate,
-          reason: 'EXACT_NAME_AND_LOCATION',
+          reason: 'SAME_NIK',
           similarityScore: 100,
-          description: `Nama gedung "${candidate.buildingName}" dan lokasi (${candidate.desaName || 'Desa'}, ${candidate.kecamatanName || 'Kecamatan'}) sama persis.`,
+          description: `Nama gedung "${candidate.buildingName}" dan NIK Pemilik (${candidate.nikPemilik}) sama persis.`,
         };
       }
 
-      // CATATAN: Kepemilikan gedung bisa sama karena Pemda atau Pemerintah Desa
-      // dapat memiliki lebih dari satu gedung (contoh: Kantor Desa, Balai Pertemuan Desa,
-      // Posyandu Dusun Maunura, Posyandu Usu, dan Polindes semuanya dimiliki oleh Pemdes yang sama).
-      // Oleh karena itu, kesamaan kepemilikan/pengelola BUKAN merupakan duplikat jika nama gedung berbeda.
-
-      // High text similarity (>85%)
-      const similarity = calculateTextSimilarity(tName, cName);
-      if (similarity >= 0.85) {
-        return {
-          assessment: candidate,
-          reason: 'HIGH_SIMILARITY_NAME',
-          similarityScore: Math.round(similarity * 100),
-          description: `Nama gedung mirip ${Math.round(similarity * 100)}% ("${candidate.buildingName}") di desa yang sama.`,
-        };
+      // If generic name (e.g. "rumah warga", "rumah tinggal", "kantor", "posyandu"), require same owner
+      const isGenericName = ['rumah', 'rumah tinggal', 'rumah warga', 'hunian warga', 'posyandu', 'polindes', 'balai', 'gedung'].includes(tName);
+      if (isGenericName) {
+        if (tOwner && cOwner && tOwner === cOwner) {
+          return {
+            assessment: candidate,
+            reason: 'EXACT_NAME_AND_LOCATION',
+            similarityScore: 100,
+            description: `Rumah/gedung "${candidate.buildingName}" dengan pemilik yang sama ("${candidate.namaPemilikRumah || candidate.namaPemilikGedung || candidate.ownerAgency}") di ${candidate.desaName || 'Desa'}.`,
+          };
+        }
+        // Different owners for generic house name in the same village are NOT duplicates
+        return null;
       }
+
+      // Specific building name (e.g. "SDI Kekandere Ruang Guru") matching identically in the same village
+      if (tOwner && cOwner && tOwner !== cOwner) {
+        // Different owners or agencies mean distinct assets
+        return null;
+      }
+
+      return {
+        assessment: candidate,
+        reason: 'EXACT_NAME_AND_LOCATION',
+        similarityScore: 100,
+        description: `Nama gedung "${candidate.buildingName}" dan lokasi (${candidate.desaName || 'Desa'}, ${candidate.kecamatanName || 'Kecamatan'}) sama persis.`,
+      };
     }
   }
 

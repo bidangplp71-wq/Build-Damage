@@ -2339,12 +2339,25 @@ export function parseExtractedRowsToAssessments(
       } catch (e) {}
     }
 
-    const rawPhotosJson = getVal(rowObj, ['Foto JSON', 'Daftar Foto JSON', 'Photos JSON', 'Foto']);
+    const rawPhotosJson = getVal(rowObj, ['Foto JSON', 'Daftar Foto JSON', 'Photos JSON', 'Foto', 'Link Foto', 'Foto Kerusakan', 'Dokumentasi Foto', 'URL Foto']);
     let parsedPhotos: any[] = [];
-    if (rawPhotosJson && typeof rawPhotosJson === 'string' && rawPhotosJson.trim().startsWith('[')) {
-      try {
-        parsedPhotos = JSON.parse(rawPhotosJson);
-      } catch (e) {}
+    if (rawPhotosJson) {
+      if (typeof rawPhotosJson === 'string' && rawPhotosJson.trim().startsWith('[')) {
+        try {
+          parsedPhotos = JSON.parse(rawPhotosJson);
+        } catch (e) {}
+      } else if (typeof rawPhotosJson === 'string' && (rawPhotosJson.includes('http://') || rawPhotosJson.includes('https://') || rawPhotosJson.includes('data:image'))) {
+        const rawUrls = rawPhotosJson.split(/[\n,;]+/).map((u) => u.trim()).filter((u) => u.startsWith('http') || u.startsWith('data:image'));
+        parsedPhotos = rawUrls.map((url, idx) => ({
+          id: `photo_${stableId}_${idx + 1}`,
+          name: `Dokumentasi Foto Kerusakan ${idx + 1}`,
+          category: idx === 0 ? 'Tampak Depan' : idx === 1 ? 'Struktur' : 'Kerusakan Bangunan',
+          url,
+          uploadedAt: new Date().toISOString(),
+        }));
+      } else if (Array.isArray(rawPhotosJson)) {
+        parsedPhotos = rawPhotosJson;
+      }
     }
 
     // Check if item already exists in resultsMap (from Master tab or another Kecamatan tab)

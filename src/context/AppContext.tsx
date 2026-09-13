@@ -2672,18 +2672,27 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
       }
 
       setAssessments((prev) => {
-        // Filter out deleted items
-        const validPrev = prev.filter(
-          (p) =>
-            p &&
-            p.id &&
-            !storedDeleted.has(p.id) &&
-            !deletedAssessmentIds.current.has(p.id) &&
-            (!p.code || (!storedDeleted.has(p.code) && !deletedAssessmentIds.current.has(p.code)))
-        );
+        // Map any local photos or drive folder links onto the incoming sheet items
+        const prevPhotosMap = new Map<string, any[]>();
+        const prevDriveMap = new Map<string, string>();
+        prev.forEach((p) => {
+          if (p.id) {
+            if (p.photos && p.photos.length > 0) prevPhotosMap.set(p.id, p.photos);
+            if (p.googleDriveFolderUrl) prevDriveMap.set(p.id, p.googleDriveFolderUrl);
+          }
+        });
 
-        // Reconcile and deduplicate so each building only exists once
-        const mergedList = reconcileAndMergeAssessments(validPrev, sheetItems);
+        // The authoritative dataset is 100% from the 7 kecamatan sheets
+        const mergedList = sheetItems.map((item) => {
+          const localPhotos = prevPhotosMap.get(item.id);
+          const localDrive = prevDriveMap.get(item.id);
+          return {
+            ...item,
+            photos: (item.photos && item.photos.length > 0) ? item.photos : (localPhotos || []),
+            googleDriveFolderUrl: item.googleDriveFolderUrl || localDrive,
+          };
+        });
+
         try {
           localStorage.setItem(STORAGE_KEYS.ASSESSMENTS, JSON.stringify(mergedList));
         } catch {
