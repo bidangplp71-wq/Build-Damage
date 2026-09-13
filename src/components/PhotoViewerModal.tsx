@@ -13,12 +13,15 @@ import {
   Folder,
   RefreshCw,
   Upload,
-  AlertTriangle
+  AlertTriangle,
+  FolderPlus,
+  ExternalLink
 } from 'lucide-react';
 import { BuildingPhoto } from '../types';
 import { getPhotoLocally } from '../utils/photoStorage';
 import { useApp } from '../context/AppContext';
 import { compressImageFile } from '../utils/imageCompressor';
+import { normalizeDirectImageUrl, getFallbackThumbnailUrl, isGoogleDriveFolderUrl } from '../utils/urlPhotoExtractor';
 
 interface PhotoViewerModalProps {
   photos: BuildingPhoto[];
@@ -35,17 +38,22 @@ const LightboxThumbnail: React.FC<{
   isSelected: boolean;
   onSelect: () => void;
 }> = ({ photo, idx, isSelected, onSelect }) => {
-  const [url, setUrl] = useState<string>(photo.url || '');
+  const isFolder = isGoogleDriveFolderUrl(photo.url || '');
+  const [url, setUrl] = useState<string>(isFolder ? '' : normalizeDirectImageUrl(photo.url || ''));
 
   useEffect(() => {
+    if (isFolder) {
+      setUrl('');
+      return;
+    }
     if (photo.url) {
-      setUrl(photo.url);
+      setUrl(normalizeDirectImageUrl(photo.url));
     } else if (photo.id) {
       getPhotoLocally(photo.id).then((cached) => {
         if (cached) setUrl(cached);
       });
     }
-  }, [photo.id, photo.url]);
+  }, [photo.id, photo.url, isFolder]);
 
   return (
     <button
@@ -57,7 +65,9 @@ const LightboxThumbnail: React.FC<{
           : 'border-slate-700 opacity-60 hover:opacity-100 hover:border-slate-500'
       }`}
     >
-      {url ? (
+      {isFolder ? (
+        <FolderPlus className="w-6 h-6 text-amber-400" />
+      ) : url ? (
         <img
           src={url}
           alt={`Thumb ${idx + 1}`}
@@ -90,8 +100,12 @@ export const PhotoViewerModal: React.FC<PhotoViewerModalProps> = ({
   const [rotation, setRotation] = useState(0);
 
   const currentPhoto = photos[currentIndex];
-  const [resolvedPhotoUrl, setResolvedPhotoUrl] = useState<string>(currentPhoto?.url || '');
+  const isCurrentFolder = isGoogleDriveFolderUrl(currentPhoto?.url || '');
+  const [resolvedPhotoUrl, setResolvedPhotoUrl] = useState<string>(
+    isCurrentFolder ? '' : normalizeDirectImageUrl(currentPhoto?.url || '')
+  );
   const [isImageError, setIsImageError] = useState(false);
+  const [hasTriedFallback, setHasTriedFallback] = useState(false);
   const [isRecovering, setIsRecovering] = useState(false);
   const [isLinking, setIsLinking] = useState(false);
   const fileInputRef = useRef<HTMLInputElement>(null);
@@ -99,9 +113,16 @@ export const PhotoViewerModal: React.FC<PhotoViewerModalProps> = ({
   useEffect(() => {
     if (!currentPhoto) return;
     setIsImageError(false);
+    setHasTriedFallback(false);
 
-    if (currentPhoto.url && currentPhoto.url.length > 20) {
-      setResolvedPhotoUrl(currentPhoto.url);
+    if (isGoogleDriveFolderUrl(currentPhoto.url || '')) {
+      setResolvedPhotoUrl('');
+      return;
+    }
+
+    const direct = normalizeDirectImageUrl(currentPhoto.url || '');
+    if (direct && direct.length > 20) {
+      setResolvedPhotoUrl(direct);
     } else if (currentPhoto.id) {
       getPhotoLocally(currentPhoto.id).then((cached) => {
         if (cached) {
@@ -112,6 +133,19 @@ export const PhotoViewerModal: React.FC<PhotoViewerModalProps> = ({
       });
     }
   }, [currentPhoto]);
+
+  const handleViewerImageError = () => {
+    if (!hasTriedFallback && resolvedPhotoUrl) {
+      const alt = getFallbackThumbnailUrl(resolvedPhotoUrl);
+      if (alt && alt !== resolvedPhotoUrl) {
+        setHasTriedFallback(true);
+        setResolvedPhotoUrl(alt);
+        setIsImageError(false);
+        return;
+      }
+    }
+    setIsImageError(true);
+  };
 
   const handleManualRecover = async () => {
     setIsRecovering(true);
@@ -360,11 +394,42 @@ export const PhotoViewerModal: React.FC<PhotoViewerModalProps> = ({
             transform: `scale(${zoomLevel}) rotate(${rotation}deg)`,
           }}
         >
-          {resolvedPhotoUrl && !isImageError ? (
+          {isCurrentFolder ? (
+            <div className="flex flex-col items-center justify-center p-6 sm:p-8 bg-slate-900/95 border border-amber-500/40 rounded-2xl text-center max-w-lg shadow-2xl backdrop-blur-md">
+              <div className="w-16 h-16 rounded-full bg-amber-500/20 border border-amber-500/40 flex items-center justify-center text-amber-400 mb-3 shadow-inner">
+                <FolderPlus className="w-8 h-8" />
+              </div>
+              <h4 className="text-lg font-bold text-white mb-1">
+                Folder Dokumentasi Google Drive
+              </h4>
+              <p className="text-xs text-amber-300/90 font-medium mb-4">
+                {currentPhoto.caption || 'Kumpulan foto kerusakan bangunan tersimpan di Google Drive'}
+              </p>
+              
+              <div className="bg-slate-950/80 border border-slate-800 rounded-xl p-3.5 mb-5 text-left space-y-2 w-full">
+                <p className="text-[11px] text-slate-300 leading-relaxed">
+                  Tautan ini mengarah ke folder Google Drive yang memuat banyak foto survei lapangan. Anda dapat membukanya langsung di Google Drive:
+                </p>
+                <div className="p-2 rounded bg-slate-900 border border-slate-800 font-mono text-[10px] text-amber-200 truncate">
+                  {currentPhoto.url}
+                </div>
+              </div>
+
+              <a
+                href={currentPhoto.url}
+                target="_blank"
+                rel="noopener noreferrer"
+                className="px-5 py-2.5 rounded-xl bg-amber-500 hover:bg-amber-400 text-slate-950 font-bold text-xs inline-flex items-center gap-2 transition-all shadow-md cursor-pointer"
+              >
+                <span>Buka Folder di Google Drive</span>
+                <ExternalLink className="w-4 h-4" />
+              </a>
+            </div>
+          ) : resolvedPhotoUrl && !isImageError ? (
             <img
               src={resolvedPhotoUrl}
               alt={currentPhoto.caption || `Foto Kerusakan ${currentIndex + 1}`}
-              onError={() => setIsImageError(true)}
+              onError={handleViewerImageError}
               className="max-h-[68vh] sm:max-h-[72vh] max-w-[90vw] sm:max-w-[85vw] object-contain rounded-lg shadow-2xl border border-slate-800 pointer-events-auto"
               referrerPolicy="no-referrer"
             />

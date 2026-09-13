@@ -418,6 +418,205 @@ app.get('/api/config', (req, res) => {
   });
 });
 
+// ==========================================
+// SMART PHOTO URL EXTRACTOR & RESOLVER
+// ==========================================
+app.post('/api/extract-photos', async (req, res) => {
+  try {
+    const { url, rawText, webhookUrl } = req.body;
+    const inputText = (rawText || url || '').trim();
+
+    if (!inputText) {
+      return res.status(400).json({ success: false, message: 'URL atau teks foto wajib diisi' });
+    }
+
+    const extractedUrls: string[] = [];
+    let isFolder = false;
+    let folderUrl: string | undefined = undefined;
+
+    // Check if input is a Google Drive folder link
+    const gDriveFolderMatch =
+      inputText.match(/drive\.google\.com\/drive\/(?:u\/\d+\/)?folders\/([a-zA-Z0-9_-]{20,})/i) ||
+      inputText.match(/drive\.google\.com\/embeddedfolderview\?(?:[^&]*&)*id=([a-zA-Z0-9_-]{20,})/i) ||
+      inputText.match(/drive\.google\.com\/open\?(?:[^&]*&)*id=([a-zA-Z0-9_-]{20,})/i);
+
+    if (gDriveFolderMatch && gDriveFolderMatch[1]) {
+      isFolder = true;
+      const folderId = gDriveFolderMatch[1];
+      folderUrl = `https://drive.google.com/drive/folders/${folderId}`;
+
+      // 1. Try querying Apps Script Webhook if available (native DriveApp access)
+      if (webhookUrl && typeof webhookUrl === 'string' && webhookUrl.startsWith('http')) {
+        try {
+          const hookResp = await fetch(webhookUrl, {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({
+              action: 'get_drive_folder_photos',
+              folderId,
+            }),
+          });
+          if (hookResp.ok) {
+            const hookData = await hookResp.json();
+            if (hookData && Array.isArray(hookData.photos) && hookData.photos.length > 0) {
+              hookData.photos.forEach((item: any) => {
+                const imgUrl = item.url || (item.id ? `https://lh3.googleusercontent.com/d/${item.id}` : '');
+                if (imgUrl) extractedUrls.push(imgUrl);
+              });
+            }
+          }
+        } catch (hErr) {
+          console.warn('Apps Script folder scan notice:', hErr);
+        }
+      }
+
+      // 2. Try fetching folder web page to extract all file IDs inside
+      if (extractedUrls.length === 0) {
+        try {
+          const fetchUrls = [
+            `https://drive.google.com/embeddedfolderview?id=${folderId}#list`,
+            `https://drive.google.com/embeddedfolderview?id=${folderId}#grid`,
+            `https://drive.google.com/drive/folders/${folderId}?usp=sharing`,
+            `https://drive.google.com/drive/u/0/folders/${folderId}`,
+          ];
+
+          const foundFileIds = new Set<string>();
+
+          for (const targetUrl of fetchUrls) {
+            if (foundFileIds.size > 0) break; // Found files, no need to query more variants
+            try {
+              const resp = await fetch(targetUrl, {
+                signal: AbortSignal.timeout(3000),
+                headers: {
+                  'User-Agent':
+                    'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/124.0.0.0 Safari/537.36',
+                  Accept: 'text/html,application/xhtml+xml,application/xml;q=0.9,image/avif,image/webp,*/*;q=0.8',
+                  'Accept-Language': 'id,en-US,en;q=0.9',
+                },
+              });
+
+              if (resp.ok) {
+                const html = await resp.text();
+
+                // Match file patterns like /file/d/ID or ["ID","image/..." or id="ID"
+                const fileIdRegexes = [
+                  /\/file\/d\/([a-zA-Z0-9_-]{25,45})/g,
+                  /["']([a-zA-Z0-9_-]{25,45})["']\s*,\s*\[\s*["']image\//g,
+                  /\[\s*["']([a-zA-Z0-9_-]{25,45})["']\s*,\s*["'][^"']+\.(?:jpg|jpeg|png|webp|heic|bmp)/gi,
+                  /data-id=["']([a-zA-Z0-9_-]{25,45})["']/g,
+                  /["']docid["']\s*:\s*["']([a-zA-Z0-9_-]{25,45})["']/g,
+                  /["']targetId["']\s*:\s*["']([a-zA-Z0-9_-]{25,45})["']/g,
+                  /\[["']([a-zA-Z0-9_-]{25,45})["'],\[["']https:\/\/drive\.google\.com/g,
+                  /thumbnail\?(?:amp;)?id=([a-zA-Z0-9_-]{25,45})/g,
+                  /drive\.google\.com\/uc\?(?:amp;)?(?:export=download&amp;)?id=([a-zA-Z0-9_-]{25,45})/g,
+                ];
+
+                for (const regex of fileIdRegexes) {
+                  let match;
+                  while ((match = regex.exec(html)) !== null) {
+                    const id = match[1];
+                    if (id && id !== folderId && id.length >= 25 && id.length <= 45) {
+                      foundFileIds.add(id);
+                    }
+                  }
+                }
+              }
+            } catch (e) {
+              console.warn('Error fetching folder page variant:', e);
+            }
+          }
+
+          if (foundFileIds.size > 0) {
+            foundFileIds.forEach((id) => {
+              extractedUrls.push(`https://lh3.googleusercontent.com/d/${id}`);
+            });
+          }
+        } catch (fErr) {
+          console.warn('Drive folder fetch error:', fErr);
+        }
+      }
+    } else if (inputText.includes('photos.app.goo.gl') || inputText.includes('photos.google.com/share')) {
+      // Google Photos Album
+      isFolder = true;
+      try {
+        const resp = await fetch(inputText, {
+          headers: {
+            'User-Agent':
+              'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36',
+          },
+          redirect: 'follow',
+        });
+
+        if (resp.ok) {
+          const html = await resp.text();
+          // Extract high-res image URLs in Google Photos
+          const gPhotosRegex = /"https:\/\/(lh3\.googleusercontent\.com\/[a-zA-Z0-9_-]{30,})"/g;
+          const foundGPhotoUrls = new Set<string>();
+          let match;
+          while ((match = gPhotosRegex.exec(html)) !== null) {
+            const rawImgUrl = match[1];
+            if (rawImgUrl && !rawImgUrl.includes('placeholder')) {
+              foundGPhotoUrls.add(`https://${rawImgUrl}=w1600-h1200`);
+            }
+          }
+          foundGPhotoUrls.forEach((u) => extractedUrls.push(u));
+        }
+      } catch (gErr) {
+        console.warn('Google Photos fetch error:', gErr);
+      }
+    }
+
+    // If NOT a folder or if folder was not detected, extract individual URLs from text
+    if (!isFolder && extractedUrls.length === 0) {
+      const urlRegex = /(https?:\/\/[^\s<>"',;]+)/gi;
+      const allUrls = inputText.match(urlRegex) || [];
+      const cleanList = allUrls.map((u) => u.replace(/[)\]}>.,;]+$/, '').trim());
+
+      cleanList.forEach((raw) => {
+        // Check single Google Drive file
+        const gDriveFileMatch =
+          raw.match(/drive\.google\.com\/file\/d\/([a-zA-Z0-9_-]{20,})/i) ||
+          raw.match(/drive\.google\.com\/open\?id=([a-zA-Z0-9_-]{20,})/i) ||
+          raw.match(/drive\.google\.com\/uc\?(?:[^&]*&)*id=([a-zA-Z0-9_-]{20,})/i);
+
+        if (gDriveFileMatch && gDriveFileMatch[1]) {
+          extractedUrls.push(`https://lh3.googleusercontent.com/d/${gDriveFileMatch[1]}`);
+        } else if (raw.includes('dropbox.com')) {
+          extractedUrls.push(raw.replace(/[?&]dl=0/g, '?raw=1').replace(/[?&]dl=1/g, '?raw=1'));
+        } else if (!raw.includes('drive.google.com/drive/folders/')) {
+          extractedUrls.push(raw);
+        }
+      });
+    }
+
+    if (isFolder && extractedUrls.length === 0) {
+      return res.json({
+        success: true,
+        isFolder: true,
+        folderUrl,
+        count: 0,
+        extractedUrls: [],
+        message: 'Folder Google Drive terdeteksi. Namun akses publik tidak terbuka atau belum ada foto di dalamnya. Pastikan akses folder diatur ke "Siapa saja yang memiliki link" (Anyone with the link), atau salin tautan file foto dari folder tersebut dan tempelkan sekaligus.',
+      });
+    }
+
+    return res.json({
+      success: true,
+      isFolder,
+      folderUrl,
+      count: extractedUrls.length,
+      extractedUrls,
+      message: isFolder
+        ? `Berhasil mengekstrak ${extractedUrls.length} foto dari Google Drive!`
+        : `Berhasil memproses ${extractedUrls.length} tautan foto.`,
+    });
+  } catch (err: any) {
+    console.error('Error in extract-photos endpoint:', err);
+    return res.status(500).json({ success: false, message: 'Gagal mengekstrak foto: ' + err.message });
+  }
+});
+
+// ==========================================
 // 2. API route to update Google Sheet config (called by Super Admin)
 app.post('/api/config', (req, res) => {
   const { spreadsheetUrl, webhookUrl, driveFolderId } = req.body;

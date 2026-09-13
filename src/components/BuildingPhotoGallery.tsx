@@ -1,8 +1,9 @@
 import React, { useState, useEffect } from 'react';
-import { Camera, ZoomIn, Layers, Trash2, Edit3, Image as ImageIcon, Eye, RefreshCw, AlertCircle, Folder } from 'lucide-react';
+import { Camera, ZoomIn, Layers, Trash2, Edit3, Image as ImageIcon, Eye, RefreshCw, AlertCircle, Folder, FolderPlus, ExternalLink } from 'lucide-react';
 import { BuildingPhoto } from '../types';
 import { PhotoViewerModal } from './PhotoViewerModal';
 import { getPhotoLocally } from '../utils/photoStorage';
+import { normalizeDirectImageUrl, getFallbackThumbnailUrl, isGoogleDriveFolderUrl } from '../utils/urlPhotoExtractor';
 
 interface BuildingPhotoGalleryProps {
   photos: BuildingPhoto[];
@@ -22,15 +23,26 @@ const GalleryThumbnail: React.FC<{
   onEditPhoto?: (photo: BuildingPhoto) => void;
   onDeletePhoto?: (photoId: string) => void;
 }> = ({ photo, index, isEditable, onSelect, onEditPhoto, onDeletePhoto }) => {
-  const [resolvedUrl, setResolvedUrl] = useState<string>(photo.url || '');
+  const isFolder = isGoogleDriveFolderUrl(photo.url || '');
+  const normalizedInitial = isFolder ? '' : normalizeDirectImageUrl(photo.url || '');
+  const [resolvedUrl, setResolvedUrl] = useState<string>(normalizedInitial);
   const [hasError, setHasError] = useState(false);
-  const [isLoading, setIsLoading] = useState(true);
+  const [isLoading, setIsLoading] = useState(!isFolder);
+  const [hasTriedFallback, setHasTriedFallback] = useState(false);
 
   useEffect(() => {
     let isMounted = true;
+    const isDriveFolder = isGoogleDriveFolderUrl(photo.url || '');
+    if (isDriveFolder) {
+      setResolvedUrl('');
+      setIsLoading(false);
+      return;
+    }
 
-    if (photo.url && photo.url.length > 20) {
-      setResolvedUrl(photo.url);
+    const directUrl = normalizeDirectImageUrl(photo.url || '');
+
+    if (directUrl && directUrl.length > 10) {
+      setResolvedUrl(directUrl);
       setHasError(false);
       setIsLoading(false);
     } else if (photo.id) {
@@ -56,7 +68,18 @@ const GalleryThumbnail: React.FC<{
   }, [photo.id, photo.url]);
 
   const handleImageError = () => {
-    // If remote URL failed, try fallback to local IndexedDB
+    // 1. Try alternative Google Drive direct thumbnail URL if applicable
+    if (!hasTriedFallback && resolvedUrl) {
+      const alt = getFallbackThumbnailUrl(resolvedUrl);
+      if (alt && alt !== resolvedUrl) {
+        setHasTriedFallback(true);
+        setResolvedUrl(alt);
+        setHasError(false);
+        return;
+      }
+    }
+
+    // 2. If remote URL failed, try fallback to local IndexedDB
     if (photo.id && resolvedUrl !== '') {
       getPhotoLocally(photo.id).then((local) => {
         if (local && local !== resolvedUrl) {
@@ -80,9 +103,27 @@ const GalleryThumbnail: React.FC<{
       <div 
         onClick={onSelect}
         className="relative aspect-4/3 w-full bg-slate-900 cursor-pointer overflow-hidden print:aspect-4/3 flex items-center justify-center"
-        title="Klik untuk memperbesar foto"
+        title={isFolder ? "Tautan Folder Google Drive - Klik untuk melihat" : "Klik untuk memperbesar foto"}
       >
-        {resolvedUrl && !hasError ? (
+        {isFolder ? (
+          <div className="flex flex-col items-center justify-center p-3 text-center text-amber-300 w-full h-full bg-slate-900/95">
+            <FolderPlus className="w-8 h-8 text-amber-400 mb-1.5" />
+            <span className="text-[11px] font-bold text-white">Folder Google Drive</span>
+            <span className="text-[9px] text-slate-300 mt-0.5 line-clamp-1 max-w-[90%] font-mono">
+              Dokumentasi Foto
+            </span>
+            <a
+              href={photo.url}
+              target="_blank"
+              rel="noopener noreferrer"
+              onClick={(e) => e.stopPropagation()}
+              className="mt-2 inline-flex items-center gap-1 text-[10px] bg-amber-500/20 hover:bg-amber-500/30 text-amber-300 px-2 py-0.5 rounded-md border border-amber-500/40"
+            >
+              <span>Buka di Drive</span>
+              <ExternalLink className="w-3 h-3" />
+            </a>
+          </div>
+        ) : resolvedUrl && !hasError ? (
           <img
             src={resolvedUrl}
             alt={photo.caption || `Foto Kerusakan ${index + 1}`}

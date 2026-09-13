@@ -33,6 +33,7 @@ import { PhotoViewerModal } from './PhotoViewerModal';
 import { AssessmentDetailModal } from './AssessmentDetailModal';
 import { DecimalDamageInputCell } from './DecimalDamageInputCell';
 import { AssessmentInputGuideModal } from './AssessmentInputGuideModal';
+import { processInputPhotoUrl, extractUrlsFromText, isGoogleDriveFolderUrl } from '../utils/urlPhotoExtractor';
 import {
   Building2,
   Save,
@@ -229,9 +230,16 @@ export const AssessmentForm: React.FC = () => {
     } catch {}
   }, [photos, selectedAssessmentForEdit]);
   const [photoInputMethod, setPhotoInputMethod] = useState<'upload' | 'url'>('upload');
+  const [urlInputMode, setUrlInputMode] = useState<'single' | 'multi'>('single');
   const [newPhotoDamageLocation, setNewPhotoDamageLocation] = useState<string>('Tampak Depan Bangunan');
   const [newPhotoCaption, setNewPhotoCaption] = useState('');
   const [newPhotoUrl, setNewPhotoUrl] = useState('');
+  const [multiPhotoUrls, setMultiPhotoUrls] = useState('');
+  const [driveFolderUrl, setDriveFolderUrl] = useState<string>(
+    selectedAssessmentForEdit?.driveFolderUrl || ''
+  );
+  const [isExtractingUrlPhotos, setIsExtractingUrlPhotos] = useState(false);
+  const [driveFolderNotice, setDriveFolderNotice] = useState<string | null>(null);
   const [isProcessingPhotos, setIsProcessingPhotos] = useState(false);
   const [editingPhoto, setEditingPhoto] = useState<BuildingPhoto | null>(null);
   const [previewPhotoIndex, setPreviewPhotoIndex] = useState<number | null>(null);
@@ -890,12 +898,14 @@ export const AssessmentForm: React.FC = () => {
     }
   };
 
-  const handleAddUrlPhoto = (e: React.FormEvent) => {
-    e.preventDefault();
-    if (!newPhotoUrl.trim()) {
-      showToast('URL foto wajib diisi!', 'error');
+  const handleAddUrlPhoto = async (e?: React.FormEvent) => {
+    if (e) e.preventDefault();
+    const rawInput = (urlInputMode === 'multi' ? multiPhotoUrls : newPhotoUrl).trim();
+    if (!rawInput) {
+      showToast('URL foto atau tautan Google Drive wajib diisi!', 'error');
       return;
     }
+
     const currentPhotos = photosRef.current;
     if (currentPhotos.length >= MAX_BUILDING_PHOTOS) {
       showToast(`Batas maksimal ${MAX_BUILDING_PHOTOS} foto per bangunan telah tercapai!`, 'warning');
@@ -905,30 +915,61 @@ export const AssessmentForm: React.FC = () => {
     const loc = newPhotoDamageLocation || 'Tampak Depan Bangunan';
     const cap = newPhotoCaption.trim() || `Dokumentasi visual ${loc.toLowerCase()}`;
 
-    const newPhoto: BuildingPhoto = {
-      id: `photo_${Date.now()}_${Math.random().toString(36).substring(2, 7)}`,
-      url: newPhotoUrl.trim(),
-      damageLocation: loc,
-      caption: cap,
-      takenAt: new Date().toLocaleDateString('id-ID', {
-        day: 'numeric',
-        month: 'short',
-        year: 'numeric',
-      }),
-    };
+    setIsExtractingUrlPhotos(true);
+    setDriveFolderNotice(null);
 
-    setPhotos((prev) => {
-      const updated = [...prev, newPhoto].slice(0, MAX_BUILDING_PHOTOS);
-      try {
-        if (!selectedAssessmentForEdit) {
-          sessionStorage.setItem('sipandu_form_draft_photos', JSON.stringify(updated));
+    try {
+      const result = await processInputPhotoUrl(
+        rawInput,
+        loc,
+        cap,
+        currentPhotos.length,
+        MAX_BUILDING_PHOTOS,
+        googleSheetConfig?.webhookUrl
+      );
+
+      if (result.photos && result.photos.length > 0) {
+        setPhotos((prev) => {
+          const updated = [...prev, ...result.photos].slice(0, MAX_BUILDING_PHOTOS);
+          try {
+            if (!selectedAssessmentForEdit) {
+              sessionStorage.setItem('sipandu_form_draft_photos', JSON.stringify(updated));
+            }
+          } catch {}
+          return updated;
+        });
+
+        if (result.folderUrl) {
+          setDriveFolderUrl(result.folderUrl);
         }
-      } catch {}
-      return updated;
-    });
-    setNewPhotoUrl('');
-    setNewPhotoCaption('');
-    showToast(`✓ Foto berhasil ditambahkan (${currentPhotos.length + 1}/${MAX_BUILDING_PHOTOS})`, 'success');
+
+        setNewPhotoUrl('');
+        setMultiPhotoUrls('');
+        setNewPhotoCaption('');
+        setDriveFolderNotice(null);
+
+        const addedCount = result.photos.length;
+        showToast(
+          addedCount > 1
+            ? `✓ Berhasil mengekstrak dan menambahkan ${addedCount} foto!`
+            : `✓ 1 foto berhasil ditambahkan!`,
+          'success'
+        );
+      } else if (result.isFolder) {
+        const msg =
+          result.message ||
+          'Folder Google Drive terdeteksi. Pastikan izin berbagi disetel ke "Siapa saja yang memiliki link", atau salin daftar link foto di folder tersebut lalu tempelkan sekaligus.';
+        setDriveFolderNotice(msg);
+        showToast(msg, 'warning');
+      } else {
+        showToast(result.message || 'Tidak ada foto yang dapat dimuat dari tautan tersebut.', 'error');
+      }
+    } catch (err: any) {
+      console.error('Error in handleAddUrlPhoto:', err);
+      showToast('Gagal memproses tautan: ' + (err.message || 'Terjadi kesalahan jaringan'), 'error');
+    } finally {
+      setIsExtractingUrlPhotos(false);
+    }
   };
 
   const handleDeletePhoto = (photoId: string) => {
@@ -1082,6 +1123,7 @@ export const AssessmentForm: React.FC = () => {
       costTerbilang: rehabCostDetails.costTerbilang,
 
       photos: syncedPhotos,
+      googleDriveFolderUrl: driveFolderUrl.trim() || undefined,
       cityLocation,
       reportDateStr,
       headOfDepartment: {
@@ -3143,24 +3185,161 @@ export const AssessmentForm: React.FC = () => {
               </label>
             </div>
           ) : (
-            <div className="pt-1 flex flex-col sm:flex-row gap-2">
-              <input
-                type="url"
-                value={newPhotoUrl}
-                onChange={(e) => setNewPhotoUrl(e.target.value)}
-                placeholder="https://images.unsplash.com/photo-..."
-                disabled={photos.length >= MAX_BUILDING_PHOTOS}
-                className="flex-1 px-3 py-2 rounded-xl border border-slate-200 bg-white text-xs font-mono"
-              />
-              <button
-                type="button"
-                onClick={handleAddUrlPhoto}
-                disabled={photos.length >= MAX_BUILDING_PHOTOS || !newPhotoUrl.trim()}
-                className="px-4 py-2 bg-amber-500 hover:bg-amber-400 disabled:opacity-50 text-slate-950 font-bold rounded-xl text-xs flex items-center justify-center gap-1.5 shadow-xs cursor-pointer transition-all"
-              >
-                <Plus className="w-4 h-4" />
-                <span>Tambahkan Foto URL</span>
-              </button>
+            <div className="pt-1 space-y-3">
+              {/* Sub-mode selector */}
+              <div className="flex items-center gap-2 border-b border-slate-100 pb-2">
+                <button
+                  type="button"
+                  onClick={() => {
+                    setUrlInputMode('single');
+                    setDriveFolderNotice(null);
+                  }}
+                  className={`px-3 py-1.5 rounded-lg text-xs font-semibold transition-all cursor-pointer flex items-center gap-1.5 ${
+                    urlInputMode === 'single'
+                      ? 'bg-amber-500 text-slate-950 shadow-xs'
+                      : 'bg-slate-100 text-slate-600 hover:bg-slate-200'
+                  }`}
+                >
+                  <Link2 className="w-3.5 h-3.5" />
+                  <span>Link Foto / Folder Drive</span>
+                </button>
+                <button
+                  type="button"
+                  onClick={() => {
+                    setUrlInputMode('multi');
+                    setDriveFolderNotice(null);
+                  }}
+                  className={`px-3 py-1.5 rounded-lg text-xs font-semibold transition-all cursor-pointer flex items-center gap-1.5 ${
+                    urlInputMode === 'multi'
+                      ? 'bg-amber-500 text-slate-950 shadow-xs'
+                      : 'bg-slate-100 text-slate-600 hover:bg-slate-200'
+                  }`}
+                >
+                  <Layers className="w-3.5 h-3.5" />
+                  <span>Tempel Banyak Link Sekaligus</span>
+                </button>
+              </div>
+
+              {urlInputMode === 'single' ? (
+                <div className="flex flex-col sm:flex-row gap-2">
+                  <input
+                    type="url"
+                    value={newPhotoUrl}
+                    onChange={(e) => {
+                      setNewPhotoUrl(e.target.value);
+                      if (driveFolderNotice) setDriveFolderNotice(null);
+                    }}
+                    onKeyDown={(e) => {
+                      if (e.key === 'Enter') {
+                        e.preventDefault();
+                        handleAddUrlPhoto();
+                      }
+                    }}
+                    placeholder="Tempel link Google Drive folder/file, Google Photos, atau link foto..."
+                    disabled={photos.length >= MAX_BUILDING_PHOTOS || isExtractingUrlPhotos}
+                    className="flex-1 px-3 py-2 rounded-xl border border-slate-200 bg-white text-xs font-mono focus:border-amber-500 focus:ring-1 focus:ring-amber-500"
+                  />
+                  <button
+                    type="button"
+                    onClick={() => handleAddUrlPhoto()}
+                    disabled={photos.length >= MAX_BUILDING_PHOTOS || !newPhotoUrl.trim() || isExtractingUrlPhotos}
+                    className="px-4 py-2 bg-amber-500 hover:bg-amber-400 disabled:opacity-50 text-slate-950 font-bold rounded-xl text-xs flex items-center justify-center gap-1.5 shadow-xs cursor-pointer transition-all shrink-0"
+                  >
+                    {isExtractingUrlPhotos ? (
+                      <>
+                        <Loader2 className="w-4 h-4 animate-spin text-slate-900" />
+                        <span>Mengekstrak Foto...</span>
+                      </>
+                    ) : (
+                      <>
+                        <Plus className="w-4 h-4" />
+                        <span>Ekstrak &amp; Tambahkan</span>
+                      </>
+                    )}
+                  </button>
+                </div>
+              ) : (
+                <div className="space-y-2">
+                  <textarea
+                    rows={4}
+                    value={multiPhotoUrls}
+                    onChange={(e) => {
+                      setMultiPhotoUrls(e.target.value);
+                      if (driveFolderNotice) setDriveFolderNotice(null);
+                    }}
+                    placeholder={`Tempel beberapa link foto di sini (1 per baris, dipisahkan koma atau spasi):\nContoh:\nhttps://drive.google.com/file/d/1A2B3C.../view\nhttps://drive.google.com/file/d/4D5E6F.../view\nhttps://lh3.googleusercontent.com/...`}
+                    disabled={photos.length >= MAX_BUILDING_PHOTOS || isExtractingUrlPhotos}
+                    className="w-full px-3 py-2 rounded-xl border border-slate-200 bg-white text-xs font-mono focus:border-amber-500 focus:ring-1 focus:ring-amber-500"
+                  />
+                  <div className="flex items-center justify-between gap-2">
+                    <span className="text-[11px] text-slate-500 font-mono">
+                      Terdeteksi:{' '}
+                      <strong className="text-amber-600 font-bold">
+                        {extractUrlsFromText(multiPhotoUrls).length}
+                      </strong>{' '}
+                      tautan foto (Sisa kuota: {Math.max(0, MAX_BUILDING_PHOTOS - photos.length)})
+                    </span>
+                    <button
+                      type="button"
+                      onClick={() => handleAddUrlPhoto()}
+                      disabled={
+                        photos.length >= MAX_BUILDING_PHOTOS ||
+                        extractUrlsFromText(multiPhotoUrls).length === 0 ||
+                        isExtractingUrlPhotos
+                      }
+                      className="px-4 py-2 bg-amber-500 hover:bg-amber-400 disabled:opacity-50 text-slate-950 font-bold rounded-xl text-xs flex items-center justify-center gap-1.5 shadow-xs cursor-pointer transition-all shrink-0"
+                    >
+                      {isExtractingUrlPhotos ? (
+                        <>
+                          <Loader2 className="w-4 h-4 animate-spin text-slate-900" />
+                          <span>Mengekstrak Foto...</span>
+                        </>
+                      ) : (
+                        <>
+                          <Plus className="w-4 h-4" />
+                          <span>
+                            Tambahkan Semua ({extractUrlsFromText(multiPhotoUrls).length}) Foto
+                          </span>
+                        </>
+                      )}
+                    </button>
+                  </div>
+                </div>
+              )}
+
+              {/* Notice / Guidance Banner */}
+              {driveFolderNotice ? (
+                <div className="p-3 bg-amber-50 border border-amber-300 rounded-xl text-xs text-amber-950 flex items-start gap-2.5">
+                  <AlertCircle className="w-4 h-4 text-amber-600 shrink-0 mt-0.5" />
+                  <div className="flex-1">
+                    <p className="font-semibold text-amber-900">{driveFolderNotice}</p>
+                    <p className="text-[11px] text-amber-800 mt-1 leading-relaxed">
+                      💡 <strong>Solusi cepat:</strong> Buka folder di Google Drive, pilih foto-foto kerusakan, klik kanan lalu pilih &quot;Salin Link&quot; (Copy link), kemudian gunakan tab <strong>Tempel Banyak Link Sekaligus</strong> di atas untuk memuat semuanya dalam 1 kali klik.
+                    </p>
+                    {urlInputMode !== 'multi' && (
+                      <button
+                        type="button"
+                        onClick={() => setUrlInputMode('multi')}
+                        className="mt-2 text-xs font-bold text-amber-900 underline hover:text-amber-700 cursor-pointer"
+                      >
+                        Beralih ke Mode Tempel Banyak Link →
+                      </button>
+                    )}
+                  </div>
+                </div>
+              ) : (
+                <div className="bg-slate-50 border border-slate-200/80 rounded-xl p-2.5 text-[11px] text-slate-600 flex items-start gap-2">
+                  <Info className="w-3.5 h-3.5 text-amber-600 shrink-0 mt-0.5" />
+                  <div className="space-y-0.5">
+                    <p>
+                      <strong>Mendukung Folder Google Drive</strong>: Seluruh foto di dalam folder akan diekstrak otomatis menjadi foto terpisah. Pastikan folder disetel ke &quot;Siapa saja yang memiliki link&quot;.
+                    </p>
+                    <p className="text-slate-500">
+                      Juga mendukung link file foto Google Drive, Google Photos album, Dropbox, atau link gambar JPG/PNG/WEBP lainnya.
+                    </p>
+                  </div>
+                </div>
+              )}
             </div>
           )}
         </div>
