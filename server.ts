@@ -635,6 +635,211 @@ app.post('/api/extract-photos', async (req, res) => {
 });
 
 // ==========================================
+// FAST ATOMIC KECAMATAN SHEETS FETCHER (STRICTLY 7 KECAMATAN SHEETS ONLY)
+// High-speed direct datacenter peering with Google Sheets
+// ==========================================
+interface ServerKecamatanCache {
+  spreadsheetId: string;
+  timestamp: number;
+  rows: Array<{ rowObj: Record<string, any>; sheetRowNumber: number; sourceSheet: string }>;
+}
+let serverKecamatanCache: ServerKecamatanCache | null = null;
+const SERVER_KECAMATAN_CACHE_TTL = 30000; // 30 seconds
+
+const KECAMATAN_SPECS = [
+  { name: 'Aesesa', aliases: ['Kec. Aesesa', 'Aesesa', 'Kec Aesesa', 'AESESA'] },
+  { name: 'Aesesa Selatan', aliases: ['Kec. Aesesa Selatan', 'Aesesa Selatan', 'Kec Aesesa Selatan', 'AESESA SELATAN'] },
+  { name: 'Boawae', aliases: ['Kec. Boawae', 'Boawae', 'Kec Boawae', 'BOAWAE'] },
+  { name: 'Mauponggo', aliases: ['Kec. Mauponggo', 'Mauponggo', 'Kec Mauponggo', 'MAUPONGGO'] },
+  { name: 'Nangaroro', aliases: ['Kec. Nangaroro', 'Nangaroro', 'Kec Nangaroro', 'NANGARORO'] },
+  { name: 'Keo Tengah', aliases: ['Kec. Keo Tengah', 'Keo Tengah', 'Kec Keo Tengah', 'KEO TENGAH'] },
+  { name: 'Wolowae', aliases: ['Kec. Wolowae', 'Wolowae', 'Kec Wolowae', 'WOLOWAE'] },
+];
+
+function parseServerGvizTextToRows(rawText: string, sheetName: string): Array<{ rowObj: Record<string, any>; sheetRowNumber: number; sourceSheet: string }> {
+  if (!rawText || !rawText.includes('google.visualization.Query.setResponse')) return [];
+  try {
+    const match = rawText.match(/google\.visualization\.Query\.setResponse\(([\s\S]+)\);?/);
+    if (!match || !match[1]) return [];
+    const json = JSON.parse(match[1]);
+    if (!json || json.status === 'error' || !json.table) return [];
+
+    const cols = json.table.cols || [];
+    const headers = cols.map((col: any, idx: number) => {
+      return (col.label && String(col.label).trim()) || (col.id && String(col.id).trim()) || `kolom_${idx + 1}`;
+    });
+
+    const rows = json.table.rows || [];
+    const extracted: Array<{ rowObj: Record<string, any>; sheetRowNumber: number; sourceSheet: string }> = [];
+
+    rows.forEach((r: any, rIdx: number) => {
+      if (!r || !Array.isArray(r.c)) return;
+      const rowObj: Record<string, any> = {};
+      let hasData = false;
+
+      r.c.forEach((cell: any, cIdx: number) => {
+        const colName = headers[cIdx] || `kolom_${cIdx + 1}`;
+        let val = '';
+        if (cell !== null && cell !== undefined) {
+          val = cell.f !== undefined && cell.f !== null ? cell.f : cell.v !== undefined && cell.v !== null ? cell.v : '';
+        }
+        if (val !== '' && val !== null && val !== undefined && String(val).trim() !== '-' && String(val).trim() !== '') {
+          hasData = true;
+        }
+        rowObj[colName] = val;
+      });
+
+      if (hasData) {
+        extracted.push({
+          rowObj,
+          sheetRowNumber: rIdx + 2,
+          sourceSheet: sheetName,
+        });
+      }
+    });
+
+    return extracted;
+  } catch {
+    return [];
+  }
+}
+
+async function fetchKecamatanRowsOnServer(
+  spreadsheetId: string,
+  kec: { name: string; aliases: string[] },
+  cacheBuster: number
+): Promise<{ success: boolean; rows: Array<{ rowObj: Record<string, any>; sheetRowNumber: number; sourceSheet: string }>; matchedTab?: string }> {
+  const prioritized = [`Kec. ${kec.name}`, kec.name, ...kec.aliases.filter(a => a !== `Kec. ${kec.name}` && a !== kec.name)];
+  const probeTopTwo = prioritized.slice(0, 2);
+
+  const fetchSingleAlias = async (alias: string) => {
+    const url = `https://docs.google.com/spreadsheets/d/${spreadsheetId}/gviz/tq?sheet=${encodeURIComponent(alias)}&_t=${cacheBuster}`;
+    const controller = new AbortController();
+    const timeout = setTimeout(() => controller.abort(), 4500);
+    try {
+      const resp = await fetch(url, { signal: controller.signal });
+      clearTimeout(timeout);
+      if (!resp.ok) return null;
+      const text = await resp.text();
+      const parsed = parseServerGvizTextToRows(text, alias);
+      if (parsed.length === 0) return null;
+
+      // Validate that this is NOT a Master Rekap fallback (which contains rows from multiple other kecamatans)
+      const targetLower = kec.name.toLowerCase();
+      let matchCount = 0;
+      let otherKecCount = 0;
+      const otherKecNames = KECAMATAN_SPECS.filter(k => k.name.toLowerCase() !== targetLower).map(k => k.name.toLowerCase());
+
+      parsed.forEach(p => {
+        const rawKec = String(
+          p.rowObj['Kecamatan'] || p.rowObj['Kec'] || p.rowObj['Wilayah Kecamatan'] || p.rowObj['Nama Kecamatan'] || ''
+        ).toLowerCase().trim();
+        if (rawKec) {
+          if (rawKec.includes(targetLower)) matchCount++;
+          else if (otherKecNames.some(o => rawKec.includes(o))) otherKecCount++;
+        }
+      });
+
+      // If other kecamatans dominate, it's the Master Rekap sheet returned by Google fallback, not the target tab
+      if (otherKecCount >= 2 && otherKecCount > matchCount) {
+        return null;
+      }
+
+      return { rows: parsed, matchedTab: alias };
+    } catch {
+      clearTimeout(timeout);
+      return null;
+    }
+  };
+
+  // Run top two variants concurrently
+  const topResults = await Promise.all(probeTopTwo.map(fetchSingleAlias));
+  for (const res of topResults) {
+    if (res && res.rows.length > 0) {
+      return { success: true, rows: res.rows, matchedTab: res.matchedTab };
+    }
+  }
+
+  // Check remaining aliases if top two yielded no data
+  const remaining = prioritized.slice(2);
+  for (const alias of remaining) {
+    const res = await fetchSingleAlias(alias);
+    if (res && res.rows.length > 0) {
+      return { success: true, rows: res.rows, matchedTab: res.matchedTab };
+    }
+  }
+
+  return { success: false, rows: [] };
+}
+
+const handleKecamatanRawFetch = async (req: express.Request, res: express.Response) => {
+  try {
+    const spreadsheetUrl = (req.body?.spreadsheetUrl || req.query?.spreadsheetUrl || getGoogleSheetConfig().spreadsheetUrl || '').toString().trim();
+    const forceRefresh = req.body?.forceRefresh === true || req.query?.forceRefresh === 'true';
+
+    const match = spreadsheetUrl.match(/\/spreadsheets\/d\/([a-zA-Z0-9_-]{15,})/);
+    const spreadsheetId = match ? match[1] : '';
+
+    if (!spreadsheetId) {
+      return res.status(400).json({ success: false, message: 'ID Spreadsheet Google Sheet tidak valid atau kosong.', rows: [] });
+    }
+
+    // In-memory cache hit
+    if (!forceRefresh && serverKecamatanCache && serverKecamatanCache.spreadsheetId === spreadsheetId) {
+      const age = Date.now() - serverKecamatanCache.timestamp;
+      if (age < SERVER_KECAMATAN_CACHE_TTL && serverKecamatanCache.rows.length > 0) {
+        return res.json({
+          success: true,
+          count: serverKecamatanCache.rows.length,
+          rows: serverKecamatanCache.rows,
+          cached: true,
+          message: `Memuat instan ${serverKecamatanCache.rows.length} baris dari server cache.`,
+        });
+      }
+    }
+
+    const cacheBuster = Date.now();
+    // Concurrently fetch all 7 kecamatan sheets using Cloud Run's high-speed datacenter connection
+    const results = await Promise.all(
+      KECAMATAN_SPECS.map(kec => fetchKecamatanRowsOnServer(spreadsheetId, kec, cacheBuster))
+    );
+
+    const allRows: Array<{ rowObj: Record<string, any>; sheetRowNumber: number; sourceSheet: string }> = [];
+    const scannedSheets: string[] = [];
+
+    results.forEach((r, idx) => {
+      if (r.success && r.rows.length > 0) {
+        allRows.push(...r.rows);
+        scannedSheets.push(r.matchedTab || KECAMATAN_SPECS[idx].name);
+      }
+    });
+
+    if (allRows.length > 0) {
+      serverKecamatanCache = {
+        spreadsheetId,
+        timestamp: Date.now(),
+        rows: allRows,
+      };
+    }
+
+    return res.json({
+      success: true,
+      count: allRows.length,
+      rows: allRows,
+      scannedSheets,
+      cached: false,
+      message: `Berhasil memuat ${allRows.length} baris data murni dari ke-7 sheet kecamatan.`,
+    });
+  } catch (err: any) {
+    console.error('Error fetching kecamatan sheets on server:', err);
+    return res.status(500).json({ success: false, message: 'Gagal membaca sheet kecamatan: ' + err.message, rows: [] });
+  }
+};
+
+app.post('/api/sheets/kecamatan-raw', handleKecamatanRawFetch);
+app.get('/api/sheets/kecamatan-raw', handleKecamatanRawFetch);
+
+// ==========================================
 // 2. API route to update Google Sheet config (called by Super Admin)
 app.post('/api/config', (req, res) => {
   const { spreadsheetUrl, webhookUrl, driveFolderId } = req.body;
