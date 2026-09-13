@@ -223,21 +223,41 @@ export function detectAllDuplicateGroups(
 }
 
 /**
- * Deduplicate an array of assessments strictly by unique ID so every surveyed building is preserved
+ * Deduplicate an array of assessments safely
+ * Merges duplicate entries with matching ID, Registration Code, or Sheet+Row
  */
 export function deduplicateAssessmentsList(list: BuildingAssessment[]): BuildingAssessment[] {
   if (!Array.isArray(list) || list.length <= 1) return list || [];
 
   const result: BuildingAssessment[] = [];
   const seenIdMap = new Map<string, number>(); // id -> index in result
+  const seenCodeMap = new Map<string, number>(); // code -> index in result
+  const seenSheetRowMap = new Map<string, number>(); // sheet:row -> index in result
+  const seenNikMap = new Map<string, number>(); // nik:kec -> index in result
 
   for (const item of list) {
     if (!item || !item.id) continue;
+
+    const normCode = normalizeString(item.code);
+    const normNik = (item.nikPemilik && item.nikPemilik !== '0' && String(item.nikPemilik).length >= 10)
+      ? String(item.nikPemilik).trim()
+      : '';
+    const normKec = normalizeString(item.kecamatanName || item.kecamatanId);
+    const nikKey = normNik && normKec ? `${normNik}::${normKec}` : '';
+    const sheetRowKey = (item as any).sourceSheet && (item as any).sheetRowNumber
+      ? `${normalizeString((item as any).sourceSheet)}::r${(item as any).sheetRowNumber}`
+      : '';
 
     let matchIdx = -1;
 
     if (seenIdMap.has(item.id)) {
       matchIdx = seenIdMap.get(item.id)!;
+    } else if (normCode && seenCodeMap.has(normCode)) {
+      matchIdx = seenCodeMap.get(normCode)!;
+    } else if (sheetRowKey && seenSheetRowMap.has(sheetRowKey)) {
+      matchIdx = seenSheetRowMap.get(sheetRowKey)!;
+    } else if (nikKey && seenNikMap.has(nikKey)) {
+      matchIdx = seenNikMap.get(nikKey)!;
     }
 
     if (matchIdx !== -1) {
@@ -272,6 +292,9 @@ export function deduplicateAssessmentsList(list: BuildingAssessment[]): Building
       const newIdx = result.length;
       result.push(item);
       seenIdMap.set(item.id, newIdx);
+      if (normCode) seenCodeMap.set(normCode, newIdx);
+      if (sheetRowKey) seenSheetRowMap.set(sheetRowKey, newIdx);
+      if (nikKey) seenNikMap.set(nikKey, newIdx);
     }
   }
 
@@ -279,14 +302,87 @@ export function deduplicateAssessmentsList(list: BuildingAssessment[]): Building
 }
 
 /**
- * Reconcile base assessments with incoming Google Sheet / server records without creating duplicate entries
+ * Reconcile base assessments with incoming Google Sheet records without creating duplicate entries
+ * Replaces obsolete spreadsheet sync items while preserving locally created user assessments
  */
 export function reconcileAndMergeAssessments(
   baseList: BuildingAssessment[],
   incomingList: BuildingAssessment[]
 ): BuildingAssessment[] {
-  const combined = [...(incomingList || []), ...(baseList || [])];
-  return deduplicateAssessmentsList(combined);
+  // Start with clean deduplicated incoming records from the 7 kecamatan sheets
+  const dedupedIncoming = deduplicateAssessmentsList(incomingList || []);
+
+  const seenIdMap = new Map<string, number>();
+  const seenCodeMap = new Map<string, number>();
+  const seenSheetRowMap = new Map<string, number>();
+  const seenNikMap = new Map<string, number>();
+
+  dedupedIncoming.forEach((item, idx) => {
+    seenIdMap.set(item.id, idx);
+    const normCode = normalizeString(item.code);
+    if (normCode) seenCodeMap.set(normCode, idx);
+
+    const sheetRowKey = (item as any).sourceSheet && (item as any).sheetRowNumber
+      ? `${normalizeString((item as any).sourceSheet)}::r${(item as any).sheetRowNumber}`
+      : '';
+    if (sheetRowKey) seenSheetRowMap.set(sheetRowKey, idx);
+
+    const normNik = (item.nikPemilik && item.nikPemilik !== '0' && String(item.nikPemilik).length >= 10)
+      ? String(item.nikPemilik).trim()
+      : '';
+    const normKec = normalizeString(item.kecamatanName || item.kecamatanId);
+    if (normNik && normKec) seenNikMap.set(`${normNik}::${normKec}`, idx);
+  });
+
+  const merged = [...dedupedIncoming];
+
+  // Process base records
+  (baseList || []).forEach((baseItem) => {
+    if (!baseItem || !baseItem.id) return;
+
+    const normCode = normalizeString(baseItem.code);
+    const normNik = (baseItem.nikPemilik && baseItem.nikPemilik !== '0' && String(baseItem.nikPemilik).length >= 10)
+      ? String(baseItem.nikPemilik).trim()
+      : '';
+    const normKec = normalizeString(baseItem.kecamatanName || baseItem.kecamatanId);
+    const nikKey = normNik && normKec ? `${normNik}::${normKec}` : '';
+    const sheetRowKey = (baseItem as any).sourceSheet && (baseItem as any).sheetRowNumber
+      ? `${normalizeString((baseItem as any).sourceSheet)}::r${(baseItem as any).sheetRowNumber}`
+      : '';
+
+    let matchIdx = -1;
+    if (seenIdMap.has(baseItem.id)) {
+      matchIdx = seenIdMap.get(baseItem.id)!;
+    } else if (normCode && seenCodeMap.has(normCode)) {
+      matchIdx = seenCodeMap.get(normCode)!;
+    } else if (sheetRowKey && seenSheetRowMap.has(sheetRowKey)) {
+      matchIdx = seenSheetRowMap.get(sheetRowKey)!;
+    } else if (nikKey && seenNikMap.has(nikKey)) {
+      matchIdx = seenNikMap.get(nikKey)!;
+    }
+
+    if (matchIdx !== -1) {
+      // Merge user local photos or edits into the incoming item
+      const incomingItem = merged[matchIdx];
+      const mergedPhotos = (baseItem.photos && baseItem.photos.length > 0)
+        ? baseItem.photos
+        : (incomingItem.photos || []);
+      merged[matchIdx] = {
+        ...baseItem,
+        ...incomingItem,
+        photos: mergedPhotos,
+        googleDriveFolderUrl: incomingItem.googleDriveFolderUrl || baseItem.googleDriveFolderUrl,
+      };
+    } else {
+      // Only keep non-spreadsheet local items (e.g. ast_xxx created locally)
+      // Discard obsolete sheet_xxx items that no longer exist in the spreadsheet
+      if (!baseItem.id.startsWith('sheet_')) {
+        merged.push(baseItem);
+      }
+    }
+  });
+
+  return deduplicateAssessmentsList(merged);
 }
 
 /**

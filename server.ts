@@ -78,18 +78,37 @@ app.use('/uploads', express.static(path.join(process.cwd(), 'uploads')));
 // ASSESSMENTS API (Zero-quota Cloud Persistence)
 // ==========================================
 
-// Safe deduplication for server-stored assessments (strictly by ID to prevent dropping survey rows)
+// Safe deduplication for server-stored assessments
 function deduplicateServerAssessments(list: any[]): any[] {
   if (!Array.isArray(list) || list.length <= 1) return list || [];
   const result: any[] = [];
   const seenIdMap = new Map<string, number>();
+  const seenCodeMap = new Map<string, number>();
+  const seenSheetRowMap = new Map<string, number>();
+  const seenNikMap = new Map<string, number>();
 
   for (const item of list) {
     if (!item || !item.id) continue;
 
+    const normCode = item.code ? String(item.code).toLowerCase().replace(/[^a-z0-9]/g, '').trim() : '';
+    const normNik = item.nikPemilik && item.nikPemilik !== '0' && String(item.nikPemilik).length >= 10
+      ? String(item.nikPemilik).trim()
+      : '';
+    const normKec = item.kecamatanName || item.kecamatanId ? String(item.kecamatanName || item.kecamatanId).toLowerCase().trim() : '';
+    const nikKey = normNik && normKec ? `${normNik}::${normKec}` : '';
+    const sheetRowKey = item.sourceSheet && item.sheetRowNumber
+      ? `${String(item.sourceSheet).toLowerCase().trim()}::r${item.sheetRowNumber}`
+      : '';
+
     let matchIdx = -1;
     if (seenIdMap.has(item.id)) {
       matchIdx = seenIdMap.get(item.id)!;
+    } else if (normCode && seenCodeMap.has(normCode)) {
+      matchIdx = seenCodeMap.get(normCode)!;
+    } else if (sheetRowKey && seenSheetRowMap.has(sheetRowKey)) {
+      matchIdx = seenSheetRowMap.get(sheetRowKey)!;
+    } else if (nikKey && seenNikMap.has(nikKey)) {
+      matchIdx = seenNikMap.get(nikKey)!;
     }
 
     if (matchIdx !== -1) {
@@ -106,6 +125,9 @@ function deduplicateServerAssessments(list: any[]): any[] {
       const newIdx = result.length;
       result.push(item);
       seenIdMap.set(item.id, newIdx);
+      if (normCode) seenCodeMap.set(normCode, newIdx);
+      if (sheetRowKey) seenSheetRowMap.set(sheetRowKey, newIdx);
+      if (nikKey) seenNikMap.set(nikKey, newIdx);
     }
   }
   return result;
