@@ -78,45 +78,18 @@ app.use('/uploads', express.static(path.join(process.cwd(), 'uploads')));
 // ASSESSMENTS API (Zero-quota Cloud Persistence)
 // ==========================================
 
-// Safe deduplication for server-stored assessments
+// Safe deduplication for server-stored assessments (strictly by ID to prevent dropping survey rows)
 function deduplicateServerAssessments(list: any[]): any[] {
   if (!Array.isArray(list) || list.length <= 1) return list || [];
   const result: any[] = [];
-  const seenCodeMap = new Map<string, number>();
-  const seenNikMap = new Map<string, number>();
-  const seenLocMap = new Map<string, number>();
   const seenIdMap = new Map<string, number>();
-
-  const clean = (s: any) =>
-    String(s || '')
-      .toLowerCase()
-      .replace(/[.,/#!$%^&*;:{}=\-_`~()]/g, ' ')
-      .replace(/\s+/g, ' ')
-      .trim();
 
   for (const item of list) {
     if (!item || !item.id) continue;
-    const normCode = clean(item.code);
-    const normNik =
-      item.nikPemilik && item.nikPemilik !== '0' && String(item.nikPemilik).length >= 10
-        ? String(item.nikPemilik).trim()
-        : '';
-    const normKec = clean(item.kecamatanName || item.kecamatanId);
-    const normDesa = clean(item.desaName || item.desaId);
-    const normBldg = clean(item.buildingName).replace(/\s*baris\s+\d+/i, '').trim();
-
-    const nikKey = normNik && normKec ? `${normNik}::${normKec}` : '';
-    const locKey = normKec && normDesa && normBldg ? `${normKec}::${normDesa}::${normBldg}` : '';
 
     let matchIdx = -1;
     if (seenIdMap.has(item.id)) {
       matchIdx = seenIdMap.get(item.id)!;
-    } else if (normCode && seenCodeMap.has(normCode)) {
-      matchIdx = seenCodeMap.get(normCode)!;
-    } else if (nikKey && seenNikMap.has(nikKey)) {
-      matchIdx = seenNikMap.get(nikKey)!;
-    } else if (locKey && seenLocMap.has(locKey)) {
-      matchIdx = seenLocMap.get(locKey)!;
     }
 
     if (matchIdx !== -1) {
@@ -133,9 +106,6 @@ function deduplicateServerAssessments(list: any[]): any[] {
       const newIdx = result.length;
       result.push(item);
       seenIdMap.set(item.id, newIdx);
-      if (normCode) seenCodeMap.set(normCode, newIdx);
-      if (nikKey) seenNikMap.set(nikKey, newIdx);
-      if (locKey) seenLocMap.set(locKey, newIdx);
     }
   }
   return result;
@@ -733,27 +703,6 @@ async function fetchKecamatanRowsOnServer(
       const text = await resp.text();
       const parsed = parseServerGvizTextToRows(text, alias);
       if (parsed.length === 0) return null;
-
-      // Validate that this is NOT a Master Rekap fallback (which contains rows from multiple other kecamatans)
-      const targetLower = kec.name.toLowerCase();
-      let matchCount = 0;
-      let otherKecCount = 0;
-      const otherKecNames = KECAMATAN_SPECS.filter(k => k.name.toLowerCase() !== targetLower).map(k => k.name.toLowerCase());
-
-      parsed.forEach(p => {
-        const rawKec = String(
-          p.rowObj['Kecamatan'] || p.rowObj['Kec'] || p.rowObj['Wilayah Kecamatan'] || p.rowObj['Nama Kecamatan'] || ''
-        ).toLowerCase().trim();
-        if (rawKec) {
-          if (rawKec.includes(targetLower)) matchCount++;
-          else if (otherKecNames.some(o => rawKec.includes(o))) otherKecCount++;
-        }
-      });
-
-      // If other kecamatans dominate, it's the Master Rekap sheet returned by Google fallback, not the target tab
-      if (otherKecCount >= 2 && otherKecCount > matchCount) {
-        return null;
-      }
 
       return { rows: parsed, matchedTab: alias };
     } catch {

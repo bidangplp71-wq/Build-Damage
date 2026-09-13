@@ -2248,22 +2248,14 @@ export function parseExtractedRowsToAssessments(
     const nikPemilik = String(getVal(rowObj, ['NIK Pemilik', 'NIK', 'NIK 16 Digit']) || '0');
     const noKkPemilik = String(getVal(rowObj, ['No KK Pemilik', 'No KK', 'Nomor KK', 'No. KK']) || '0');
 
-    // Deterministic deduplication key across Master and Kecamatan sheets
-    const normCode = rawCode ? rawCode.toUpperCase() : '';
+    // Deterministic key per physical row from each kecamatan sheet so 100% of rows are preserved
     const cleanBuilding = buildingName.toLowerCase().replace(/\s*\(baris\s+\d+\)/i, '').trim();
     const cleanKec = kecInfo.name.toLowerCase().trim();
     const cleanDesa = desaName.toLowerCase().trim();
-    const cleanNik = (nikPemilik && nikPemilik !== '0' && nikPemilik.length >= 10) ? nikPemilik.trim() : '';
+    const cleanSheet = (sourceSheet || 'sheet').toLowerCase().replace(/[^a-z0-9]/g, '_');
 
-    // If an official registration code was explicitly provided in the sheet: dedupe by that code.
-    // If a valid NIK is provided (>= 10 digits): dedupe by NIK + kecamatan.
-    // Otherwise: preserve every distinct physical row from each sheet so multiple houses in the same village
-    // (e.g. "Rumah Tinggal", "Rumah Warga") are NEVER collapsed or lost!
-    const dedupeKey = normCode
-      ? `code:${normCode}`
-      : cleanNik
-        ? `nik:${cleanNik}::${cleanKec}::${cleanDesa}`
-        : `row:${(sourceSheet || 'sheet').toLowerCase()}::r${sheetRowNumber}::${cleanBuilding.slice(0, 30)}`;
+    // Each row in each kecamatan sheet is an independent building survey record
+    const dedupeKey = `row:${cleanSheet}::r${sheetRowNumber}`;
 
     // Registration code assignment
     let code = rawCode;
@@ -2279,10 +2271,8 @@ export function parseExtractedRowsToAssessments(
       code = `REG-${kecPrefix}-2026-${seq}`;
     }
 
-    // Stable deterministic ID
-    const stableId = normCode
-      ? `sheet_reg_${normCode.toLowerCase().replace(/[^a-z0-9]/g, '_')}`
-      : `sheet_${(sourceSheet || 'data').toLowerCase().replace(/[^a-z0-9]/g, '_')}_r${sheetRowNumber}_${cleanKec.replace(/[^a-z0-9]/g, '_')}_${cleanBuilding.replace(/[^a-z0-9]/g, '_').slice(0, 20)}`;
+    // Stable deterministic ID unique per physical row in the sheet
+    const stableId = `sheet_${cleanSheet}_r${sheetRowNumber}_${cleanKec.replace(/[^a-z0-9]/g, '_')}`;
 
     const numberOfFloors = parseNumber(getVal(rowObj, ['Jumlah Tingkat', 'Jumlah Lantai', 'Tingkat', 'Lantai'])) || 1;
     const yearBuilt = parseNumber(getVal(rowObj, ['Tahun Dibangun', 'Tahun Pembangunan', 'Tahun'])) || new Date().getFullYear();
@@ -2865,28 +2855,6 @@ export async function fetchAssessmentsFromGoogleSheet(
               if (text && text.includes('google.visualization.Query.setResponse')) {
                 const parsedRows = parseGvizResponseToRows(text, alias);
                 if (parsedRows.length > 0) {
-                  // Verify that this is strictly this kecamatan and not the multi-kecamatan Master Rekap fallback
-                  const targetLower = group.name.toLowerCase();
-                  let matchCount = 0;
-                  let otherKecCount = 0;
-                  const otherKecNames = kecamatanTabGroups
-                    .filter((g) => g.name.toLowerCase() !== targetLower)
-                    .map((g) => g.name.toLowerCase());
-
-                  parsedRows.forEach((r) => {
-                    const val = String(
-                      getVal(r.rowObj, ['Kecamatan', 'Kec', 'Wilayah Kecamatan', 'Nama Kecamatan']) || ''
-                    ).toLowerCase().trim();
-                    if (val) {
-                      if (val.includes(targetLower)) matchCount++;
-                      else if (otherKecNames.some((o) => val.includes(o))) otherKecCount++;
-                    }
-                  });
-
-                  if (otherKecCount >= 2 && otherKecCount > matchCount) {
-                    return null; // Master rekap fallback, reject
-                  }
-
                   return { rows: parsedRows, matchedAlias: alias };
                 }
               }
