@@ -58,7 +58,11 @@ import {
   getPhotoLocally 
 } from '../utils/photoStorage';
 import { hydrateAssessmentPhotos } from '../utils/imageCompressor';
-import { detectAllDuplicateGroups } from '../utils/duplicateDetector';
+import { 
+  detectAllDuplicateGroups, 
+  deduplicateAssessmentsList, 
+  reconcileAndMergeAssessments 
+} from '../utils/duplicateDetector';
 import { generateNextRegistrationCode } from '../utils/registrationCodeGenerator';
 import {
   queueAssessmentForSync,
@@ -346,17 +350,9 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
       const parsed = JSON.parse(saved);
       if (!Array.isArray(parsed)) return INITIAL_ASSESSMENTS.filter((a) => !deletedIds.has(a.id));
 
-      // Filter out deleted IDs and deduplicate by id
-      const map = new Map<string, BuildingAssessment>();
-      parsed.forEach((item: BuildingAssessment) => {
-        if (item && item.id && !deletedIds.has(item.id)) {
-          const existing = map.get(item.id);
-          if (!existing || new Date(item.updatedAt || item.createdAt || 0).getTime() >= new Date(existing.updatedAt || existing.createdAt || 0).getTime()) {
-            map.set(item.id, item);
-          }
-        }
-      });
-      return Array.from(map.values());
+      // Filter out deleted IDs and deduplicate completely
+      const valid = parsed.filter((item: BuildingAssessment) => item && item.id && !deletedIds.has(item.id));
+      return deduplicateAssessmentsList(valid);
     } catch {
       return INITIAL_ASSESSMENTS;
     }
@@ -722,22 +718,7 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
       .then((data) => {
         if (data.success && Array.isArray(data.assessments) && data.assessments.length > 0) {
           setAssessments((prev) => {
-            const map = new Map<string, BuildingAssessment>();
-            prev.forEach((p) => { if (p && p.id) map.set(p.id, p); });
-            data.assessments.forEach((s: BuildingAssessment) => {
-              if (!s || !s.id) return;
-              const existing = map.get(s.id);
-              if (!existing) {
-                map.set(s.id, s);
-              } else {
-                const existingTime = new Date(existing.updatedAt || existing.createdAt || 0).getTime();
-                const remoteTime = new Date(s.updatedAt || s.createdAt || 0).getTime();
-                if (remoteTime >= existingTime) {
-                  map.set(s.id, { ...existing, ...s });
-                }
-              }
-            });
-            const merged = Array.from(map.values());
+            const merged = reconcileAndMergeAssessments(prev, data.assessments);
             try {
               localStorage.setItem(STORAGE_KEYS.ASSESSMENTS, JSON.stringify(merged));
             } catch {}
@@ -769,18 +750,10 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
         .then((data) => {
           if (data.success && Array.isArray(data.assessments) && data.assessments.length > 0) {
             setAssessments((prev) => {
-              let hasNew = false;
-              const map = new Map<string, BuildingAssessment>();
-              prev.forEach((p) => { if (p && p.id) map.set(p.id, p); });
-              data.assessments.forEach((s: BuildingAssessment) => {
-                if (!s || !s.id) return;
-                if (!map.has(s.id)) {
-                  map.set(s.id, s);
-                  hasNew = true;
-                }
-              });
-              if (!hasNew) return prev;
-              const merged = Array.from(map.values());
+              const merged = reconcileAndMergeAssessments(prev, data.assessments);
+              if (merged.length === prev.length && JSON.stringify(merged) === JSON.stringify(prev)) {
+                return prev;
+              }
               try {
                 localStorage.setItem(STORAGE_KEYS.ASSESSMENTS, JSON.stringify(merged));
               } catch {}
@@ -2699,36 +2672,18 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
       }
 
       setAssessments((prev) => {
-        const map = new Map<string, BuildingAssessment>();
-        // 1. Preserve all existing valid assessments (never drop records on sync)
-        prev.forEach((p) => {
-          if (
+        // Filter out deleted items
+        const validPrev = prev.filter(
+          (p) =>
             p &&
             p.id &&
             !storedDeleted.has(p.id) &&
             !deletedAssessmentIds.current.has(p.id) &&
             (!p.code || (!storedDeleted.has(p.code) && !deletedAssessmentIds.current.has(p.code)))
-          ) {
-            map.set(p.id, p);
-          }
-        });
+        );
 
-        // 2. Non-destructively merge incoming Google Sheet records
-        sheetItems.forEach((s) => {
-          const existing = map.get(s.id);
-          const mergedPhotos = (s.photos && s.photos.length > 0)
-            ? s.photos
-            : (existing?.photos && existing.photos.length > 0 ? existing.photos : []);
-          map.set(s.id, {
-            ...(existing || {}),
-            ...s,
-            photos: mergedPhotos,
-            googleSheetSynced: true,
-            googleSheetSyncedAt: new Date().toISOString(),
-          });
-        });
-
-        const mergedList = Array.from(map.values());
+        // Reconcile and deduplicate so each building only exists once
+        const mergedList = reconcileAndMergeAssessments(validPrev, sheetItems);
         try {
           localStorage.setItem(STORAGE_KEYS.ASSESSMENTS, JSON.stringify(mergedList));
         } catch {
@@ -2751,13 +2706,11 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
           body: JSON.stringify({ assessments: mergedList, replace: true }),
         }).catch((err) => console.warn('Server sync-batch notice:', err));
 
-        // Persist synced Google Sheet items directly into Firestore database
-        if (db && !isFirestoreQuotaExceeded && sheetItems.length > 0) {
-          sheetItems.forEach((item) => {
-            const existing = map.get(item.id);
-            const toSave = existing ? { ...existing, ...item } : item;
-            const clean = prepareAssessmentForFirestore(toSave);
-            setDoc(doc(db, 'assessments', toSave.id), clean, { merge: true }).catch((err) => {
+        // Persist synced items directly into Firestore database
+        if (db && !isFirestoreQuotaExceeded && mergedList.length > 0) {
+          mergedList.forEach((item) => {
+            const clean = prepareAssessmentForFirestore(item);
+            setDoc(doc(db, 'assessments', item.id), clean, { merge: true }).catch((err) => {
               if (isQuotaError(err)) setIsFirestoreQuotaExceeded(true);
             });
           });

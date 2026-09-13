@@ -223,6 +223,97 @@ export function detectAllDuplicateGroups(
 }
 
 /**
+ * Deduplicate an array of assessments so every building only appears ONCE
+ * Resolves duplicates by Code, NIK + Kecamatan, and Location + Exact Building Name
+ */
+export function deduplicateAssessmentsList(list: BuildingAssessment[]): BuildingAssessment[] {
+  if (!Array.isArray(list) || list.length <= 1) return list || [];
+
+  const result: BuildingAssessment[] = [];
+  const seenCodeMap = new Map<string, number>(); // normCode -> index in result
+  const seenNikMap = new Map<string, number>();  // nik::kec -> index in result
+  const seenLocMap = new Map<string, number>();  // kec::desa::bldg -> index in result
+  const seenIdMap = new Map<string, number>();   // id -> index in result
+
+  for (const item of list) {
+    if (!item || !item.id) continue;
+
+    const normCode = normalizeString(item.code);
+    const normNik = (item.nikPemilik && item.nikPemilik !== '0' && item.nikPemilik.length >= 10)
+      ? item.nikPemilik.trim()
+      : '';
+    const normKec = normalizeString(item.kecamatanName || item.kecamatanId);
+    const normDesa = normalizeString(item.desaName || item.desaId);
+    const normBldg = normalizeString(item.buildingName).replace(/\s*baris\s+\d+/i, '').trim();
+
+    const nikKey = normNik && normKec ? `${normNik}::${normKec}` : '';
+    const locKey = normKec && normDesa && normBldg ? `${normKec}::${normDesa}::${normBldg}` : '';
+
+    let matchIdx = -1;
+
+    if (seenIdMap.has(item.id)) {
+      matchIdx = seenIdMap.get(item.id)!;
+    } else if (normCode && seenCodeMap.has(normCode)) {
+      matchIdx = seenCodeMap.get(normCode)!;
+    } else if (nikKey && seenNikMap.has(nikKey)) {
+      matchIdx = seenNikMap.get(nikKey)!;
+    } else if (locKey && seenLocMap.has(locKey)) {
+      matchIdx = seenLocMap.get(locKey)!;
+    }
+
+    if (matchIdx !== -1) {
+      // Merge with existing item at matchIdx
+      const existing = result[matchIdx];
+      const mergedPhotos = (item.photos && item.photos.length > 0)
+        ? item.photos
+        : (existing.photos || []);
+      const mergedDriveUrl = item.googleDriveFolderUrl || item.backupDriveUrl || existing.googleDriveFolderUrl || existing.backupDriveUrl;
+
+      const existingTime = new Date(existing.updatedAt || existing.createdAt || 0).getTime();
+      const incomingTime = new Date(item.updatedAt || item.createdAt || 0).getTime();
+
+      const merged: BuildingAssessment = incomingTime >= existingTime ? {
+        ...existing,
+        ...item,
+        photos: mergedPhotos,
+        googleDriveFolderUrl: mergedDriveUrl,
+        backupDriveUrl: item.backupDriveUrl || existing.backupDriveUrl,
+        googleSheetSynced: Boolean(item.googleSheetSynced || existing.googleSheetSynced),
+      } : {
+        ...item,
+        ...existing,
+        photos: mergedPhotos,
+        googleDriveFolderUrl: mergedDriveUrl,
+        backupDriveUrl: existing.backupDriveUrl || item.backupDriveUrl,
+        googleSheetSynced: Boolean(existing.googleSheetSynced || item.googleSheetSynced),
+      };
+
+      result[matchIdx] = merged;
+    } else {
+      const newIdx = result.length;
+      result.push(item);
+      seenIdMap.set(item.id, newIdx);
+      if (normCode) seenCodeMap.set(normCode, newIdx);
+      if (nikKey) seenNikMap.set(nikKey, newIdx);
+      if (locKey) seenLocMap.set(locKey, newIdx);
+    }
+  }
+
+  return result;
+}
+
+/**
+ * Reconcile base assessments with incoming Google Sheet / server records without creating duplicate entries
+ */
+export function reconcileAndMergeAssessments(
+  baseList: BuildingAssessment[],
+  incomingList: BuildingAssessment[]
+): BuildingAssessment[] {
+  const combined = [...(incomingList || []), ...(baseList || [])];
+  return deduplicateAssessmentsList(combined);
+}
+
+/**
  * Get duplicate item IDs lookup map
  */
 export function getDuplicateIdsMap(groups: DuplicateGroup[]): Map<string, { group: DuplicateGroup; count: number }> {
@@ -234,3 +325,4 @@ export function getDuplicateIdsMap(groups: DuplicateGroup[]): Map<string, { grou
   });
   return map;
 }
+

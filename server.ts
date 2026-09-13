@@ -78,10 +78,73 @@ app.use('/uploads', express.static(path.join(process.cwd(), 'uploads')));
 // ASSESSMENTS API (Zero-quota Cloud Persistence)
 // ==========================================
 
+// Safe deduplication for server-stored assessments
+function deduplicateServerAssessments(list: any[]): any[] {
+  if (!Array.isArray(list) || list.length <= 1) return list || [];
+  const result: any[] = [];
+  const seenCodeMap = new Map<string, number>();
+  const seenNikMap = new Map<string, number>();
+  const seenLocMap = new Map<string, number>();
+  const seenIdMap = new Map<string, number>();
+
+  const clean = (s: any) =>
+    String(s || '')
+      .toLowerCase()
+      .replace(/[.,/#!$%^&*;:{}=\-_`~()]/g, ' ')
+      .replace(/\s+/g, ' ')
+      .trim();
+
+  for (const item of list) {
+    if (!item || !item.id) continue;
+    const normCode = clean(item.code);
+    const normNik =
+      item.nikPemilik && item.nikPemilik !== '0' && String(item.nikPemilik).length >= 10
+        ? String(item.nikPemilik).trim()
+        : '';
+    const normKec = clean(item.kecamatanName || item.kecamatanId);
+    const normDesa = clean(item.desaName || item.desaId);
+    const normBldg = clean(item.buildingName).replace(/\s*baris\s+\d+/i, '').trim();
+
+    const nikKey = normNik && normKec ? `${normNik}::${normKec}` : '';
+    const locKey = normKec && normDesa && normBldg ? `${normKec}::${normDesa}::${normBldg}` : '';
+
+    let matchIdx = -1;
+    if (seenIdMap.has(item.id)) {
+      matchIdx = seenIdMap.get(item.id)!;
+    } else if (normCode && seenCodeMap.has(normCode)) {
+      matchIdx = seenCodeMap.get(normCode)!;
+    } else if (nikKey && seenNikMap.has(nikKey)) {
+      matchIdx = seenNikMap.get(nikKey)!;
+    } else if (locKey && seenLocMap.has(locKey)) {
+      matchIdx = seenLocMap.get(locKey)!;
+    }
+
+    if (matchIdx !== -1) {
+      const existing = result[matchIdx];
+      const mergedPhotos =
+        item.photos && item.photos.length > 0 ? item.photos : existing.photos || [];
+      const existingTime = new Date(existing.updatedAt || existing.createdAt || 0).getTime();
+      const incomingTime = new Date(item.updatedAt || item.createdAt || 0).getTime();
+      result[matchIdx] =
+        incomingTime >= existingTime
+          ? { ...existing, ...item, photos: mergedPhotos }
+          : { ...item, ...existing, photos: mergedPhotos };
+    } else {
+      const newIdx = result.length;
+      result.push(item);
+      seenIdMap.set(item.id, newIdx);
+      if (normCode) seenCodeMap.set(normCode, newIdx);
+      if (nikKey) seenNikMap.set(nikKey, newIdx);
+      if (locKey) seenLocMap.set(locKey, newIdx);
+    }
+  }
+  return result;
+}
+
 // GET /api/assessments - Fetch all assessments stored on server
 app.get('/api/assessments', (req, res) => {
   try {
-    const list = getStoredAssessments();
+    const list = deduplicateServerAssessments(getStoredAssessments());
     res.json({
       success: true,
       count: list.length,
@@ -101,40 +164,13 @@ app.post('/api/assessments', (req, res) => {
     }
 
     const currentList = getStoredAssessments();
-    const map = new Map<string, any>();
-    currentList.forEach((a) => {
-      if (a && a.id) map.set(a.id, a);
-    });
-
-    const existing = map.get(assessment.id);
-    if (existing) {
-      // Precise merge: if photos is provided in payload, always respect updated photos array
-      const mergedPhotos =
-        assessment.photos !== undefined
-          ? assessment.photos
-          : existing.photos || [];
-
-      map.set(assessment.id, {
-        ...existing,
-        ...assessment,
-        photos: mergedPhotos,
-        backupDriveUrl: assessment.backupDriveUrl !== undefined ? assessment.backupDriveUrl : existing.backupDriveUrl,
-        googleDriveFolderUrl: assessment.googleDriveFolderUrl !== undefined
-          ? assessment.googleDriveFolderUrl
-          : (assessment.backupDriveUrl !== undefined ? assessment.backupDriveUrl : existing.googleDriveFolderUrl),
-        updatedAt: assessment.updatedAt || new Date().toISOString(),
-      });
-    } else {
-      map.set(assessment.id, assessment);
-    }
-
-    const updatedList = Array.from(map.values());
+    const updatedList = deduplicateServerAssessments([assessment, ...currentList]);
     saveStoredAssessments(updatedList);
 
     return res.json({
       success: true,
       count: updatedList.length,
-      assessment: map.get(assessment.id),
+      assessment: updatedList.find((a) => a.id === assessment.id) || assessment,
       message: 'Data penilaian berhasil disimpan di server!',
     });
   } catch (err: any) {
@@ -153,44 +189,18 @@ app.post('/api/assessments/sync-batch', (req, res) => {
 
     const currentList = getStoredAssessments();
 
-    // Safe replace: only completely replace if incomingList is >= currentList.length
-    // This prevents partial batches (e.g. 13 or 91 items) from overwriting the full 98 records!
-    if (replace && incomingList.length >= currentList.length) {
-      saveStoredAssessments(incomingList);
+    if (replace) {
+      const cleanDeduped = deduplicateServerAssessments(incomingList);
+      saveStoredAssessments(cleanDeduped);
       return res.json({
         success: true,
-        count: incomingList.length,
-        assessments: incomingList,
-        message: `${incomingList.length} data penilaian berhasil diperbarui bersih di server!`,
+        count: cleanDeduped.length,
+        assessments: cleanDeduped,
+        message: `${cleanDeduped.length} data penilaian berhasil diperbarui bersih di server!`,
       });
     }
 
-    const map = new Map<string, any>();
-    // 1. Keep all existing assessments on server
-    currentList.forEach((a) => {
-      if (a && a.id) map.set(a.id, a);
-    });
-
-    // 2. Non-destructively merge incoming assessments
-    incomingList.forEach((incoming) => {
-      if (!incoming || !incoming.id) return;
-      const existing = map.get(incoming.id);
-      if (!existing) {
-        map.set(incoming.id, incoming);
-      } else {
-        const existingTime = new Date(existing.updatedAt || existing.createdAt || 0).getTime();
-        const incomingTime = new Date(incoming.updatedAt || incoming.createdAt || 0).getTime();
-        if (incomingTime >= existingTime) {
-          const mergedPhotos =
-            incoming.photos && incoming.photos.length > 0
-              ? incoming.photos
-              : existing.photos || [];
-          map.set(incoming.id, { ...existing, ...incoming, photos: mergedPhotos });
-        }
-      }
-    });
-
-    const merged = Array.from(map.values());
+    const merged = deduplicateServerAssessments([...incomingList, ...currentList]);
     saveStoredAssessments(merged);
 
     return res.json({
@@ -715,7 +725,7 @@ async function fetchKecamatanRowsOnServer(
   const fetchSingleAlias = async (alias: string) => {
     const url = `https://docs.google.com/spreadsheets/d/${spreadsheetId}/gviz/tq?sheet=${encodeURIComponent(alias)}&_t=${cacheBuster}`;
     const controller = new AbortController();
-    const timeout = setTimeout(() => controller.abort(), 4500);
+    const timeout = setTimeout(() => controller.abort(), 12000);
     try {
       const resp = await fetch(url, { signal: controller.signal });
       clearTimeout(timeout);

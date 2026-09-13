@@ -2798,7 +2798,7 @@ export async function fetchAssessmentsFromGoogleSheet(
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({ spreadsheetUrl: config.spreadsheetUrl, forceRefresh }),
-        signal: AbortSignal.timeout(6000),
+        signal: AbortSignal.timeout(10000),
       });
       if (serverResp.ok) {
         const json = await serverResp.json();
@@ -2856,7 +2856,7 @@ export async function fetchAssessmentsFromGoogleSheet(
           const gvizUrl = `https://docs.google.com/spreadsheets/d/${spreadsheetId}/gviz/tq?sheet=${encodeURIComponent(alias)}&_t=${cacheBuster}`;
           try {
             const controller = new AbortController();
-            const timeoutId = setTimeout(() => controller.abort(), 4500);
+            const timeoutId = setTimeout(() => controller.abort(), 12000);
             const res = await fetch(gvizUrl, { signal: controller.signal });
             clearTimeout(timeoutId);
             lastStatus = res.status;
