@@ -2589,7 +2589,8 @@ const CACHE_TTL_MS = 25000; // 25 seconds fast in-memory cache
  */
 export async function fetchAssessmentsFromGoogleSheet(
   config: GoogleSheetConfig,
-  forceRefresh = false
+  forceRefresh = false,
+  onProgress?: (progress: { currentKec: string; count: number; totalSoFar: number; step: number; totalSteps: number; partialData: BuildingAssessment[] }) => void
 ): Promise<{ success: boolean; data: BuildingAssessment[]; message: string; totalRows?: number }> {
   const hasSpreadsheet = Boolean(config.spreadsheetUrl && isConfiguredSheetUrl(config.spreadsheetUrl));
   const hasWebhook = Boolean(config.webhookUrl && config.webhookUrl.startsWith('http'));
@@ -2989,8 +2990,10 @@ export async function fetchAssessmentsFromGoogleSheet(
       return null;
     };
 
-    // Sequentially process each kecamatan with queue interval to avoid traffic congestion
+    // Sequentially process each kecamatan with queue interval to avoid traffic congestion & progressively stream results
+    let stepIdx = 0;
     for (const group of kecamatanTabGroups) {
+      stepIdx++;
       const knownAlias = confirmedTabs[group.name];
       const validKnown = knownAlias && knownAlias.toLowerCase().startsWith('kec') ? knownAlias : null;
       const initialAliases = validKnown
@@ -3001,16 +3004,33 @@ export async function fetchAssessmentsFromGoogleSheet(
         new Set([...initialAliases, ...group.aliases])
       ).filter((a) => a.toLowerCase().startsWith('kec'));
 
+      let groupRowsFound = 0;
       for (const alias of prioritizedAliases) {
         const res = await fetchSingleWithRetry(alias);
         if (res && res.rows.length > 0) {
           updatedConfirmedTabs[group.name] = res.matchedAlias;
           allExtractedRows.push(...res.rows);
           successfulFetches++;
+          groupRowsFound = res.rows.length;
           break;
         }
         // Small pause between alias probes
         await new Promise((r) => setTimeout(r, 80));
+      }
+
+      // If callback provided, stream progress and current partial dataset immediately
+      if (onProgress && allExtractedRows.length > 0) {
+        try {
+          const currentPartialAssessments = parseExtractedRowsToAssessments(allExtractedRows);
+          onProgress({
+            currentKec: group.name,
+            count: groupRowsFound,
+            totalSoFar: currentPartialAssessments.length,
+            step: stepIdx,
+            totalSteps: kecamatanTabGroups.length,
+            partialData: currentPartialAssessments,
+          });
+        } catch {}
       }
 
       // Pacing interval between kecamatan tabs
@@ -3020,13 +3040,6 @@ export async function fetchAssessmentsFromGoogleSheet(
     try {
       localStorage.setItem(CONFIRMED_TABS_KEY, JSON.stringify(updatedConfirmedTabs));
     } catch {}
-
-    kecamatanResults.forEach((res) => {
-      if (res.success && res.rows.length > 0) {
-        allExtractedRows.push(...res.rows);
-        successfulFetches++;
-      }
-    });
 
     if (successfulFetches === 0 && allExtractedRows.length === 0) {
       console.warn(`[GoogleSheetSync] Notice: Google Sheet tidak dapat diakses (${lastStatus ? `HTTP ${lastStatus}` : 'Koneksi dibatasi'}).`);

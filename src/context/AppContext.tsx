@@ -2746,7 +2746,42 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
     try {
       // If user clicked manual sync, always force fresh download
       const shouldForce = forceRefresh !== undefined ? forceRefresh : Boolean(showToastAlert);
-      const result = await fetchAssessmentsFromGoogleSheet(googleSheetConfig, shouldForce);
+      
+      const onProgressStream = (prog: { currentKec: string; count: number; totalSoFar: number; step: number; totalSteps: number; partialData: BuildingAssessment[] }) => {
+        if (!prog.partialData || prog.partialData.length === 0) return;
+        setAssessments((prev) => {
+          const prevPhotosMap = new Map<string, any[]>();
+          const prevDriveMap = new Map<string, string>();
+          prev.forEach((p) => {
+            if (p.id) {
+              if (p.photos && p.photos.length > 0) prevPhotosMap.set(p.id, p.photos);
+              if (p.googleDriveFolderUrl) prevDriveMap.set(p.id, p.googleDriveFolderUrl);
+            }
+          });
+
+          const streamedKeys = new Set<string>();
+          const updatedStream = prog.partialData.map((item) => {
+            if (item.id) streamedKeys.add(item.id);
+            if (item.code) streamedKeys.add(item.code);
+            return {
+              ...item,
+              photos: (item.photos && item.photos.length > 0) ? item.photos : (prevPhotosMap.get(item.id) || []),
+              googleDriveFolderUrl: item.googleDriveFolderUrl || prevDriveMap.get(item.id),
+            };
+          });
+
+          // Keep remaining un-fetched items so far so screen always shows maximum available data
+          prev.forEach((p) => {
+            if (p.id && !streamedKeys.has(p.id) && (!p.code || !streamedKeys.has(p.code))) {
+              updatedStream.push(p);
+            }
+          });
+
+          return updatedStream;
+        });
+      };
+
+      const result = await fetchAssessmentsFromGoogleSheet(googleSheetConfig, shouldForce, onProgressStream);
       if (!result.success || !result.data) {
         if (showToastAlert) showToast(result.message, 'info');
         return { success: false, message: result.message, count: 0 };
