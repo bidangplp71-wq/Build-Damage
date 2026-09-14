@@ -50,7 +50,7 @@ import {
   canManageUserPassword,
   canViewUserPassword,
 } from '../utils/security';
-import { db, isQuotaError, FIRESTORE_DATABASE_CONSOLE_URL, pauseFirestoreNetwork, resumeFirestoreNetwork } from '../services/firebase';
+import { db, isQuotaError, isQuotaExceeded, FIRESTORE_DATABASE_CONSOLE_URL, pauseFirestoreNetwork, resumeFirestoreNetwork } from '../services/firebase';
 import { collection, onSnapshot, doc, setDoc, getDocs, getDoc, deleteDoc } from 'firebase/firestore';
 import { 
   savePhotoLocally,
@@ -590,7 +590,13 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
   });
 
   // Track Firebase Firestore Quota Exhaustion (Spark Free Tier limit protection)
-  const [isFirestoreQuotaExceeded, setIsFirestoreQuotaExceeded] = useState<boolean>(false);
+  const [isFirestoreQuotaExceeded, setIsFirestoreQuotaExceeded] = useState<boolean>(() => {
+    try {
+      return isQuotaExceeded || localStorage.getItem('sipandu_pupr_quota_exceeded') === 'true';
+    } catch {
+      return false;
+    }
+  });
 
   useEffect(() => {
     try {
@@ -904,19 +910,6 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
           hydrated.forEach((h) => mergedMap.set(h.id, h));
           const mergedList = Array.from(mergedMap.values());
 
-          // Automatically push any local items missing in Firestore up to Firestore
-          if (db) {
-            const missingInFirestore = mergedList.filter((item) => !map.has(item.id) && !storedDeleted.has(item.id));
-            if (missingInFirestore.length > 0) {
-              missingInFirestore.forEach((item) => {
-                const clean = prepareAssessmentForFirestore(item);
-                setDoc(doc(db, 'assessments', clean.id), clean, { merge: true }).catch((err) => {
-                  console.warn('Auto-sync local assessment to Firestore notice:', err);
-                });
-              });
-            }
-          }
-
           try {
             localStorage.setItem(STORAGE_KEYS.ASSESSMENTS, JSON.stringify(mergedList));
           } catch (e) {
@@ -936,6 +929,7 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
       }).catch((err) => {
         if (isQuotaError(err)) {
           setIsFirestoreQuotaExceeded(true);
+          pauseFirestoreNetwork().catch(() => {});
         }
         console.warn('Firebase assessments fetch offline/deferred:', err?.message || err);
       }),
@@ -2111,12 +2105,15 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
       deviceInfo: typeof navigator !== 'undefined' ? navigator.userAgent.slice(0, 100) : '',
     };
 
-    // Sync to Firestore for Cloudflare Pages / Static Hosting support
-    if (db) {
+    // Sync to Firestore for Cloudflare Pages / Static Hosting support only if quota is healthy
+    if (db && !isFirestoreQuotaExceeded) {
       try {
         await setDoc(doc(db, 'active_sessions', sessionId), sessionPayload, { merge: true });
       } catch (err) {
-        console.warn('Firestore active_sessions write notice:', err);
+        if (isQuotaError(err)) {
+          setIsFirestoreQuotaExceeded(true);
+          pauseFirestoreNetwork().catch(() => {});
+        }
       }
     }
 
@@ -2167,11 +2164,16 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
         lastHeartbeat: Date.now(),
       };
 
-      // 1. Sync Heartbeat to Firestore (Works on Cloudflare Pages)
-      if (db) {
+      // 1. Sync Heartbeat to Firestore only if quota is available
+      if (db && !isFirestoreQuotaExceeded) {
         try {
           await setDoc(doc(db, 'active_sessions', sessionId), heartbeatPayload, { merge: true });
-        } catch {}
+        } catch (err) {
+          if (isQuotaError(err)) {
+            setIsFirestoreQuotaExceeded(true);
+            pauseFirestoreNetwork().catch(() => {});
+          }
+        }
       }
 
       // 2. Sync Heartbeat to Server API

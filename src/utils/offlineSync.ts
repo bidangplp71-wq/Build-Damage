@@ -1,5 +1,5 @@
 import { BuildingAssessment } from '../types';
-import { db } from '../services/firebase';
+import { db, isQuotaError, pauseFirestoreNetwork } from '../services/firebase';
 import { doc, setDoc } from 'firebase/firestore';
 
 const OFFLINE_QUEUE_KEY = 'sipandu_offline_sync_outbox';
@@ -105,6 +105,9 @@ export async function flushOfflineSyncQueue(
         await setDoc(doc(db, 'assessments', clean.id), clean, { merge: true });
         synced = true;
       } catch (err) {
+        if (isQuotaError(err)) {
+          pauseFirestoreNetwork().catch(() => {});
+        }
         console.warn('Firestore outbox sync notice:', err);
       }
     }

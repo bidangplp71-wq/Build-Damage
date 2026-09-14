@@ -13,6 +13,7 @@ let db: Firestore | null = null;
 let auth: Auth | null = null;
 let storage: FirebaseStorage | null = null;
 let isFirestoreNetworkPaused = false;
+let isQuotaExceeded = false;
 
 try {
   if (typeof window !== 'undefined') {
@@ -34,25 +35,42 @@ try {
       storage = getStorage(app);
     }
 
-    // Clean stale quota exceeded flag on fresh app boot so multi-device sync always attempts cloud connection
-    try {
-      localStorage.removeItem('sipandu_pupr_quota_exceeded');
+    // Check if quota was recently recorded as exceeded
+    const quotaTimestamp = localStorage.getItem('sipandu_pupr_quota_exceeded_ts');
+    const now = Date.now();
+    // 30-minute cooldown before re-testing network if previously exhausted
+    if (quotaTimestamp && now - parseInt(quotaTimestamp, 10) < 30 * 60 * 1000) {
+      isQuotaExceeded = true;
+      isFirestoreNetworkPaused = true;
+      if (db) {
+        disableNetwork(db).catch(() => {});
+      }
+    } else {
       isFirestoreNetworkPaused = false;
+      isQuotaExceeded = false;
+      localStorage.removeItem('sipandu_pupr_quota_exceeded');
+      localStorage.removeItem('sipandu_pupr_quota_exceeded_ts');
       if (db) {
         enableNetwork(db).catch(() => {});
       }
-    } catch {}
+    }
   }
 } catch (err) {
   console.warn('Firebase initialization notice:', err);
 }
 
-export { app, db, auth, storage };
+export { app, db, auth, storage, isQuotaExceeded };
 
 /**
  * Pause Firestore network traffic to stop exponential backoff retry loops when quota is exceeded
  */
 export async function pauseFirestoreNetwork(): Promise<void> {
+  isQuotaExceeded = true;
+  try {
+    localStorage.setItem('sipandu_pupr_quota_exceeded', 'true');
+    localStorage.setItem('sipandu_pupr_quota_exceeded_ts', String(Date.now()));
+  } catch {}
+
   if (!db || isFirestoreNetworkPaused) return;
   try {
     isFirestoreNetworkPaused = true;
@@ -67,12 +85,14 @@ export async function pauseFirestoreNetwork(): Promise<void> {
  * Resume Firestore network traffic
  */
 export async function resumeFirestoreNetwork(): Promise<void> {
-  if (!db || !isFirestoreNetworkPaused) return;
+  if (!db) return;
   try {
     await enableNetwork(db);
     isFirestoreNetworkPaused = false;
+    isQuotaExceeded = false;
     try {
       localStorage.removeItem('sipandu_pupr_quota_exceeded');
+      localStorage.removeItem('sipandu_pupr_quota_exceeded_ts');
     } catch {}
     console.info('[Firestore] Network synchronization resumed.');
   } catch (err) {
