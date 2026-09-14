@@ -16,6 +16,7 @@ import {
   Folder,
   PenLine,
   RotateCcw,
+  LayoutTemplate,
 } from 'lucide-react';
 import { BuildingPhotoGallery } from './BuildingPhotoGallery';
 import { syncAssessmentPhotosToDrive } from '../services/googleSheetsService';
@@ -55,6 +56,7 @@ export const AssessmentDetailModal: React.FC<Props> = ({ assessment, onClose }) 
   const hasPhotos = Boolean(assessment.photos && assessment.photos.length > 0);
   const hasDriveFolder = Boolean(assessment.googleDriveFolderUrl);
   const [showPhotos, setShowPhotos] = useState(true);
+  const [printOrientation, setPrintOrientation] = useState<'portrait' | 'landscape'>('portrait');
 
   const displayComponents = React.useMemo(() => {
     return assessment?.components && assessment.components.length > 0
@@ -158,6 +160,16 @@ export const AssessmentDetailModal: React.FC<Props> = ({ assessment, onClose }) 
 
   const modalContent = (
     <div id="pupr-print-portal">
+      {/* Dynamic media print orientation */}
+      <style>{`
+        @media print {
+          @page {
+            size: A4 ${printOrientation} !important;
+            margin: 8mm 10mm !important;
+          }
+        }
+      `}</style>
+
       <div 
         className="modal-backdrop-wrap fixed inset-0 z-50 overflow-y-auto bg-slate-950/75 backdrop-blur-xs flex items-center justify-center p-2 sm:p-4 animate-in fade-in duration-150"
         onClick={(e) => {
@@ -166,7 +178,7 @@ export const AssessmentDetailModal: React.FC<Props> = ({ assessment, onClose }) 
           }
         }}
       >
-        <div className="modal-card-sheet bg-white rounded-2xl w-full max-w-4xl shadow-2xl border border-slate-300 max-h-[95vh] flex flex-col overflow-hidden">
+        <div className={`modal-card-sheet bg-white rounded-2xl w-full ${printOrientation === 'landscape' ? 'max-w-6xl' : 'max-w-4xl'} shadow-2xl border border-slate-300 max-h-[95vh] flex flex-col overflow-hidden transition-all duration-200`}>
           {/* Top Control Bar (Hidden on print) */}
           <div className="no-print print-controls flex flex-wrap items-center justify-between gap-3 px-6 py-3.5 border-b border-slate-200 bg-slate-50">
             <div className="flex items-center gap-2">
@@ -179,6 +191,36 @@ export const AssessmentDetailModal: React.FC<Props> = ({ assessment, onClose }) 
             </div>
 
             <div className="flex items-center gap-2 flex-wrap">
+              {/* Orientation switch (Landscape vs Portrait) */}
+              <div className="flex items-center bg-white p-0.5 rounded-xl border border-slate-300 shadow-2xs">
+                <button
+                  type="button"
+                  onClick={() => setPrintOrientation('landscape')}
+                  className={`flex items-center gap-1 px-2.5 py-1 rounded-lg text-xs font-bold transition-all cursor-pointer ${
+                    printOrientation === 'landscape'
+                      ? 'bg-amber-500 text-slate-950 font-black shadow-2xs'
+                      : 'text-slate-600 hover:text-slate-900'
+                  }`}
+                  title="Format Landscape / Mendatar"
+                >
+                  <LayoutTemplate className="w-3 h-3 rotate-90" />
+                  <span>Landscape</span>
+                </button>
+                <button
+                  type="button"
+                  onClick={() => setPrintOrientation('portrait')}
+                  className={`flex items-center gap-1 px-2.5 py-1 rounded-lg text-xs font-bold transition-all cursor-pointer ${
+                    printOrientation === 'portrait'
+                      ? 'bg-amber-500 text-slate-950 font-black shadow-2xs'
+                      : 'text-slate-600 hover:text-slate-900'
+                  }`}
+                  title="Format Portrait / Tegak"
+                >
+                  <LayoutTemplate className="w-3 h-3" />
+                  <span>Portrait</span>
+                </button>
+              </div>
+
               {/* Toggle with Photos preview */}
               {(hasPhotos || hasDriveFolder) ? (
                 <label className="flex items-center gap-1.5 cursor-pointer text-xs font-semibold text-slate-700 bg-white border border-slate-300 px-2.5 py-1.5 rounded-xl hover:bg-slate-50 transition-colors shadow-2xs">

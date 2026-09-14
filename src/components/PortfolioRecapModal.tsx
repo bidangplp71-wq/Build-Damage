@@ -25,6 +25,7 @@ import {
   Check,
   Clock,
   AlertCircle,
+  LayoutTemplate,
 } from 'lucide-react';
 
 interface Props {
@@ -51,6 +52,7 @@ export const PortfolioRecapModal: React.FC<Props> = ({
   const [selectedClassification, setSelectedClassification] = useState<string>('all');
   const [selectedVerificationStatus, setSelectedVerificationStatus] = useState<string>('all');
   const [searchTerm, setSearchTerm] = useState<string>('');
+  const [printOrientation, setPrintOrientation] = useState<'landscape' | 'portrait'>('landscape');
   const [includeCover, setIncludeCover] = useState<boolean>(true);
   const [includeExecutiveSummary, setIncludeExecutiveSummary] = useState<boolean>(true);
   const [includeVisualDossier, setIncludeVisualDossier] = useState<boolean>(true);
@@ -246,15 +248,24 @@ export const PortfolioRecapModal: React.FC<Props> = ({
     return () => window.removeEventListener('keydown', handleKeyDown);
   }, [isOpen, onClose]);
 
-  // Handle body print isolation
+  // Handle body print isolation & orientation class
   useEffect(() => {
     if (!isOpen) return;
     document.body.classList.add('portfolio-modal-active');
+    if (printOrientation === 'landscape') {
+      document.body.classList.add('print-landscape');
+      document.body.classList.remove('print-portrait');
+    } else {
+      document.body.classList.add('print-portrait');
+      document.body.classList.remove('print-landscape');
+    }
 
     return () => {
       document.body.classList.remove('portfolio-modal-active');
+      document.body.classList.remove('print-landscape');
+      document.body.classList.remove('print-portrait');
     };
-  }, [isOpen]);
+  }, [isOpen, printOrientation]);
 
   // Log user activity once when modal is opened
   const hasLoggedOpenRef = React.useRef(false);
@@ -266,22 +277,22 @@ export const PortfolioRecapModal: React.FC<Props> = ({
         'Portofolio Rekapitulasi',
         `Membuka Portofolio Rekap: ${assessments.length} data bangunan (Terverifikasi & Belum Verifikasi)`,
         selectedKecId && selectedKecId !== 'all' ? `Kecamatan: ${kecamatans.find((k) => k.id === selectedKecId)?.name}` : 'Semua Kecamatan',
-        `Format Portofolio Dossier A4 Terpadu`
+        `Format Portofolio Dossier A4 (${printOrientation.toUpperCase()})`
       );
     } else if (!isOpen) {
       hasLoggedOpenRef.current = false;
     }
-  }, [isOpen, assessments.length, selectedKecId, kecamatans, logUserActivity]);
+  }, [isOpen, assessments.length, selectedKecId, kecamatans, printOrientation, logUserActivity]);
 
   const handlePrint = () => {
     logUserActivity(
       'PRINT_PORTFOLIO',
       'Pencetakan & Dokumen',
-      `Mencetak Buku Portofolio Rekapitulasi (${filteredData.length} Bangunan)`,
+      `Mencetak Buku Portofolio Rekapitulasi (${filteredData.length} Bangunan) — Format ${printOrientation === 'landscape' ? 'Landscape (Mendatar)' : 'Portrait (Tegak)'}`,
       selectedKecId ? `Filter: ${kecamatans.find((k) => k.id === selectedKecId)?.name}` : 'Seluruh Kabupaten Nagekeo',
-      `Format Portofolio Dossier A4 Terpadu`
+      `Format Portofolio Dossier A4 Terpadu (${printOrientation.toUpperCase()})`
     );
-    showToast('Menyiapkan dokumen cetak portofolio...', 'info');
+    showToast(`Menyiapkan cetakan format ${printOrientation === 'landscape' ? 'Landscape (Mendatar)' : 'Portrait (Tegak)'}...`, 'info');
     setTimeout(() => {
       window.print();
     }, 180);
@@ -303,6 +314,16 @@ export const PortfolioRecapModal: React.FC<Props> = ({
 
   const modalContent = (
     <div id="portfolio-print-portal">
+      {/* DYNAMIC MEDIA PRINT ORIENTATION INJECTION */}
+      <style>{`
+        @media print {
+          @page {
+            size: A4 ${printOrientation} !important;
+            margin: 8mm 10mm !important;
+          }
+        }
+      `}</style>
+
       <div 
         className="modal-backdrop-wrap fixed inset-0 z-50 overflow-y-auto bg-slate-950/80 backdrop-blur-xs flex items-center justify-center p-2 sm:p-4"
         onClick={(e) => {
@@ -311,7 +332,7 @@ export const PortfolioRecapModal: React.FC<Props> = ({
           }
         }}
       >
-        <div className="modal-card-sheet bg-white rounded-3xl w-full max-w-6xl shadow-2xl border border-slate-300 max-h-[96vh] flex flex-col overflow-hidden">
+        <div className={`modal-card-sheet bg-white rounded-3xl w-full ${printOrientation === 'landscape' ? 'max-w-[1400px]' : 'max-w-6xl'} shadow-2xl border border-slate-300 max-h-[96vh] flex flex-col overflow-hidden transition-all duration-200`}>
           
           {/* TOP TOOLBAR & CONTROLS (Hidden on Print) */}
           <div className="no-print print-controls flex flex-wrap items-center justify-between gap-3 px-6 py-4 border-b border-slate-200 bg-slate-900 text-white">
@@ -327,6 +348,9 @@ export const PortfolioRecapModal: React.FC<Props> = ({
                   <span className="px-2 py-0.5 rounded-full text-[10px] font-extrabold bg-amber-400 text-slate-950">
                     Standar PUPR
                   </span>
+                  <span className="px-2 py-0.5 rounded-full text-[10px] font-extrabold bg-slate-800 text-amber-300 border border-slate-700 uppercase">
+                    {printOrientation === 'landscape' ? 'Mode Landscape' : 'Mode Portrait'}
+                  </span>
                 </div>
                 <p className="text-xs text-slate-300">
                   Dossier Eksekutif, Galeri Visual Dokumentasi, & Rekapitulasi Anggaran Pasca Bencana
@@ -335,13 +359,43 @@ export const PortfolioRecapModal: React.FC<Props> = ({
             </div>
 
             <div className="flex items-center gap-2.5 flex-wrap">
+              {/* ORIENTATION TOGGLE (Landscape vs Portrait) */}
+              <div className="flex items-center bg-slate-800 p-1 rounded-xl border border-slate-700">
+                <button
+                  type="button"
+                  onClick={() => setPrintOrientation('landscape')}
+                  className={`flex items-center gap-1.5 px-3 py-1.5 rounded-lg text-xs font-bold transition-all cursor-pointer ${
+                    printOrientation === 'landscape'
+                      ? 'bg-amber-500 text-slate-950 shadow-xs font-black'
+                      : 'text-slate-300 hover:text-white'
+                  }`}
+                  title="Cetak format Landscape / Mendatar (Sangat direkomendasikan untuk tabel matriks data luas)"
+                >
+                  <LayoutTemplate className="w-3.5 h-3.5 rotate-90" />
+                  <span>Landscape</span>
+                </button>
+                <button
+                  type="button"
+                  onClick={() => setPrintOrientation('portrait')}
+                  className={`flex items-center gap-1.5 px-3 py-1.5 rounded-lg text-xs font-bold transition-all cursor-pointer ${
+                    printOrientation === 'portrait'
+                      ? 'bg-amber-500 text-slate-950 shadow-xs font-black'
+                      : 'text-slate-300 hover:text-white'
+                  }`}
+                  title="Cetak format Portrait / Tegak"
+                >
+                  <LayoutTemplate className="w-3.5 h-3.5" />
+                  <span>Portrait</span>
+                </button>
+              </div>
+
               <button
                 type="button"
                 onClick={handlePrint}
                 className="flex items-center gap-2 px-5 py-2.5 rounded-xl text-xs font-bold bg-amber-500 hover:bg-amber-400 text-slate-950 shadow-md hover:shadow-amber-500/20 transition-all cursor-pointer"
               >
                 <Printer className="w-4 h-4" />
-                <span>Cetak / Simpan PDF Portofolio</span>
+                <span>Cetak / PDF ({printOrientation === 'landscape' ? 'Landscape' : 'Portrait'})</span>
               </button>
 
               <button
@@ -748,12 +802,12 @@ export const PortfolioRecapModal: React.FC<Props> = ({
                 PAGE 1: SAMPUL / COVER PORTOFOLIO RESMI EKSEKUTIF
                ======================================================== */}
             {includeCover && (
-              <div className="portfolio-page bg-white rounded-2xl shadow-md border border-slate-200 text-slate-900 flex flex-col justify-between overflow-hidden relative">
+              <div className={`portfolio-page bg-white rounded-2xl shadow-md border border-slate-200 text-slate-900 flex flex-col justify-between overflow-hidden relative ${printOrientation === 'landscape' ? 'p-2 sm:p-4' : ''}`}>
                 {/* Decorative Top Accent Bar */}
                 <div className="h-3 bg-gradient-to-r from-amber-500 via-orange-500 to-amber-600 w-full" />
 
                 {/* Inner Border Frame (Luxury Official Government Style) */}
-                <div className="m-6 sm:m-10 p-8 border-4 border-double border-slate-900/80 rounded-xl flex-1 flex flex-col justify-between relative">
+                <div className={`portfolio-cover-inner border-4 border-double border-slate-900/80 rounded-xl flex-1 flex flex-col justify-between relative ${printOrientation === 'landscape' ? 'm-2 sm:m-4 p-4 sm:p-6' : 'm-6 sm:m-10 p-8'}`}>
                   
                   {/* Watermark Emblem in Background */}
                   <div className="absolute inset-0 flex items-center justify-center opacity-[0.03] pointer-events-none">
@@ -785,29 +839,29 @@ export const PortfolioRecapModal: React.FC<Props> = ({
                   </div>
 
                   {/* Middle: Title & Document Identity */}
-                  <div className="text-center my-auto py-10 space-y-6 relative z-10">
-                    <div className="inline-flex items-center gap-2 px-4 py-1.5 rounded-full bg-amber-100 border border-amber-300 text-amber-950 text-xs font-black tracking-wider uppercase">
+                  <div className={`text-center my-auto relative z-10 ${printOrientation === 'landscape' ? 'py-3 space-y-3' : 'py-10 space-y-6'}`}>
+                    <div className="inline-flex items-center gap-2 px-4 py-1 rounded-full bg-amber-100 border border-amber-300 text-amber-950 text-xs font-black tracking-wider uppercase">
                       <Sparkles className="w-3.5 h-3.5 text-amber-700" />
                       <span>Dokumen Portofolio Teknis & Rekapitulasi</span>
                     </div>
 
-                    <div className="space-y-3">
-                      <h1 className="text-3xl sm:text-4xl font-black text-slate-950 tracking-tight leading-tight uppercase font-serif">
+                    <div className="space-y-2">
+                      <h1 className={`font-black text-slate-950 tracking-tight leading-tight uppercase font-serif ${printOrientation === 'landscape' ? 'text-2xl sm:text-3xl' : 'text-3xl sm:text-4xl'}`}>
                         Portofolio Rekapitulasi Penilaian Kerusakan Bangunan Gedung
                       </h1>
                       <div className="w-24 h-1.5 bg-amber-500 mx-auto rounded-full" />
-                      <p className="text-sm sm:text-base text-slate-700 max-w-2xl mx-auto font-medium leading-relaxed">
+                      <p className={`text-slate-700 max-w-3xl mx-auto font-medium leading-relaxed ${printOrientation === 'landscape' ? 'text-xs line-clamp-2' : 'text-sm sm:text-base'}`}>
                         Laporan Terpadu Hasil Inventarisasi Fisik, Verifikasi Tingkat Kerusakan, Dokumentasi Visual Lapangan, dan Estimasi Kebutuhan Biaya Rehabilitasi / Rekonstruksi Pasca Bencana
                       </p>
                     </div>
 
-                    <div className="inline-block px-5 py-2.5 bg-slate-50 border border-slate-300 rounded-2xl text-xs font-semibold text-slate-700">
+                    <div className="inline-block px-4 py-1.5 bg-slate-50 border border-slate-300 rounded-2xl text-xs font-semibold text-slate-700">
                       Pedoman Acuan: <strong className="text-slate-900">Peraturan Menteri PUPR No. 22/PRT/M/2018</strong>
                     </div>
                   </div>
 
                   {/* Bottom: Metadata Scope, Period & Classification */}
-                  <div className="relative z-10 border-t-2 border-slate-200 pt-6 mt-4">
+                  <div className={`relative z-10 border-t-2 border-slate-200 ${printOrientation === 'landscape' ? 'pt-3 mt-2' : 'pt-6 mt-4'}`}>
                     <div className="grid grid-cols-2 sm:grid-cols-4 gap-4 text-left">
                       <div className="p-3 bg-slate-50 rounded-xl border border-slate-200">
                         <span className="block text-[10px] font-bold uppercase text-slate-400">Wilayah Sasaran</span>
@@ -1145,7 +1199,7 @@ export const PortfolioRecapModal: React.FC<Props> = ({
                 PAGE 4: MATRIKS REKAPITULASI DATA TERPADU
                ======================================================== */}
             {includeSummaryTable && (
-              <div className="portfolio-page bg-white rounded-2xl shadow-md border border-slate-200 text-slate-900 p-8 space-y-4">
+              <div className="portfolio-page table-page bg-white rounded-2xl shadow-md border border-slate-200 text-slate-900 p-6 sm:p-8 space-y-4">
                 <div className="flex items-center justify-between border-b-2 border-slate-900 pb-3">
                   <div>
                     <div className="flex items-center gap-2">
@@ -1155,7 +1209,7 @@ export const PortfolioRecapModal: React.FC<Props> = ({
                       </h2>
                     </div>
                     <p className="text-xs text-slate-500 font-medium">
-                      Tabel Komparatif Seluruh Gedung Terdampak di Wilayah Sasaran
+                      Tabel Komparatif Seluruh Gedung Terdampak di Wilayah Sasaran (Format {printOrientation === 'landscape' ? 'Landscape' : 'Portrait'})
                     </p>
                   </div>
                   <div className="text-right text-xs font-bold text-slate-700">
@@ -1185,7 +1239,7 @@ export const PortfolioRecapModal: React.FC<Props> = ({
                   </div>
                 ) : (
                   <div className="border border-slate-300 rounded-xl overflow-hidden">
-                    <table className="w-full text-[10px] text-left">
+                    <table className={`w-full text-left ${printOrientation === 'landscape' ? 'text-[11px]' : 'text-[10px]'}`}>
                       <thead className="bg-slate-900 text-white font-bold">
                         <tr>
                           <th className="p-2 text-center w-8">No</th>
