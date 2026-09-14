@@ -3685,7 +3685,7 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
       const updated = { ...prev, ...config };
       
       // Save to server-side JSON config endpoint for robust fallback across all devices
-      if (updated.spreadsheetUrl || updated.webhookUrl || updated.driveFolderId) {
+      if (updated.spreadsheetUrl || updated.webhookUrl || updated.driveFolderId || updated.spreadsheetProfiles) {
         fetch('/api/config', {
           method: 'POST',
           headers: { 'Content-Type': 'application/json' },
@@ -3693,6 +3693,8 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
             spreadsheetUrl: updated.spreadsheetUrl,
             webhookUrl: updated.webhookUrl,
             driveFolderId: updated.driveFolderId,
+            spreadsheetProfiles: updated.spreadsheetProfiles,
+            activeProfileId: updated.activeProfileId,
           }),
         }).catch((err) => console.warn('Server config save failed:', err));
       }

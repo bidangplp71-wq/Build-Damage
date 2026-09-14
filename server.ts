@@ -978,7 +978,28 @@ function getGoogleSheetConfig() {
   try {
     if (fs.existsSync(CONFIG_FILE_PATH)) {
       const data = fs.readFileSync(CONFIG_FILE_PATH, 'utf8');
-      return JSON.parse(data);
+      const parsed = JSON.parse(data);
+      return {
+        spreadsheetUrl: parsed.spreadsheetUrl || process.env.VITE_SPREADSHEET_URL || '',
+        webhookUrl: parsed.webhookUrl || process.env.VITE_WEBHOOK_URL || '',
+        driveFolderId: parsed.driveFolderId || process.env.VITE_DRIVE_FOLDER_ID || 'https://drive.google.com/drive/folders/1xKF8SYvNY97A9-ga0B42z3jQTbcC_Tk5?usp=sharing',
+        sheetName: parsed.sheetName || 'REKAP_SEMUA_KECAMATAN',
+        splitByKecamatan: parsed.splitByKecamatan !== false,
+        includeMasterSummarySheet: parsed.includeMasterSummarySheet !== false,
+        spreadsheetProfiles: parsed.spreadsheetProfiles || [
+          {
+            id: 'profile_default_1',
+            name: 'Buku 1: Utama / Kab. Nagekeo',
+            spreadsheetUrl: parsed.spreadsheetUrl || process.env.VITE_SPREADSHEET_URL || 'https://docs.google.com/spreadsheets/d/12FNcCcnpg5QfyXeCTjM9pWfN8iSW9SpKVquRK8qZo2g/edit?usp=sharing',
+            pageNumber: 1,
+            capacityStatus: 'Normal',
+            estimatedRowCount: 45,
+            maxCapacityRows: 500,
+            isDefault: true,
+          }
+        ],
+        activeProfileId: parsed.activeProfileId || 'profile_default_1',
+      };
     }
   } catch (err) {
     console.error('Error reading google_sheet_config.json:', err);
@@ -987,6 +1008,22 @@ function getGoogleSheetConfig() {
     spreadsheetUrl: process.env.VITE_SPREADSHEET_URL || '',
     webhookUrl: process.env.VITE_WEBHOOK_URL || '',
     driveFolderId: process.env.VITE_DRIVE_FOLDER_ID || 'https://drive.google.com/drive/folders/1xKF8SYvNY97A9-ga0B42z3jQTbcC_Tk5?usp=sharing',
+    sheetName: 'REKAP_SEMUA_KECAMATAN',
+    splitByKecamatan: true,
+    includeMasterSummarySheet: true,
+    spreadsheetProfiles: [
+      {
+        id: 'profile_default_1',
+        name: 'Buku 1: Utama / Kab. Nagekeo',
+        spreadsheetUrl: process.env.VITE_SPREADSHEET_URL || 'https://docs.google.com/spreadsheets/d/12FNcCcnpg5QfyXeCTjM9pWfN8iSW9SpKVquRK8qZo2g/edit?usp=sharing',
+        pageNumber: 1,
+        capacityStatus: 'Normal',
+        estimatedRowCount: 45,
+        maxCapacityRows: 500,
+        isDefault: true,
+      }
+    ],
+    activeProfileId: 'profile_default_1',
   };
 }
 
