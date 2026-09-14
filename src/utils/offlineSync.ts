@@ -1,4 +1,6 @@
 import { BuildingAssessment } from '../types';
+import { db } from '../services/firebase';
+import { doc, setDoc } from 'firebase/firestore';
 
 const OFFLINE_QUEUE_KEY = 'sipandu_offline_sync_outbox';
 
@@ -74,7 +76,7 @@ export function removeAssessmentFromSyncQueue(assessmentId: string): void {
 }
 
 /**
- * Process and flush the offline sync queue to the server
+ * Process and flush the offline sync queue to the server & Firestore
  */
 export async function flushOfflineSyncQueue(
   onItemSynced?: (item: PendingSyncItem) => void
@@ -85,6 +87,29 @@ export async function flushOfflineSyncQueue(
   let succeeded = 0;
 
   for (const item of queue) {
+    let synced = false;
+
+    // 1. Sync to Cloud Firestore directly (for Cloudflare Pages / Static Hosting)
+    if (db) {
+      try {
+        const clean: any = JSON.parse(JSON.stringify(item.assessment));
+        if (Array.isArray(clean.photos)) {
+          clean.photos = clean.photos.map((p: any) => ({
+            id: p.id || '',
+            caption: p.caption || '',
+            damageLocation: p.damageLocation || '',
+            url: p.url && (p.url.startsWith('http://') || p.url.startsWith('https://') || p.url.startsWith('/uploads/')) ? p.url : '',
+            timestamp: p.timestamp || '',
+          }));
+        }
+        await setDoc(doc(db, 'assessments', clean.id), clean, { merge: true });
+        synced = true;
+      } catch (err) {
+        console.warn('Firestore outbox sync notice:', err);
+      }
+    }
+
+    // 2. Also sync to Express backend if fullstack
     try {
       const response = await fetch('/api/assessments', {
         method: 'POST',
@@ -93,16 +118,17 @@ export async function flushOfflineSyncQueue(
       });
 
       if (response.ok) {
-        removeAssessmentFromSyncQueue(item.id);
-        succeeded++;
-        if (onItemSynced) {
-          onItemSynced(item);
-        }
-      } else {
-        item.attempts = (item.attempts || 0) + 1;
-        saveOfflineSyncQueue(queue);
+        synced = true;
       }
-    } catch {
+    } catch {}
+
+    if (synced) {
+      removeAssessmentFromSyncQueue(item.id);
+      succeeded++;
+      if (onItemSynced) {
+        onItemSynced(item);
+      }
+    } else {
       item.attempts = (item.attempts || 0) + 1;
       saveOfflineSyncQueue(queue);
     }

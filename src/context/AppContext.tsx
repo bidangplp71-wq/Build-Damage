@@ -284,12 +284,23 @@ function persistDeletedAssessmentIdsBatch(ids: string[]) {
 function prepareAssessmentForFirestore(assessment: BuildingAssessment): any {
   const clean = JSON.parse(JSON.stringify(assessment));
   if (Array.isArray(clean.photos)) {
-    clean.photos = clean.photos.map((p: any) => ({
-      ...p,
-      url: p.url && (p.url.startsWith('http') || p.url.startsWith('/uploads/') || p.url.startsWith('data:') || p.url.length <= 300)
-        ? p.url
-        : '',
-    }));
+    clean.photos = clean.photos.map((p: any) => {
+      let safeUrl = '';
+      if (p.url && typeof p.url === 'string') {
+        if (p.url.startsWith('http://') || p.url.startsWith('https://') || p.url.startsWith('/uploads/')) {
+          safeUrl = p.url;
+        } else if (!p.url.startsWith('data:') && p.url.length <= 400) {
+          safeUrl = p.url;
+        }
+      }
+      return {
+        id: p.id || '',
+        caption: p.caption || '',
+        damageLocation: p.damageLocation || '',
+        url: safeUrl,
+        timestamp: p.timestamp || '',
+      };
+    });
   }
   return clean;
 }
@@ -893,6 +904,19 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
           hydrated.forEach((h) => mergedMap.set(h.id, h));
           const mergedList = Array.from(mergedMap.values());
 
+          // Automatically push any local items missing in Firestore up to Firestore
+          if (db) {
+            const missingInFirestore = mergedList.filter((item) => !map.has(item.id) && !storedDeleted.has(item.id));
+            if (missingInFirestore.length > 0) {
+              missingInFirestore.forEach((item) => {
+                const clean = prepareAssessmentForFirestore(item);
+                setDoc(doc(db, 'assessments', clean.id), clean, { merge: true }).catch((err) => {
+                  console.warn('Auto-sync local assessment to Firestore notice:', err);
+                });
+              });
+            }
+          }
+
           try {
             localStorage.setItem(STORAGE_KEYS.ASSESSMENTS, JSON.stringify(mergedList));
           } catch (e) {
@@ -901,7 +925,7 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
                 ...a,
                 photos: a.photos?.map((p) => ({
                   ...p,
-                  url: p.url && (p.url.startsWith('http') || p.url.startsWith('/uploads/') || p.url.startsWith('data:') || p.url.length < 300) ? p.url : '',
+                  url: p.url && (p.url.startsWith('http') || p.url.startsWith('/uploads/') || (!p.url.startsWith('data:') && p.url.length <= 400)) ? p.url : '',
                 })) || [],
               }));
               localStorage.setItem(STORAGE_KEYS.ASSESSMENTS, JSON.stringify(lightweight));
@@ -2436,7 +2460,7 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
     // 6. Save to Firebase Firestore if connected
     if (db) {
       const cleanA = prepareAssessmentForFirestore(assessmentToSave);
-      setDoc(doc(db, 'assessments', cleanA.id), cleanA).catch((err) => {
+      setDoc(doc(db, 'assessments', cleanA.id), cleanA, { merge: true }).catch((err) => {
         if (isQuotaError(err)) setIsFirestoreQuotaExceeded(true);
         console.warn('Firebase assessment save notice:', err?.message || err);
       });
