@@ -640,6 +640,7 @@ function doPost(e) {
       var logTabName = json.logSheetName || "Log_Akses_Pengguna";
       var logSheet = getOrCreateSheet(ss, logTabName);
       writeTableToSheet(logSheet, logRows, "#4338ca"); // Indigo Header
+      trimLogSheet(ss, 150); // Automatically keep max 150 log entries to prevent crash
 
       return ContentService.createTextOutput(JSON.stringify({
         status: "success",
@@ -656,6 +657,7 @@ function doPost(e) {
         var logTabName2 = json.logSheetName || "Log_Akses_Pengguna";
         var logSheet2 = getOrCreateSheet(ss, logTabName2);
         saveOrUpdateRow(logSheet2, singleLog, singleLog['ID Log'] || "", 'insert', "#4338ca");
+        trimLogSheet(ss, 150); // Automatically keep max 150 log entries to prevent crash
       }
       return ContentService.createTextOutput(JSON.stringify({
         status: "success",
@@ -1075,6 +1077,24 @@ function writeTableToSheet(sheet, rows, headerBgColor) {
   
   // Format border & alignment
   range.setBorder(true, true, true, true, true, true, "#cbd5e1", SpreadsheetApp.BorderStyle.SOLID);
+}
+
+/**
+ * Membatasi jumlah baris log agar tidak melebihi batas (mencegah sheet crash / read-only)
+ */
+function trimLogSheet(ss, maxRows) {
+  try {
+    var logSheet = ss.getSheetByName("Log_Akses_Pengguna");
+    if (logSheet) {
+      var lastRow = logSheet.getLastRow();
+      if (lastRow > (maxRows || 150)) {
+        var numRowsToDelete = lastRow - (maxRows || 150);
+        if (numRowsToDelete > 0) {
+          logSheet.deleteRows(2, numRowsToDelete);
+        }
+      }
+    }
+  } catch(e) {}
 }
 
 /**
