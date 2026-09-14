@@ -832,12 +832,99 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
           }
         })
         .catch(() => {});
+
+      // 3. Poll latest google sheet config from server to ensure Super Admin updates propagate instantly to all surveyors
+      fetch('/api/config')
+        .then((res) => res.json())
+        .then((data) => {
+          if (data.success && data.config) {
+            const { spreadsheetUrl, webhookUrl, driveFolderId, spreadsheetProfiles, activeProfileId } = data.config;
+            if (spreadsheetUrl) {
+              setGoogleSheetConfig((prev) => {
+                if (prev.spreadsheetUrl !== spreadsheetUrl || prev.activeProfileId !== activeProfileId || JSON.stringify(prev.spreadsheetProfiles) !== JSON.stringify(spreadsheetProfiles)) {
+                  const updated = {
+                    ...prev,
+                    spreadsheetUrl: spreadsheetUrl || prev.spreadsheetUrl,
+                    webhookUrl: webhookUrl || prev.webhookUrl,
+                    driveFolderId: driveFolderId || prev.driveFolderId,
+                    spreadsheetProfiles: spreadsheetProfiles || prev.spreadsheetProfiles,
+                    activeProfileId: activeProfileId || prev.activeProfileId,
+                  };
+                  try {
+                    localStorage.setItem(STORAGE_KEYS.GOOGLE_SHEET, JSON.stringify(updated));
+                  } catch {}
+                  return updated;
+                }
+                return prev;
+              });
+            }
+          }
+        })
+        .catch(() => {});
     }, 8000);
     return () => {
       clearInterval(interval);
       window.removeEventListener('online', handleOnline);
     };
   }, []);
+
+  // Real-time Firestore & BroadcastChannel listener for Super Admin Google Sheet config updates
+  useEffect(() => {
+    let unsubscribeFirestore: (() => void) | undefined;
+    if (db && !isFirestoreQuotaExceeded) {
+      try {
+        unsubscribeFirestore = onSnapshot(
+          doc(db, 'system_configs', 'google_sheet'),
+          (docSnap) => {
+            if (docSnap.exists()) {
+              const remoteData = docSnap.data() as GoogleSheetConfig;
+              if (remoteData && remoteData.spreadsheetUrl) {
+                setGoogleSheetConfig((prev) => {
+                  if (prev.spreadsheetUrl !== remoteData.spreadsheetUrl || prev.activeProfileId !== remoteData.activeProfileId) {
+                    const updated = { ...prev, ...remoteData };
+                    try {
+                      localStorage.setItem(STORAGE_KEYS.GOOGLE_SHEET, JSON.stringify(updated));
+                    } catch {}
+                    return updated;
+                  }
+                  return prev;
+                });
+              }
+            }
+          },
+          (err) => {
+            if (isQuotaError(err)) {
+              setIsFirestoreQuotaExceeded(true);
+            }
+          }
+        );
+      } catch {}
+    }
+
+    let bc: BroadcastChannel | undefined;
+    if (typeof BroadcastChannel !== 'undefined') {
+      try {
+        bc = new BroadcastChannel('sipandu_pupr_sync_channel');
+        bc.onmessage = (event) => {
+          if (event.data && event.data.type === 'UPDATE_GOOGLE_SHEET' && event.data.payload && event.data.payload.config) {
+            const newConf = event.data.payload.config;
+            setGoogleSheetConfig((prev) => {
+              const updated = { ...prev, ...newConf };
+              try {
+                localStorage.setItem(STORAGE_KEYS.GOOGLE_SHEET, JSON.stringify(updated));
+              } catch {}
+              return updated;
+            });
+          }
+        };
+      } catch {}
+    }
+
+    return () => {
+      if (unsubscribeFirestore) unsubscribeFirestore();
+      if (bc) bc.close();
+    };
+  }, [db, isFirestoreQuotaExceeded]);
 
   // Load from Firebase ONCE on mount with Deleted IDs Filtering
   useEffect(() => {
