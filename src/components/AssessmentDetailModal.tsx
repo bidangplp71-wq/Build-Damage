@@ -83,16 +83,20 @@ export const AssessmentDetailModal: React.FC<Props> = ({ assessment, onClose }) 
   };
 
   // Manage body class for print isolation & scroll lock
+  const hasLoggedDetailRef = React.useRef(false);
   useEffect(() => {
     document.body.classList.add('pupr-modal-active');
-    const safeTotalPercent = safeNumber(assessment.totalDamagePercent);
-    logUserActivity(
-      'VIEW_DETAIL',
-      'Penilaian Kerusakan',
-      `Membuka Rincian Penilaian: ${assessment.buildingName}`,
-      assessment.code || assessment.buildingName,
-      `Klasifikasi: ${assessment.damageClassification || 'Belum Diklasifikasi'} (${safeTotalPercent.toFixed(1)}%)`
-    );
+    if (!hasLoggedDetailRef.current) {
+      hasLoggedDetailRef.current = true;
+      const safeTotalPercent = safeNumber(assessment.totalDamagePercent);
+      logUserActivity(
+        'VIEW_DETAIL',
+        'Penilaian Kerusakan',
+        `Membuka Rincian Penilaian: ${assessment.buildingName}`,
+        assessment.code || assessment.buildingName,
+        `Klasifikasi: ${assessment.damageClassification || 'Belum Diklasifikasi'} (${safeTotalPercent.toFixed(1)}%)`
+      );
+    }
 
     const handleKeyDown = (e: KeyboardEvent) => {
       if (e.key === 'Escape') {
@@ -105,7 +109,7 @@ export const AssessmentDetailModal: React.FC<Props> = ({ assessment, onClose }) 
       document.body.classList.remove('pupr-modal-active');
       window.removeEventListener('keydown', handleKeyDown);
     };
-  }, [assessment.id, onClose]);
+  }, [assessment.id, assessment.buildingName, assessment.code, assessment.damageClassification, assessment.totalDamagePercent, logUserActivity, onClose]);
 
   const handlePrintWithoutPhotos = () => {
     setShowPhotos(false);

@@ -822,13 +822,15 @@ export const DashboardAnalytics: React.FC = () => {
       />
 
       {/* MODAL CETAK BUKU PORTOFOLIO REKAPITULASI RESMI A4 */}
-      <PortfolioRecapModal
-        isOpen={isPortfolioModalOpen}
-        onClose={() => setIsPortfolioModalOpen(false)}
-        assessments={assessments}
-        kecamatans={kecamatans}
-        desas={desas}
-      />
+      {isPortfolioModalOpen && (
+        <PortfolioRecapModal
+          isOpen={isPortfolioModalOpen}
+          onClose={() => setIsPortfolioModalOpen(false)}
+          assessments={assessments}
+          kecamatans={kecamatans}
+          desas={desas}
+        />
+      )}
     </div>
   );
 };

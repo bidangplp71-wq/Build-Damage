@@ -1560,15 +1560,27 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
     };
   };
 
+  // Stable references for logUserActivity to prevent re-render loops
+  const currentUserRef = useRef(currentUser);
+  currentUserRef.current = currentUser;
+  const usersRef = useRef(users);
+  usersRef.current = users;
+  const dbRef = useRef(db);
+  dbRef.current = db;
+  const isFirestoreQuotaExceededRef = useRef(isFirestoreQuotaExceeded);
+  isFirestoreQuotaExceededRef.current = isFirestoreQuotaExceeded;
+  const googleSheetConfigRef = useRef(googleSheetConfig);
+  googleSheetConfigRef.current = googleSheetConfig;
+
   // User Activity & Access Logger (Analytics & Audit Trail)
-  const logUserActivity = (
+  const logUserActivity = React.useCallback((
     action: ActivityActionType,
     actionCategory: 'Autentikasi' | 'Penilaian Kerusakan' | 'Pencetakan & Dokumen' | 'Integrasi Google Sheet' | 'Sistem & Pengguna',
     actionDescription: string,
     targetResource?: string,
     details?: string
   ) => {
-    const activeUser = currentUser || users[0];
+    const activeUser = currentUserRef.current || usersRef.current[0];
     const newLog: UserActivityLog = {
       id: `log_${Date.now()}_${Math.random().toString(36).substring(2, 7)}`,
       userId: activeUser?.id || 'guest',
@@ -1590,17 +1602,19 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
 
     // Only record major audit actions to Firestore to conserve quota
     const isMajorAuditAction = ['LOGIN', 'CREATE_ASSESSMENT', 'DELETE_ASSESSMENT', 'VERIFY_ASSESSMENT'].includes(action);
-    if (db && isMajorAuditAction && !isFirestoreQuotaExceeded) {
+    const firestoreDb = dbRef.current;
+    if (firestoreDb && isMajorAuditAction && !isFirestoreQuotaExceededRef.current) {
       const cleanLog = JSON.parse(JSON.stringify(newLog));
-      setDoc(doc(db, 'activity_logs', cleanLog.id), cleanLog).catch((err) => {
+      setDoc(doc(firestoreDb, 'activity_logs', cleanLog.id), cleanLog).catch((err) => {
         if (isQuotaError(err)) setIsFirestoreQuotaExceeded(true);
       });
     }
 
-    if (googleSheetConfig.webhookUrl && googleSheetConfig.webhookUrl.startsWith('http') && googleSheetConfig.directSaveEnabled) {
-      directSaveActivityLogToGoogleSheet(newLog, googleSheetConfig).catch(() => {});
+    const gsConfig = googleSheetConfigRef.current;
+    if (gsConfig.webhookUrl && gsConfig.webhookUrl.startsWith('http') && gsConfig.directSaveEnabled) {
+      directSaveActivityLogToGoogleSheet(newLog, gsConfig).catch(() => {});
     }
-  };
+  }, []);
 
   const syncActivityLogsToSheet = async () => {
     const res = await syncActivityLogsToGoogleSheet(activityLogs, googleSheetConfig);

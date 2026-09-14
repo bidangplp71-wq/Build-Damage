@@ -1720,13 +1720,15 @@ export const AssessmentTable: React.FC = () => {
       />
 
       {/* MODAL CETAK BUKU PORTOFOLIO REKAPITULASI RESMI A4 */}
-      <PortfolioRecapModal
-        isOpen={showPortfolioModal}
-        onClose={() => setShowPortfolioModal(false)}
-        assessments={assessments}
-        kecamatans={kecamatans}
-        desas={desas}
-      />
+      {showPortfolioModal && (
+        <PortfolioRecapModal
+          isOpen={showPortfolioModal}
+          onClose={() => setShowPortfolioModal(false)}
+          assessments={assessments}
+          kecamatans={kecamatans}
+          desas={desas}
+        />
+      )}
     </div>
   );
 };

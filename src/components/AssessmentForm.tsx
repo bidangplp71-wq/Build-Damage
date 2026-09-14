@@ -440,8 +440,10 @@ export const AssessmentForm: React.FC = () => {
   const currentKec = kecamatans.find((k) => k.id === kecamatanId);
   const currentDesa = desas.find((d) => d.id === desaId);
 
-  // Filter available desas based on selected kecamatan
-  const availableDesas = desas.filter((d) => d.kecamatanId === kecamatanId);
+  // Filter available desas based on selected kecamatan (memoized to prevent render thrashing)
+  const availableDesas = useMemo(() => {
+    return desas.filter((d) => d.kecamatanId === kecamatanId);
+  }, [desas, kecamatanId]);
 
   // Default select first desa and automatically update target sheet when kecamatan changes
   useEffect(() => {

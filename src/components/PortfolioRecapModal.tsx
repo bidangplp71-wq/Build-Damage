@@ -60,8 +60,10 @@ export const PortfolioRecapModal: React.FC<Props> = ({
 
   // Sync defaultKecamatanId if passed from outside
   useEffect(() => {
-    if (defaultKecamatanId) {
+    if (defaultKecamatanId && defaultKecamatanId !== 'all') {
       setSelectedKecId(defaultKecamatanId);
+    } else if (defaultKecamatanId === 'all') {
+      setSelectedKecId('');
     }
   }, [defaultKecamatanId]);
 
@@ -127,7 +129,7 @@ export const PortfolioRecapModal: React.FC<Props> = ({
       }
 
       // 2. Kecamatan filter
-      if (selectedKecId) {
+      if (selectedKecId && selectedKecId !== 'all') {
         const kecObj = kecamatans.find((k) => k.id === selectedKecId);
         const matchId = item.kecamatanId === selectedKecId;
         const matchName = kecObj && item.kecamatanName && (
@@ -248,18 +250,28 @@ export const PortfolioRecapModal: React.FC<Props> = ({
   useEffect(() => {
     if (!isOpen) return;
     document.body.classList.add('portfolio-modal-active');
-    logUserActivity(
-      'VIEW_PORTFOLIO',
-      'Portofolio Rekapitulasi',
-      `Membuka Portofolio Rekap: ${filteredData.length} data bangunan (Terverifikasi & Belum Verifikasi)`,
-      selectedKecId ? `Kecamatan: ${kecamatans.find((k) => k.id === selectedKecId)?.name}` : 'Semua Kecamatan',
-      `Total Estimasi: ${formatRupiah(stats.totalCost)}`
-    );
 
     return () => {
       document.body.classList.remove('portfolio-modal-active');
     };
-  }, [isOpen, filteredData.length, selectedKecId, kecamatans, stats.totalCost, logUserActivity]);
+  }, [isOpen]);
+
+  // Log user activity once when modal is opened
+  const hasLoggedOpenRef = React.useRef(false);
+  useEffect(() => {
+    if (isOpen && !hasLoggedOpenRef.current) {
+      hasLoggedOpenRef.current = true;
+      logUserActivity(
+        'VIEW_PORTFOLIO',
+        'Portofolio Rekapitulasi',
+        `Membuka Portofolio Rekap: ${assessments.length} data bangunan (Terverifikasi & Belum Verifikasi)`,
+        selectedKecId && selectedKecId !== 'all' ? `Kecamatan: ${kecamatans.find((k) => k.id === selectedKecId)?.name}` : 'Semua Kecamatan',
+        `Format Portofolio Dossier A4 Terpadu`
+      );
+    } else if (!isOpen) {
+      hasLoggedOpenRef.current = false;
+    }
+  }, [isOpen, assessments.length, selectedKecId, kecamatans, logUserActivity]);
 
   const handlePrint = () => {
     logUserActivity(
