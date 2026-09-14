@@ -44,7 +44,10 @@ import {
   Sparkles,
   Maximize2,
   BarChart3,
+  BookOpen,
+  Printer,
 } from 'lucide-react';
+import { PortfolioRecapModal } from './PortfolioRecapModal';
 
 export const DashboardAnalytics: React.FC = () => {
   const {
@@ -66,6 +69,7 @@ export const DashboardAnalytics: React.FC = () => {
   const [isPythonLoading, setIsPythonLoading] = useState(false);
   const [pythonResult, setPythonResult] = useState<PythonAnalyticsResult | null>(null);
   const [isPythonModalOpen, setIsPythonModalOpen] = useState(false);
+  const [isPortfolioModalOpen, setIsPortfolioModalOpen] = useState(false);
 
   // Automatically pre-compute analysis for instant display on mount/change
   useEffect(() => {
@@ -189,6 +193,15 @@ export const DashboardAnalytics: React.FC = () => {
             >
               <Zap className={`w-4 h-4 text-amber-300 ${isPythonLoading ? 'animate-spin' : ''}`} />
               <span>{isPythonLoading ? 'Memproses Python...' : 'Analisis Cepat Python'}</span>
+            </button>
+            <button
+              onClick={() => setIsPortfolioModalOpen(true)}
+              className="flex items-center gap-2 px-4 py-2.5 rounded-xl bg-amber-400 hover:bg-amber-300 text-amber-950 font-bold text-sm border border-amber-500 shadow-md transition-all transform active:scale-95 cursor-pointer"
+              title="Cetak Buku Portofolio Rekapitulasi Penilaian Kerusakan Bangunan A4"
+            >
+              <BookOpen className="w-4 h-4 text-amber-950" />
+              <Printer className="w-4 h-4 text-amber-950" />
+              <span>Cetak Portofolio Rekap</span>
             </button>
             <button
               onClick={() => setActiveTab('input_baru')}
@@ -806,6 +819,15 @@ export const DashboardAnalytics: React.FC = () => {
         }}
         onRecompute={runPythonAnalytics}
         isLoading={isPythonLoading}
+      />
+
+      {/* MODAL CETAK BUKU PORTOFOLIO REKAPITULASI RESMI A4 */}
+      <PortfolioRecapModal
+        isOpen={isPortfolioModalOpen}
+        onClose={() => setIsPortfolioModalOpen(false)}
+        assessments={assessments}
+        kecamatans={kecamatans}
+        desas={desas}
       />
     </div>
   );

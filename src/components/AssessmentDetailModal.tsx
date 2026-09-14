@@ -14,6 +14,8 @@ import {
   ExternalLink,
   UploadCloud,
   Folder,
+  PenLine,
+  RotateCcw,
 } from 'lucide-react';
 import { BuildingPhotoGallery } from './BuildingPhotoGallery';
 import { syncAssessmentPhotosToDrive } from '../services/googleSheetsService';
@@ -33,6 +35,22 @@ export const AssessmentDetailModal: React.FC<Props> = ({ assessment, onClose }) 
   const [isSyncing, setIsSyncing] = useState(false);
   const [isUploadingToDrive, setIsUploadingToDrive] = useState(false);
   const [showSignatures, setShowSignatures] = useState(true);
+  const [isEditingSignature, setIsEditingSignature] = useState(false);
+  const [customHeadName, setCustomHeadName] = useState(() => {
+    const raw = assessment.headOfDepartment?.name || '';
+    if (raw === '-' || raw.toLowerCase().includes('bernard')) return '';
+    return raw;
+  });
+  const [customHeadNip, setCustomHeadNip] = useState(() => {
+    const raw = assessment.headOfDepartment?.nip || '';
+    if (raw === '-' || raw.includes('19750812')) return '';
+    return raw;
+  });
+  const [customHeadRank, setCustomHeadRank] = useState(() => {
+    const raw = assessment.headOfDepartment?.rank || '';
+    if (raw === '-' || raw.toLowerCase().includes('pembina tk. i')) return '';
+    return raw;
+  });
 
   const hasPhotos = Boolean(assessment.photos && assessment.photos.length > 0);
   const hasDriveFolder = Boolean(assessment.googleDriveFolderUrl);
@@ -75,10 +93,19 @@ export const AssessmentDetailModal: React.FC<Props> = ({ assessment, onClose }) 
       assessment.code || assessment.buildingName,
       `Klasifikasi: ${assessment.damageClassification || 'Belum Diklasifikasi'} (${safeTotalPercent.toFixed(1)}%)`
     );
+
+    const handleKeyDown = (e: KeyboardEvent) => {
+      if (e.key === 'Escape') {
+        onClose();
+      }
+    };
+    window.addEventListener('keydown', handleKeyDown);
+
     return () => {
       document.body.classList.remove('pupr-modal-active');
+      window.removeEventListener('keydown', handleKeyDown);
     };
-  }, [assessment.id]);
+  }, [assessment.id, onClose]);
 
   const handlePrintWithoutPhotos = () => {
     setShowPhotos(false);
@@ -127,7 +154,14 @@ export const AssessmentDetailModal: React.FC<Props> = ({ assessment, onClose }) 
 
   const modalContent = (
     <div id="pupr-print-portal">
-      <div className="modal-backdrop-wrap fixed inset-0 z-50 overflow-y-auto bg-slate-950/75 backdrop-blur-xs flex items-center justify-center p-2 sm:p-4 animate-in fade-in duration-150">
+      <div 
+        className="modal-backdrop-wrap fixed inset-0 z-50 overflow-y-auto bg-slate-950/75 backdrop-blur-xs flex items-center justify-center p-2 sm:p-4 animate-in fade-in duration-150"
+        onClick={(e) => {
+          if (e.target === e.currentTarget) {
+            onClose();
+          }
+        }}
+      >
         <div className="modal-card-sheet bg-white rounded-2xl w-full max-w-4xl shadow-2xl border border-slate-300 max-h-[95vh] flex flex-col overflow-hidden">
           {/* Top Control Bar (Hidden on print) */}
           <div className="no-print print-controls flex flex-wrap items-center justify-between gap-3 px-6 py-3.5 border-b border-slate-200 bg-slate-50">
@@ -540,15 +574,92 @@ export const AssessmentDetailModal: React.FC<Props> = ({ assessment, onClose }) 
                   {assessment.headOfDepartment?.subTitle && (
                     <p className="font-bold text-slate-950">{assessment.headOfDepartment.subTitle}</p>
                   )}
-                  <div className="h-20 flex items-end">
-                    <div>
-                      <p className="font-bold underline text-slate-950">{assessment.headOfDepartment?.name || '-'}</p>
-                      {assessment.headOfDepartment?.rank && (
-                        <p className="text-[11px] text-slate-700 font-medium">{assessment.headOfDepartment.rank}</p>
+                  <div className="h-24 flex items-end">
+                    <div className="w-full max-w-[260px]">
+                      {customHeadName ? (
+                        <>
+                          <p className="font-bold underline text-slate-950 uppercase">{customHeadName}</p>
+                          {customHeadRank && (
+                            <p className="text-[11px] text-slate-700 font-medium">{customHeadRank}</p>
+                          )}
+                          <p className="text-[11px] text-slate-700 font-mono">
+                            {customHeadNip ? `NIP. ${customHeadNip}` : 'NIP. ....................................................'}
+                          </p>
+                        </>
+                      ) : (
+                        <>
+                          <div className="w-48 h-0.5 bg-slate-800 mb-1" />
+                          <p className="font-bold text-slate-700 tracking-wider">
+                            (&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;)
+                          </p>
+                          <p className="text-[11px] text-slate-600 font-mono">
+                            NIP. ....................................................
+                          </p>
+                        </>
                       )}
-                      <p className="text-[11px] text-slate-700 font-mono">
-                        {assessment.headOfDepartment?.nip ? `NIP. ${assessment.headOfDepartment.nip}` : 'NIP. -'}
-                      </p>
+
+                      {/* Interactive edit button on screen */}
+                      <div className="no-print pt-2 flex items-center gap-2">
+                        <button
+                          type="button"
+                          onClick={() => setIsEditingSignature(!isEditingSignature)}
+                          className="text-[10px] flex items-center gap-1 font-bold text-amber-700 hover:text-amber-900 bg-amber-50 hover:bg-amber-100 px-2 py-0.5 rounded border border-amber-200 cursor-pointer"
+                        >
+                          <PenLine className="w-2.5 h-2.5" />
+                          <span>{customHeadName ? 'Ubah Nama Pejabat' : 'Ketik Nama Pejabat'}</span>
+                        </button>
+                        {customHeadName && (
+                          <button
+                            type="button"
+                            onClick={() => {
+                              setCustomHeadName('');
+                              setCustomHeadNip('');
+                              setCustomHeadRank('');
+                            }}
+                            className="text-[10px] text-slate-500 hover:text-red-600 cursor-pointer"
+                            title="Kosongkan untuk TTD basah"
+                          >
+                            Kosongkan
+                          </button>
+                        )}
+                      </div>
+
+                      {/* Mini editor popup if editing */}
+                      {isEditingSignature && (
+                        <div className="no-print mt-2 p-2.5 bg-white rounded-lg border border-amber-300 shadow-lg space-y-1.5 text-left text-[11px]">
+                          <p className="font-bold text-slate-800">Atur Nama Pejabat Pengesah:</p>
+                          <input
+                            type="text"
+                            value={customHeadName}
+                            onChange={(e) => setCustomHeadName(e.target.value)}
+                            placeholder="Nama Lengkap & Gelar"
+                            className="w-full px-2 py-1 border border-slate-300 rounded text-xs"
+                          />
+                          <input
+                            type="text"
+                            value={customHeadNip}
+                            onChange={(e) => setCustomHeadNip(e.target.value)}
+                            placeholder="NIP (Contoh: 19780101...)"
+                            className="w-full px-2 py-1 border border-slate-300 rounded text-xs font-mono"
+                          />
+                          <input
+                            type="text"
+                            value={customHeadRank}
+                            onChange={(e) => setCustomHeadRank(e.target.value)}
+                            placeholder="Pangkat / Golongan (Contoh: Pembina Tk. I)"
+                            className="w-full px-2 py-1 border border-slate-300 rounded text-xs"
+                          />
+                          <div className="flex justify-end gap-1.5 pt-1">
+                            <button
+                              type="button"
+                              onClick={() => setIsEditingSignature(false)}
+                              className="px-2 py-0.5 bg-amber-500 text-slate-950 font-bold rounded text-[10px]"
+                            >
+                              Selesai
+                            </button>
+                          </div>
+                        </div>
+                      )}
                     </div>
                   </div>
                 </div>
@@ -574,6 +685,22 @@ export const AssessmentDetailModal: React.FC<Props> = ({ assessment, onClose }) 
                 </div>
               </div>
             )}
+          </div>
+
+          {/* Bottom Control Bar (Hidden on print) */}
+          <div className="no-print print-controls px-6 py-3 bg-slate-100 border-t border-slate-200 flex items-center justify-between text-xs">
+            <span className="text-slate-500 hidden sm:inline">
+              Format Standar Permen PUPR No. 22/PRT/M/2018 &bull; Tekan <strong>Esc</strong> untuk menutup
+            </span>
+            <div className="flex items-center gap-2 ml-auto">
+              <button
+                type="button"
+                onClick={onClose}
+                className="px-4 py-2 text-xs font-bold text-slate-700 hover:text-slate-950 bg-white hover:bg-slate-200 rounded-xl border border-slate-300 transition-colors cursor-pointer shadow-xs"
+              >
+                Tutup Dokumen
+              </button>
+            </div>
           </div>
         </div>
       </div>

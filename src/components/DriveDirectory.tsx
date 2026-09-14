@@ -186,9 +186,9 @@ export const DriveDirectory: React.FC = () => {
         headOfDepartment: {
           title: 'Kepala Dinas Pekerjaan Umum dan Penataan Ruang',
           subTitle: 'Kabupaten Nagekeo',
-          rank: 'Pembina Utama Muda (IV/c)',
-          name: '-',
-          nip: '-',
+          rank: '',
+          name: '',
+          nip: '',
         },
         analysisTeam: ['Tim Lapangan PUPR'],
         googleSheetSynced: false,

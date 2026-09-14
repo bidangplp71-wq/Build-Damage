@@ -46,10 +46,12 @@ import {
   Edit3,
   Sparkles,
   Lock,
+  BookOpen,
 } from 'lucide-react';
 import { PhotoViewerModal } from './PhotoViewerModal';
 import { DuplicateAuditModal } from './DuplicateAuditModal';
 import { DataFulfillmentCard } from './DataFulfillmentCard';
+import { PortfolioRecapModal } from './PortfolioRecapModal';
 
 export const AssessmentTable: React.FC = () => {
   const {
@@ -80,6 +82,36 @@ export const AssessmentTable: React.FC = () => {
   const [selectedClassification, setSelectedClassification] = useState('');
   const [selectedVerification, setSelectedVerification] = useState('');
   const [isRefreshing, setIsRefreshing] = useState(false);
+
+  // Portfolio Recap Modal State
+  const [showPortfolioModal, setShowPortfolioModal] = useState(false);
+
+  // Recently submitted assessment highlight & toast
+  const [recentlySubmittedId, setRecentlySubmittedId] = useState<string | null>(null);
+
+  useEffect(() => {
+    try {
+      const justSubmitted = sessionStorage.getItem('sipandu_just_submitted_id');
+      if (justSubmitted) {
+        setRecentlySubmittedId(justSubmitted);
+        sessionStorage.removeItem('sipandu_just_submitted_id');
+        // Clear filters so new entry is 100% visible at the top immediately
+        setSearchTerm('');
+        setSelectedCategory('');
+        setSelectedKecamatanId('');
+        setSelectedDesaId('');
+        setSelectedClassification('');
+        setSelectedVerification('');
+        setShowOnlyDuplicates(false);
+        setCurrentPage(1);
+
+        const timer = setTimeout(() => {
+          setRecentlySubmittedId(null);
+        }, 15000);
+        return () => clearTimeout(timer);
+      }
+    } catch {}
+  }, [assessments.length]);
 
   // Pagination State - defaults to 200 so 179+ rows display all at once
   const [currentPage, setCurrentPage] = useState(1);
@@ -622,6 +654,17 @@ export const AssessmentTable: React.FC = () => {
             <span>CSV</span>
           </button>
 
+          {/* Cetak Portofolio Rekapitulasi Resmi */}
+          <button
+            onClick={() => setShowPortfolioModal(true)}
+            title="Cetak Buku Rekapitulasi Portofolio Penilaian Kerusakan Bangunan format A4 Resmi"
+            className="flex items-center gap-1.5 px-3 py-2 text-xs font-bold text-amber-950 bg-amber-400 hover:bg-amber-300 rounded-xl border border-amber-500 shadow-2xs transition-all cursor-pointer"
+          >
+            <BookOpen className="w-3.5 h-3.5 text-amber-950" />
+            <Printer className="w-3.5 h-3.5 text-amber-950" />
+            <span>Cetak Portofolio Rekap</span>
+          </button>
+
           {/* Direct Google Sheet button */}
           {googleSheetConfig.spreadsheetUrl && (
             <div className="flex items-center gap-1.5 flex-wrap">
@@ -865,7 +908,32 @@ export const AssessmentTable: React.FC = () => {
         </div>
       </div>
 
-      {/* Active Data Count Banner */}
+      {/* Active Data Count Banner & Recently Submitted Notification */}
+      {recentlySubmittedId && (
+        <div className="p-4 rounded-2xl bg-emerald-50 border-2 border-emerald-400 text-emerald-950 flex items-center justify-between gap-3 shadow-md">
+          <div className="flex items-center gap-3">
+            <div className="p-2 bg-emerald-600 text-white rounded-xl shadow-xs">
+              <CheckCircle className="w-5 h-5" />
+            </div>
+            <div>
+              <h4 className="font-black text-sm text-emerald-950">
+                ✓ Penilaian Baru Berhasil Masuk Sekali Input!
+              </h4>
+              <p className="text-xs text-emerald-800 font-medium">
+                Data penilaian langsung tersimpan permanen dan ditandai pada baris tabel di bawah.
+              </p>
+            </div>
+          </div>
+          <button
+            onClick={() => setRecentlySubmittedId(null)}
+            className="p-1.5 text-emerald-700 hover:text-emerald-950 hover:bg-emerald-100 rounded-lg cursor-pointer"
+            title="Tutup notifikasi"
+          >
+            <X className="w-4 h-4" />
+          </button>
+        </div>
+      )}
+
       <div className="flex flex-wrap items-center justify-between gap-2 text-xs text-slate-700 bg-slate-50 px-3 py-2 rounded-xl border border-slate-200">
         <div className="flex items-center gap-2 flex-wrap">
           <span>
@@ -909,6 +977,7 @@ export const AssessmentTable: React.FC = () => {
             <tbody className="divide-y divide-slate-100 text-slate-700">
               {paginatedAssessments.map((item, index) => {
                 const rowNo = (currentPage - 1) * pageSize + index + 1;
+                const isRecentlySubmitted = item.id === recentlySubmittedId;
                 const isVerified = item.verificationStatus === 'Terverifikasi';
                 const canEdit =
                   !isVerified &&
@@ -927,7 +996,14 @@ export const AssessmentTable: React.FC = () => {
                   currentUser.role === 'admin_verifikator';
 
                 return (
-                  <tr key={item.id} className="hover:bg-slate-50/75 transition-colors">
+                  <tr
+                    key={item.id}
+                    className={
+                      isRecentlySubmitted
+                        ? 'bg-emerald-50/90 border-2 border-emerald-500 shadow-sm transition-colors'
+                        : 'hover:bg-slate-50/75 transition-colors'
+                    }
+                  >
                     {/* Row No */}
                     <td className="py-3 px-3 text-center text-slate-400 font-medium">
                       {rowNo}
@@ -937,6 +1013,11 @@ export const AssessmentTable: React.FC = () => {
                     <td className="py-3 px-3">
                       <div className="flex items-center gap-1.5 flex-wrap">
                         <span className="font-bold text-slate-900">{item.buildingName}</span>
+                        {isRecentlySubmitted && (
+                          <span className="inline-flex items-center gap-1 px-2 py-0.5 rounded-full bg-emerald-600 text-white text-[10px] font-extrabold shadow-xs animate-pulse">
+                            <Check className="w-3 h-3" /> Baru Masuk
+                          </span>
+                        )}
                         {duplicateMap.has(item.id) && (
                           <button
                             type="button"
@@ -1636,6 +1717,15 @@ export const AssessmentTable: React.FC = () => {
         }}
         onIgnorePair={handleIgnoreDuplicatePair}
         onClearIgnored={handleClearIgnoredDuplicates}
+      />
+
+      {/* MODAL CETAK BUKU PORTOFOLIO REKAPITULASI RESMI A4 */}
+      <PortfolioRecapModal
+        isOpen={showPortfolioModal}
+        onClose={() => setShowPortfolioModal(false)}
+        assessments={assessments}
+        kecamatans={kecamatans}
+        desas={desas}
       />
     </div>
   );

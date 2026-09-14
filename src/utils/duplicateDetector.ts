@@ -305,10 +305,8 @@ export function reconcileAndMergeAssessments(
         googleDriveFolderUrl: incomingItem.googleDriveFolderUrl || baseItem.googleDriveFolderUrl,
       };
     } else {
-      // Preserve user-created local drafts (ast_xxx) that have not yet been written to Google Sheet
-      if (!baseItem.id.startsWith('sheet_')) {
-        merged.push(baseItem);
-      }
+      // Preserve all base records unconditionally (both local drafts and sheet items)
+      merged.push(baseItem);
     }
   });
 

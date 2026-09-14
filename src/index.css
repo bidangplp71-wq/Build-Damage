@@ -25,9 +25,11 @@
     print-color-adjust: exact !important;
   }
 
-  /* When printing from PUPR modal, hide the entire main web application (#root) completely */
+  /* When printing from PUPR modal or Portfolio modal, hide the entire main web application (#root) completely */
   body.pupr-modal-active #root,
-  body:has(#pupr-print-portal) #root {
+  body.portfolio-modal-active #root,
+  body:has(#pupr-print-portal) #root,
+  body:has(#portfolio-print-portal) #root {
     display: none !important;
     visibility: hidden !important;
     height: 0 !important;
@@ -35,8 +37,9 @@
     overflow: hidden !important;
   }
 
-  /* Show ONLY the PUPR print portal */
-  #pupr-print-portal {
+  /* Show ONLY the PUPR print portal or Portfolio print portal */
+  #pupr-print-portal,
+  #portfolio-print-portal {
     display: block !important;
     position: static !important;
     width: 100% !important;
@@ -49,7 +52,8 @@
     border: none !important;
   }
 
-  #pupr-print-portal .modal-backdrop-wrap {
+  #pupr-print-portal .modal-backdrop-wrap,
+  #portfolio-print-portal .modal-backdrop-wrap {
     position: static !important;
     inset: auto !important;
     background: transparent !important;
@@ -62,7 +66,8 @@
     backdrop-filter: none !important;
   }
 
-  #pupr-print-portal .modal-card-sheet {
+  #pupr-print-portal .modal-card-sheet,
+  #portfolio-print-portal .modal-card-sheet {
     position: static !important;
     width: 100% !important;
     max-width: 100% !important;
@@ -78,13 +83,34 @@
     background: #ffffff !important;
   }
 
-  #pupr-print-portal .printable-content-area {
+  #pupr-print-portal .printable-content-area,
+  #portfolio-print-portal .printable-content-area {
     padding: 0 !important;
     margin: 0 !important;
     overflow: visible !important;
     height: auto !important;
     max-height: none !important;
     display: block !important;
+  }
+
+  /* Portfolio page breaks and formatting */
+  .portfolio-page {
+    break-after: page !important;
+    page-break-after: always !important;
+    min-height: 270mm !important;
+    position: relative !important;
+    padding: 12mm 10mm 15mm 10mm !important;
+    box-sizing: border-box !important;
+  }
+
+  .portfolio-page:last-child {
+    break-after: auto !important;
+    page-break-after: auto !important;
+  }
+
+  .portfolio-card-item {
+    break-inside: avoid !important;
+    page-break-inside: avoid !important;
   }
 
   /* Control buttons & non-printable elements */

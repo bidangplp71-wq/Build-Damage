@@ -1054,13 +1054,24 @@ export const AssessmentForm: React.FC = () => {
       return;
     }
 
-    if (!kecamatanId || !desaId) {
+    // Fallback/auto-resolve Kecamatan & Desa if empty so user is NEVER blocked on first input
+    const finalKecId = kecamatanId || kecamatans[0]?.id || '';
+    const finalDesaId =
+      desaId ||
+      availableDesas[0]?.id ||
+      desas.find((d) => d.kecamatanId === finalKecId)?.id ||
+      '';
+
+    if (!finalKecId || !finalDesaId) {
       showToast('Kecamatan dan Desa wajib dipilih!', 'error');
       return;
     }
 
-    const currentKec = kecamatans.find((k) => k.id === kecamatanId);
-    const currentDesa = desas.find((d) => d.id === desaId);
+    if (!kecamatanId) setKecamatanId(finalKecId);
+    if (!desaId) setDesaId(finalDesaId);
+
+    const currentKec = kecamatans.find((k) => k.id === finalKecId);
+    const currentDesa = desas.find((d) => d.id === finalDesaId);
 
     const finalOwner = buildingCategory === 'Hunian Masyarakat'
       ? (namaPemilikRumah.trim() || ownerAgency.trim() || 'Pemilik Rumah')
@@ -1189,6 +1200,7 @@ export const AssessmentForm: React.FC = () => {
       }
 
       try {
+        sessionStorage.setItem('sipandu_just_submitted_id', payload.id);
         sessionStorage.removeItem('sipandu_form_draft_photos');
       } catch {}
       setShowDuplicateConfirmModal(false);

@@ -2052,17 +2052,24 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
     queueAssessmentForSync(assessmentToSave, 'insert');
 
     // 5. Send to Express server for zero-quota persistence and multi-client accessibility
-    fetch('/api/assessments', {
-      method: 'POST',
-      headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify(assessmentToSave),
-    })
-      .then((res) => {
+    try {
+      const serverPromise = fetch('/api/assessments', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify(assessmentToSave),
+      }).then((res) => {
         if (res.ok) {
           removeAssessmentFromSyncQueue(assessmentToSave.id);
         }
-      })
-      .catch((e) => console.warn('Server assessment save notice (queued in outbox):', e));
+      });
+      // Await server write with 1.5s timeout so it is written before navigation without blocking offline users
+      await Promise.race([
+        serverPromise,
+        new Promise((resolve) => setTimeout(resolve, 1500)),
+      ]);
+    } catch (e) {
+      console.warn('Server assessment save notice (queued in outbox):', e);
+    }
 
     // 6. Save to Firebase Firestore if connected
     if (db) {
