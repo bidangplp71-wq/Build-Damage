@@ -232,12 +232,16 @@ export const BufferQueueBanner: React.FC<BufferQueueBannerProps> = ({
                     : 'bg-emerald-500/20 text-emerald-300 border border-emerald-500/40'
                 }`}
               >
-                {pendingItems.length} Data Menunggu Transfer
+                {pendingItems.length > 0
+                  ? `${pendingItems.length} Data Menunggu Transfer`
+                  : '0 Antrean (Semua Data Masuk Langsung ke Sistem)'}
               </span>
             </div>
 
             <p className="text-xs text-slate-300 mt-1 max-w-2xl leading-relaxed">
-              Data baru yang diinput surveyor akan aman ditampung di sheet sementara terlebih dahulu, lalu secara otomatis dialihkan ke 7 sheet kecamatan setiap 1 jam untuk menjaga stabilitas sistem dan koneksi Google Sheets.
+              {pendingItems.length > 0
+                ? 'Terdapat data survei yang siap dialihkan ke 7 sheet kecamatan secara otomatis setiap 1 jam atau tekan "Proses Sekarang".'
+                : 'Data yang diinput surveyor langsung masuk dan tersimpan di database sistem utama (Tabel Penilaian). Tidak ada data yang tersangkut/tertahan.'}
             </p>
           </div>
         </div>
@@ -258,20 +262,29 @@ export const BufferQueueBanner: React.FC<BufferQueueBannerProps> = ({
             disabled={isProcessingManual || pendingItems.length === 0}
             className={`px-3.5 py-2 rounded-xl text-xs font-bold flex items-center gap-1.5 transition-all shadow-md active:scale-95 ${
               pendingItems.length > 0
-                ? 'bg-gradient-to-r from-blue-600 to-indigo-600 hover:from-blue-500 hover:to-indigo-500 text-white shadow-blue-500/20'
-                : 'bg-slate-800 text-slate-500 cursor-not-allowed border border-slate-700'
+                ? 'bg-gradient-to-r from-blue-600 to-indigo-600 hover:from-blue-500 hover:to-indigo-500 text-white shadow-blue-500/20 cursor-pointer'
+                : 'bg-slate-800/90 text-slate-400 cursor-default border border-slate-700'
             }`}
-            title="Klik untuk langsung memindahkan seluruh data antrean ke 7 sheet kecamatan tanpa menunggu 1 jam"
+            title={
+              pendingItems.length > 0
+                ? 'Klik untuk langsung memindahkan seluruh data antrean ke 7 sheet kecamatan tanpa menunggu 1 jam'
+                : 'Antrean kosong (0 entri). Seluruh data surveyor telah langsung masuk dan tersimpan di Tabel Penilaian sistem.'
+            }
           >
             {isProcessingManual ? (
               <>
                 <RefreshCw className="w-3.5 h-3.5 animate-spin" />
                 <span>Memindahkan...</span>
               </>
-            ) : (
+            ) : pendingItems.length > 0 ? (
               <>
                 <Zap className="w-3.5 h-3.5 text-amber-300" />
                 <span>Proses Sekarang</span>
+              </>
+            ) : (
+              <>
+                <CheckCircle2 className="w-3.5 h-3.5 text-emerald-400" />
+                <span>Antrean Kosong</span>
               </>
             )}
           </button>
