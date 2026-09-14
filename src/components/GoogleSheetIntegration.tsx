@@ -118,7 +118,7 @@ export const GoogleSheetIntegration: React.FC = () => {
         {
           id: 'profile_primary_2026',
           name: 'Spreadsheet Utama SIM-PKBG 2026 (Nagekeo)',
-          spreadsheetUrl: googleSheetConfig.spreadsheetUrl || 'https://docs.google.com/spreadsheets/d/12FNcCcnpg5QfyXeCTjM9pWfN8iSW9SpKVquRK8qZo2g/edit?usp=sharing',
+          spreadsheetUrl: googleSheetConfig.spreadsheetUrl || '',
           webhookUrl: googleSheetConfig.webhookUrl || 'https://script.google.com/macros/s/AKfycbyAbubspPnACJi6KTODHJbVeAIppC6e72c8nAo__g8uc67GmY-wc1lOZWZkbLtieds/exec',
           driveFolderId: googleSheetConfig.driveFolderId || 'https://drive.google.com/drive/folders/1xKF8SYvNY97A9-ga0B42z3jQTbcC_Tk5?usp=sharing',
           description: 'Spreadsheet dinas utama berisi 7 tab kecamatan dan log pengguna',

@@ -990,10 +990,10 @@ function getGoogleSheetConfig() {
           {
             id: 'profile_default_1',
             name: 'Buku 1: Utama / Kab. Nagekeo',
-            spreadsheetUrl: parsed.spreadsheetUrl || process.env.VITE_SPREADSHEET_URL || 'https://docs.google.com/spreadsheets/d/12FNcCcnpg5QfyXeCTjM9pWfN8iSW9SpKVquRK8qZo2g/edit?usp=sharing',
+            spreadsheetUrl: parsed.spreadsheetUrl || process.env.VITE_SPREADSHEET_URL || '',
             pageNumber: 1,
             capacityStatus: 'Normal',
-            estimatedRowCount: 45,
+            estimatedRowCount: 0,
             maxCapacityRows: 500,
             isDefault: true,
           }
@@ -1015,10 +1015,10 @@ function getGoogleSheetConfig() {
       {
         id: 'profile_default_1',
         name: 'Buku 1: Utama / Kab. Nagekeo',
-        spreadsheetUrl: process.env.VITE_SPREADSHEET_URL || 'https://docs.google.com/spreadsheets/d/12FNcCcnpg5QfyXeCTjM9pWfN8iSW9SpKVquRK8qZo2g/edit?usp=sharing',
+        spreadsheetUrl: process.env.VITE_SPREADSHEET_URL || '',
         pageNumber: 1,
         capacityStatus: 'Normal',
-        estimatedRowCount: 45,
+        estimatedRowCount: 0,
         maxCapacityRows: 500,
         isDefault: true,
       }

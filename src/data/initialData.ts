@@ -169,7 +169,7 @@ export const INITIAL_USERS: UserAccount[] = [
 export const INITIAL_ASSESSMENTS: BuildingAssessment[] = [];
 
 export const DEFAULT_GOOGLE_SHEET_CONFIG: GoogleSheetConfig = {
-  spreadsheetUrl: (typeof import.meta !== 'undefined' && (import.meta as any).env && (import.meta as any).env.VITE_SPREADSHEET_URL) || 'https://docs.google.com/spreadsheets/d/12FNcCcnpg5QfyXeCTjM9pWfN8iSW9SpKVquRK8qZo2g/edit?usp=sharing',
+  spreadsheetUrl: (typeof import.meta !== 'undefined' && (import.meta as any).env && (import.meta as any).env.VITE_SPREADSHEET_URL) || '',
   webhookUrl: (typeof import.meta !== 'undefined' && (import.meta as any).env && (import.meta as any).env.VITE_WEBHOOK_URL) || 'https://script.google.com/macros/s/AKfycbyAbubspPnACJi6KTODHJbVeAIppC6e72c8nAo__g8uc67GmY-wc1lOZWZkbLtieds/exec',
   driveFolderId: 'https://drive.google.com/drive/folders/1xKF8SYvNY97A9-ga0B42z3jQTbcC_Tk5?usp=sharing',
   savePhotosToDrive: true,
@@ -189,12 +189,12 @@ export const DEFAULT_GOOGLE_SHEET_CONFIG: GoogleSheetConfig = {
       id: 'profile_primary_2026',
       pageNumber: 1,
       name: 'Buku 1: Spreadsheet Utama SIM-PKBG 2026 (Nagekeo)',
-      spreadsheetUrl: 'https://docs.google.com/spreadsheets/d/12FNcCcnpg5QfyXeCTjM9pWfN8iSW9SpKVquRK8qZo2g/edit?usp=sharing',
+      spreadsheetUrl: '',
       webhookUrl: 'https://script.google.com/macros/s/AKfycbyAbubspPnACJi6KTODHJbVeAIppC6e72c8nAo__g8uc67GmY-wc1lOZWZkbLtieds/exec',
       driveFolderId: 'https://drive.google.com/drive/folders/1xKF8SYvNY97A9-ga0B42z3jQTbcC_Tk5?usp=sharing',
       description: 'Spreadsheet dinas utama berisi 7 tab kecamatan dan log pengguna',
       capacityStatus: 'normal',
-      estimatedRowCount: 207,
+      estimatedRowCount: 0,
       maxCapacityRows: 2000,
       createdAt: '2026-01-01T00:00:00Z',
       isDefault: true,
