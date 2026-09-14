@@ -18,6 +18,7 @@ import { UserActivityLogView } from './components/UserActivityLogView';
 import { HsbgnSettings } from './components/HsbgnSettings';
 import { SessionLockScreen } from './components/SessionLockScreen';
 import { SheetSyncProgressBanner } from './components/SheetSyncProgressBanner';
+import { BufferQueueBanner } from './components/BufferQueueBanner';
 import { CheckCircle2, AlertCircle, Info, X, ShieldAlert, BellRing, Building2, ArrowRight } from 'lucide-react';
 
 const MainLayout: React.FC = () => {
@@ -184,6 +185,9 @@ const MainLayout: React.FC = () => {
 
       {/* Real-time Progressive Sheet Sync Bar / Status */}
       <SheetSyncProgressBanner />
+
+      {/* Real-time Floating Buffer Staging Indicator */}
+      <BufferQueueBanner variant="floating" />
 
       {/* Global Toast Notification */}
       {toastMessage && (

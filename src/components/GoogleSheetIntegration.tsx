@@ -35,6 +35,7 @@ import {
   ShieldCheck,
   Info,
 } from 'lucide-react';
+import { BufferQueueBanner } from './BufferQueueBanner';
 
 export const GoogleSheetIntegration: React.FC = () => {
   const {
@@ -430,6 +431,9 @@ export const GoogleSheetIntegration: React.FC = () => {
           </button>
         </div>
       )}
+
+      {/* 1-Hour Buffer Staging Queue Status */}
+      <BufferQueueBanner variant="card" />
 
       {/* LIVE PROGRESS STATUS IN GOOGLE SHEET INTEGRATION TAB */}
       {sheetSyncProgress && sheetSyncProgress.isLoading && (

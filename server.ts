@@ -39,6 +39,89 @@ if (!fs.existsSync(DATA_DIR)) {
 }
 const ASSESSMENTS_FILE = path.join(DATA_DIR, 'assessments.json');
 const ASSESSMENTS_BACKUP_FILE = path.join(DATA_DIR, 'assessments.backup.json');
+const BUFFER_QUEUE_FILE = path.join(DATA_DIR, 'buffer_queue.json');
+
+// Helper to safely load buffer queue from server file
+function getStoredBufferQueue(): { items: any[]; lastProcessedTime?: string; nextRunTime?: string } {
+  try {
+    if (fs.existsSync(BUFFER_QUEUE_FILE)) {
+      const content = fs.readFileSync(BUFFER_QUEUE_FILE, 'utf8');
+      const parsed = JSON.parse(content);
+      if (parsed && Array.isArray(parsed.items)) return parsed;
+    }
+  } catch (err) {
+    console.error('Error reading buffer queue file:', err);
+  }
+  const defaultNextRun = new Date(Date.now() + 60 * 60 * 1000).toISOString();
+  return { items: [], lastProcessedTime: undefined, nextRunTime: defaultNextRun };
+}
+
+// Helper to safely write buffer queue to server file
+function saveStoredBufferQueue(data: { items: any[]; lastProcessedTime?: string; nextRunTime?: string }): boolean {
+  try {
+    const jsonStr = JSON.stringify(data, null, 2);
+    fs.writeFileSync(BUFFER_QUEUE_FILE, jsonStr, 'utf8');
+    return true;
+  } catch (err) {
+    console.error('Error writing buffer queue file:', err);
+    return false;
+  }
+}
+
+// Internal processor for transferring buffer queue items to primary assessments list
+function processBufferQueueInternal(): { processedCount: number; remainingCount: number; message: string } {
+  try {
+    const bufferData = getStoredBufferQueue();
+    const pendingItems = bufferData.items.filter((item: any) => item && (item.status === 'pending_transfer' || !item.status));
+    
+    if (pendingItems.length === 0) {
+      bufferData.nextRunTime = new Date(Date.now() + 60 * 60 * 1000).toISOString();
+      saveStoredBufferQueue(bufferData);
+      return { processedCount: 0, remainingCount: 0, message: 'Tidak ada data antrean baru untuk diproses.' };
+    }
+
+    const currentList = getStoredAssessments();
+    const fullAssessmentsToMerge = pendingItems.map((p: any) => p.assessmentData || p);
+    const merged = deduplicateServerAssessments([...fullAssessmentsToMerge, ...currentList]);
+    saveStoredAssessments(merged);
+
+    // Update buffer items status or prune transferred ones
+    const updatedItems = bufferData.items.map((item: any) => {
+      if (item && (item.status === 'pending_transfer' || !item.status)) {
+        return { ...item, status: 'transferred', transferredAt: new Date().toISOString() };
+      }
+      return item;
+    });
+
+    const nowIso = new Date().toISOString();
+    const nextRunIso = new Date(Date.now() + 60 * 60 * 1000).toISOString();
+    
+    // Retain only last 50 transferred items for audit history
+    const prunedItems = updatedItems.slice(-50);
+    saveStoredBufferQueue({
+      items: prunedItems,
+      lastProcessedTime: nowIso,
+      nextRunTime: nextRunIso,
+    });
+
+    console.log(`[BufferQueue] Successfully transferred ${pendingItems.length} items to primary assessment storage. Next scheduled run: ${nextRunIso}`);
+    return {
+      processedCount: pendingItems.length,
+      remainingCount: 0,
+      message: `Berhasil memindahkan ${pendingItems.length} data dari antrean sementara ke daftar penilaian utama.`,
+    };
+  } catch (err: any) {
+    console.error('[BufferQueue] Error processing buffer queue:', err);
+    return { processedCount: 0, remainingCount: 0, message: 'Gagal memproses antrean: ' + err.message };
+  }
+}
+
+// Start 1-Hour Scheduled Batch Sync on server
+setInterval(() => {
+  console.log('[BufferQueue] 1-Hour automated batch timer triggered.');
+  processBufferQueueInternal();
+}, 60 * 60 * 1000);
+
 
 // Helper to safely load assessments from server file
 function getStoredAssessments(): any[] {
@@ -216,6 +299,107 @@ app.delete('/api/assessments/:id', (req, res) => {
     });
   } catch (err: any) {
     return res.status(500).json({ success: false, message: 'Gagal menghapus penilaian: ' + err.message });
+  }
+});
+
+// ==========================================
+// BUFFER QUEUE API (1-Hour Staging & Batch Overhaul)
+// ==========================================
+
+// GET /api/buffer-queue - Fetch status of staging buffer queue
+app.get('/api/buffer-queue', (req, res) => {
+  try {
+    const bufferData = getStoredBufferQueue();
+    const pendingItems = bufferData.items.filter((item: any) => item && (item.status === 'pending_transfer' || !item.status));
+    return res.json({
+      success: true,
+      enabled: true,
+      pendingCount: pendingItems.length,
+      items: bufferData.items,
+      nextRunTime: bufferData.nextRunTime || new Date(Date.now() + 60 * 60 * 1000).toISOString(),
+      lastProcessedTime: bufferData.lastProcessedTime,
+    });
+  } catch (err: any) {
+    return res.status(500).json({ success: false, message: 'Gagal mengambil data antrean: ' + err.message });
+  }
+});
+
+// POST /api/buffer-queue/add - Push a new survey to the staging buffer
+app.post('/api/buffer-queue/add', (req, res) => {
+  try {
+    const { assessment, submittedBy } = req.body;
+    if (!assessment || !assessment.id) {
+      return res.status(400).json({ success: false, message: 'Data assessment valid diperlukan' });
+    }
+
+    const bufferData = getStoredBufferQueue();
+    const existingIdx = bufferData.items.findIndex((item: any) => item.id === assessment.id);
+    
+    const bufferItem = {
+      id: assessment.id,
+      registrationCode: assessment.code || assessment.registrationCode || '',
+      buildingName: assessment.buildingName || '',
+      kecamatanName: assessment.kecamatanName || assessment.kecamatan || '',
+      desaName: assessment.desaName || assessment.village || '',
+      submittedAt: new Date().toISOString(),
+      submittedBy: submittedBy || assessment.surveyorName || 'Surveyor',
+      damageClassification: assessment.damageClassification || '',
+      status: 'pending_transfer',
+      assessmentData: assessment,
+    };
+
+    if (existingIdx >= 0) {
+      bufferData.items[existingIdx] = bufferItem;
+    } else {
+      bufferData.items.push(bufferItem);
+    }
+
+    // Also persist immediately to assessments.json so client UI sees it in local survey list without lag
+    const currentList = getStoredAssessments();
+    const merged = deduplicateServerAssessments([assessment, ...currentList]);
+    saveStoredAssessments(merged);
+
+    saveStoredBufferQueue(bufferData);
+
+    const pendingCount = bufferData.items.filter((item: any) => item.status === 'pending_transfer').length;
+    return res.json({
+      success: true,
+      message: `Data gedung "${assessment.buildingName}" berhasil ditampung di antrean sementara (${pendingCount} antrean aktif).`,
+      pendingCount,
+      item: bufferItem,
+      nextRunTime: bufferData.nextRunTime,
+    });
+  } catch (err: any) {
+    return res.status(500).json({ success: false, message: 'Gagal menambahkan ke antrean: ' + err.message });
+  }
+});
+
+// POST /api/buffer-queue/process - Manually or automatically trigger transfer from buffer to primary list & sheets
+app.post('/api/buffer-queue/process', (req, res) => {
+  try {
+    const result = processBufferQueueInternal();
+    return res.json({
+      success: true,
+      ...result,
+    });
+  } catch (err: any) {
+    return res.status(500).json({ success: false, message: 'Gagal memproses antrean: ' + err.message });
+  }
+});
+
+// POST /api/buffer-queue/clear - Clear processed items
+app.post('/api/buffer-queue/clear', (req, res) => {
+  try {
+    const bufferData = getStoredBufferQueue();
+    bufferData.items = bufferData.items.filter((item: any) => item && item.status === 'pending_transfer');
+    saveStoredBufferQueue(bufferData);
+    return res.json({
+      success: true,
+      message: 'Riwayat antrean yang telah diproses berhasil dibersihkan.',
+      remainingPending: bufferData.items.length,
+    });
+  } catch (err: any) {
+    return res.status(500).json({ success: false, message: 'Gagal membersihkan antrean: ' + err.message });
   }
 });
 

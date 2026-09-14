@@ -52,6 +52,7 @@ import { PhotoViewerModal } from './PhotoViewerModal';
 import { DuplicateAuditModal } from './DuplicateAuditModal';
 import { DataFulfillmentCard } from './DataFulfillmentCard';
 import { PortfolioRecapModal } from './PortfolioRecapModal';
+import { BufferQueueBanner } from './BufferQueueBanner';
 
 export const AssessmentTable: React.FC = () => {
   const {
@@ -416,6 +417,9 @@ export const AssessmentTable: React.FC = () => {
 
   return (
     <div className="space-y-4">
+      {/* 1-Hour Buffer Staging Queue Status Banner */}
+      <BufferQueueBanner variant="card" />
+
       {/* Surveyor / Admin Revision Notification Banner */}
       {needsRevisionCount > 0 && (
         <div className="bg-rose-50 border-2 border-rose-300 rounded-2xl p-4 flex flex-col sm:flex-row items-start sm:items-center justify-between gap-3 text-xs shadow-xs">

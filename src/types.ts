@@ -593,4 +593,27 @@ export interface SheetSyncProgress {
   statusMessage: string;
 }
 
+export interface BufferQueueItem {
+  id: string;
+  registrationCode: string;
+  buildingName: string;
+  kecamatanName: string;
+  desaName: string;
+  submittedAt: string;
+  submittedBy?: string;
+  damageClassification?: string;
+  status: 'pending_transfer' | 'transferred' | 'processing';
+}
+
+export interface BufferQueueStatus {
+  enabled: boolean;
+  pendingCount: number;
+  items: BufferQueueItem[];
+  nextRunTime: string;
+  lastProcessedTime?: string;
+  isProcessing: boolean;
+  statusMessage: string;
+}
+
+
 

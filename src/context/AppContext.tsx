@@ -2090,7 +2090,7 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
     // 4. Queue into Offline Outbox for guaranteed delivery regardless of network drops
     queueAssessmentForSync(assessmentToSave, 'insert');
 
-    // 5. Send to Express server for zero-quota persistence and multi-client accessibility
+    // 5. Send to Express server & Buffer Queue for zero-quota persistence, staging and multi-client accessibility
     try {
       const serverPromise = fetch('/api/assessments', {
         method: 'POST',
@@ -2101,6 +2101,17 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
           removeAssessmentFromSyncQueue(assessmentToSave.id);
         }
       });
+
+      // Also stage in buffer queue for 1-hour batch processing
+      fetch('/api/buffer-queue/add', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          assessment: assessmentToSave,
+          submittedBy: assessmentToSave.createdByName || currentUser.name,
+        }),
+      }).catch(() => {});
+
       // Await server write with 1.5s timeout so it is written before navigation without blocking offline users
       await Promise.race([
         serverPromise,
