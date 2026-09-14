@@ -615,5 +615,28 @@ export interface BufferQueueStatus {
   statusMessage: string;
 }
 
+export interface ActiveSessionInfo {
+  sessionId: string;
+  userId: string;
+  userName: string;
+  userEmail?: string;
+  role: string;
+  isPriority: boolean;
+  lastHeartbeat: number;
+  loginAt: string;
+  deviceInfo?: string;
+}
+
+export interface SessionQuotaStatus {
+  allowed: boolean;
+  isPriority: boolean;
+  activeSurveyors: number;
+  maxSurveyorQuota: number;
+  activePriorityUsers: number;
+  reason?: 'QUOTA_FULL' | 'ACTIVE' | 'PRIORITY_GRANTED';
+  message?: string;
+  waitingEstimatedMinutes?: number;
+}
+
 
 

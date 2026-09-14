@@ -19,6 +19,7 @@ import { HsbgnSettings } from './components/HsbgnSettings';
 import { SessionLockScreen } from './components/SessionLockScreen';
 import { SheetSyncProgressBanner } from './components/SheetSyncProgressBanner';
 import { BufferQueueBanner } from './components/BufferQueueBanner';
+import { SurveyorQuotaWaitingScreen } from './components/SurveyorQuotaWaitingScreen';
 import { CheckCircle2, AlertCircle, Info, X, ShieldAlert, BellRing, Building2, ArrowRight } from 'lucide-react';
 
 const MainLayout: React.FC = () => {
@@ -34,6 +35,10 @@ const MainLayout: React.FC = () => {
     latestIncomingData,
     clearLatestIncomingData,
     assessments,
+    isSurveyorQuotaBlocked,
+    sessionQuotaStatus,
+    checkSessionSlot,
+    logout,
   } = useApp();
 
   const [mobileNavOpen, setMobileNavOpen] = useState(false);
@@ -59,6 +64,19 @@ const MainLayout: React.FC = () => {
 
   if (!isLoggedIn) {
     return <LoginScreen />;
+  }
+
+  // Surveyor Quota Waiting Screen when 15 surveyor slots are occupied
+  if (isSurveyorQuotaBlocked && sessionQuotaStatus) {
+    return (
+      <SurveyorQuotaWaitingScreen
+        quotaStatus={sessionQuotaStatus}
+        onRetry={async () => {
+          await checkSessionSlot();
+        }}
+        onLogout={logout}
+      />
+    );
   }
 
   return (

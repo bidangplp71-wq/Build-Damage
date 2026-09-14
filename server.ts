@@ -40,6 +40,44 @@ if (!fs.existsSync(DATA_DIR)) {
 const ASSESSMENTS_FILE = path.join(DATA_DIR, 'assessments.json');
 const ASSESSMENTS_BACKUP_FILE = path.join(DATA_DIR, 'assessments.backup.json');
 const BUFFER_QUEUE_FILE = path.join(DATA_DIR, 'buffer_queue.json');
+const ACTIVE_SESSIONS_FILE = path.join(DATA_DIR, 'active_sessions.json');
+
+const MAX_CONCURRENT_SURVEYORS = 15;
+const SESSION_TIMEOUT_MS = 3 * 60 * 1000; // 3 minutes timeout without heartbeat
+
+function isPriorityRole(role: string): boolean {
+  if (!role) return false;
+  const r = role.toLowerCase();
+  return r === 'super_admin' || r === 'admin' || r === 'admin_verifikator';
+}
+
+function getStoredActiveSessions(): any[] {
+  try {
+    if (fs.existsSync(ACTIVE_SESSIONS_FILE)) {
+      const content = fs.readFileSync(ACTIVE_SESSIONS_FILE, 'utf8');
+      const parsed = JSON.parse(content);
+      if (Array.isArray(parsed)) return parsed;
+    }
+  } catch (err) {
+    console.error('Error reading active sessions file:', err);
+  }
+  return [];
+}
+
+function saveStoredActiveSessions(sessions: any[]): boolean {
+  try {
+    fs.writeFileSync(ACTIVE_SESSIONS_FILE, JSON.stringify(sessions, null, 2), 'utf8');
+    return true;
+  } catch (err) {
+    console.error('Error writing active sessions file:', err);
+    return false;
+  }
+}
+
+function pruneStaleSessions(sessions: any[]): any[] {
+  const now = Date.now();
+  return sessions.filter((s) => s && s.sessionId && (now - (s.lastHeartbeat || 0) < SESSION_TIMEOUT_MS));
+}
 
 // Helper to safely load buffer queue from server file
 function getStoredBufferQueue(): { items: any[]; lastProcessedTime?: string; nextRunTime?: string } {
@@ -400,6 +438,243 @@ app.post('/api/buffer-queue/clear', (req, res) => {
     });
   } catch (err: any) {
     return res.status(500).json({ success: false, message: 'Gagal membersihkan antrean: ' + err.message });
+  }
+});
+
+// ==========================================
+// CONCURRENT SURVEYOR QUOTA & SESSION MANAGER
+// ==========================================
+
+// GET /api/sessions/status - Get current active sessions summary
+app.get('/api/sessions/status', (req, res) => {
+  try {
+    const sessions = pruneStaleSessions(getStoredActiveSessions());
+    saveStoredActiveSessions(sessions);
+
+    const activeSurveyors = sessions.filter((s) => !s.isPriority).length;
+    const activePriorityUsers = sessions.filter((s) => s.isPriority).length;
+
+    return res.json({
+      success: true,
+      activeSurveyors,
+      maxSurveyorQuota: MAX_CONCURRENT_SURVEYORS,
+      activePriorityUsers,
+      availableSurveyorSlots: Math.max(0, MAX_CONCURRENT_SURVEYORS - activeSurveyors),
+      activeSessions: sessions.map((s) => ({
+        sessionId: s.sessionId,
+        userName: s.userName,
+        role: s.role,
+        isPriority: s.isPriority,
+        loginAt: s.loginAt,
+        lastHeartbeatAgoSec: Math.round((Date.now() - s.lastHeartbeat) / 1000),
+      })),
+    });
+  } catch (err: any) {
+    return res.status(500).json({ success: false, message: 'Gagal memeriksa status sesi: ' + err.message });
+  }
+});
+
+// POST /api/sessions/acquire - Acquire an active session slot
+app.post('/api/sessions/acquire', (req, res) => {
+  try {
+    const { sessionId, userId, userName, userEmail, role, deviceInfo } = req.body;
+    if (!sessionId || !role) {
+      return res.status(400).json({ success: false, message: 'sessionId dan role diperlukan' });
+    }
+
+    let sessions = pruneStaleSessions(getStoredActiveSessions());
+    const isPriority = isPriorityRole(role);
+    const existingIdx = sessions.findIndex((s) => s.sessionId === sessionId);
+
+    if (isPriority) {
+      // Super Admin, Admin, and Verifikator ALWAYS have immediate guaranteed access
+      const sessionObj = {
+        sessionId,
+        userId: userId || 'priority_user',
+        userName: userName || 'Admin/Verifikator',
+        userEmail: userEmail || '',
+        role,
+        isPriority: true,
+        lastHeartbeat: Date.now(),
+        loginAt: existingIdx >= 0 ? sessions[existingIdx].loginAt : new Date().toISOString(),
+        deviceInfo: deviceInfo || '',
+      };
+
+      if (existingIdx >= 0) {
+        sessions[existingIdx] = sessionObj;
+      } else {
+        sessions.push(sessionObj);
+      }
+
+      saveStoredActiveSessions(sessions);
+      const activeSurveyors = sessions.filter((s) => !s.isPriority).length;
+      const activePriority = sessions.filter((s) => s.isPriority).length;
+
+      return res.json({
+        success: true,
+        allowed: true,
+        isPriority: true,
+        reason: 'PRIORITY_GRANTED',
+        activeSurveyors,
+        maxSurveyorQuota: MAX_CONCURRENT_SURVEYORS,
+        activePriorityUsers: activePriority,
+        message: 'Akses prioritas administrator/verifikator aktif tanpa batasan kuota antrean.',
+      });
+    }
+
+    // Surveyor Role (e.g. Kabnagekeo, admin_user, admin_publik)
+    const activeSurveyorsList = sessions.filter((s) => !s.isPriority);
+    const alreadyActive = activeSurveyorsList.some((s) => s.sessionId === sessionId);
+
+    if (alreadyActive) {
+      // Refresh heartbeat for currently holding session
+      if (existingIdx >= 0) {
+        sessions[existingIdx].lastHeartbeat = Date.now();
+        sessions[existingIdx].userName = userName || sessions[existingIdx].userName;
+        saveStoredActiveSessions(sessions);
+      }
+      return res.json({
+        success: true,
+        allowed: true,
+        isPriority: false,
+        reason: 'ACTIVE',
+        activeSurveyors: activeSurveyorsList.length,
+        maxSurveyorQuota: MAX_CONCURRENT_SURVEYORS,
+        message: 'Sesi surveyor Anda aktif.',
+      });
+    }
+
+    // New surveyor session requesting slot
+    if (activeSurveyorsList.length >= MAX_CONCURRENT_SURVEYORS) {
+      // Quota is full!
+      return res.json({
+        success: true,
+        allowed: false,
+        isPriority: false,
+        reason: 'QUOTA_FULL',
+        activeSurveyors: activeSurveyorsList.length,
+        maxSurveyorQuota: MAX_CONCURRENT_SURVEYORS,
+        waitingEstimatedMinutes: 2,
+        message: `Mohon Maaf, Kuota Akses Surveyor Sedang Penuh (Maksimal ${MAX_CONCURRENT_SURVEYORS} Surveyor Aktif Bersamaan). Sistem menjaga kestabilan Google Sheet. Mohon menunggu beberapa saat hingga rekan surveyor selesai input data atau logout.`,
+      });
+    }
+
+    // Grant new surveyor slot
+    const newSurveyorSession = {
+      sessionId,
+      userId: userId || 'surveyor',
+      userName: userName || 'Surveyor Lapangan',
+      userEmail: userEmail || '',
+      role,
+      isPriority: false,
+      lastHeartbeat: Date.now(),
+      loginAt: new Date().toISOString(),
+      deviceInfo: deviceInfo || '',
+    };
+
+    sessions.push(newSurveyorSession);
+    saveStoredActiveSessions(sessions);
+
+    return res.json({
+      success: true,
+      allowed: true,
+      isPriority: false,
+      reason: 'ACTIVE',
+      activeSurveyors: activeSurveyorsList.length + 1,
+      maxSurveyorQuota: MAX_CONCURRENT_SURVEYORS,
+      message: `Sesi surveyor berhasil diberikan (Slot ${activeSurveyorsList.length + 1} dari ${MAX_CONCURRENT_SURVEYORS}).`,
+    });
+  } catch (err: any) {
+    return res.status(500).json({ success: false, message: 'Gagal mengalokasikan sesi: ' + err.message });
+  }
+});
+
+// POST /api/sessions/heartbeat - Keep active session alive
+app.post('/api/sessions/heartbeat', (req, res) => {
+  try {
+    const { sessionId, role, userName } = req.body;
+    if (!sessionId) {
+      return res.status(400).json({ success: false, message: 'sessionId diperlukan' });
+    }
+
+    let sessions = pruneStaleSessions(getStoredActiveSessions());
+    const idx = sessions.findIndex((s) => s.sessionId === sessionId);
+
+    if (idx >= 0) {
+      sessions[idx].lastHeartbeat = Date.now();
+      if (userName) sessions[idx].userName = userName;
+      saveStoredActiveSessions(sessions);
+
+      const activeSurveyors = sessions.filter((s) => !s.isPriority).length;
+      return res.json({
+        success: true,
+        allowed: true,
+        isPriority: sessions[idx].isPriority,
+        activeSurveyors,
+        maxSurveyorQuota: MAX_CONCURRENT_SURVEYORS,
+      });
+    }
+
+    // If session was pruned due to inactivity, check if can re-acquire
+    const isPriority = isPriorityRole(role);
+    const activeSurveyors = sessions.filter((s) => !s.isPriority).length;
+
+    if (isPriority || activeSurveyors < MAX_CONCURRENT_SURVEYORS) {
+      const restored = {
+        sessionId,
+        userId: 'restored_user',
+        userName: userName || 'Pengguna',
+        role: role || 'admin_user',
+        isPriority,
+        lastHeartbeat: Date.now(),
+        loginAt: new Date().toISOString(),
+      };
+      sessions.push(restored);
+      saveStoredActiveSessions(sessions);
+      return res.json({
+        success: true,
+        allowed: true,
+        isPriority,
+        activeSurveyors: sessions.filter((s) => !s.isPriority).length,
+        maxSurveyorQuota: MAX_CONCURRENT_SURVEYORS,
+      });
+    }
+
+    return res.json({
+      success: true,
+      allowed: false,
+      reason: 'QUOTA_FULL',
+      activeSurveyors,
+      maxSurveyorQuota: MAX_CONCURRENT_SURVEYORS,
+      message: 'Sesi kadaluarsa dan kuota surveyor saat ini telah penuh.',
+    });
+  } catch (err: any) {
+    return res.status(500).json({ success: false, message: 'Gagal memperbarui heartbeat: ' + err.message });
+  }
+});
+
+// POST /api/sessions/release - Explicitly release active session (on logout or tab close)
+app.post('/api/sessions/release', (req, res) => {
+  try {
+    const { sessionId } = req.body;
+    if (!sessionId) {
+      return res.json({ success: true, message: 'Tidak ada sessionId untuk dilepas' });
+    }
+
+    let sessions = getStoredActiveSessions();
+    const prevCount = sessions.length;
+    sessions = sessions.filter((s) => s.sessionId !== sessionId);
+    saveStoredActiveSessions(sessions);
+
+    console.log(`[Sessions] Released session ${sessionId}. Active total: ${sessions.length} (was ${prevCount})`);
+    return res.json({
+      success: true,
+      message: 'Sesi berhasil dilepas',
+      activeSurveyors: sessions.filter((s) => !s.isPriority).length,
+      maxSurveyorQuota: MAX_CONCURRENT_SURVEYORS,
+    });
+  } catch (err: any) {
+    return res.status(500).json({ success: false, message: 'Gagal melepas sesi: ' + err.message });
   }
 });
 

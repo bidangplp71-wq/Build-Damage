@@ -15,6 +15,7 @@ import {
   CheckCheck,
   Trash2,
   Clock,
+  Users,
 } from 'lucide-react';
 
 interface HeaderProps {
@@ -40,6 +41,7 @@ export const Header: React.FC<HeaderProps> = ({ onToggleMobileNav }) => {
     markNotificationAsRead,
     markAllNotificationsAsRead,
     clearNotifications,
+    sessionQuotaStatus,
   } = useApp();
 
   const [roleDropdownOpen, setRoleDropdownOpen] = React.useState(false);
@@ -198,6 +200,29 @@ export const Header: React.FC<HeaderProps> = ({ onToggleMobileNav }) => {
               <Database className="w-3.5 h-3.5 text-slate-500" />
               <span className="hidden sm:inline">Atur Link Sheet</span>
             </button>
+          )}
+
+          {/* Concurrent Surveyor Quota Status Indicator */}
+          {sessionQuotaStatus && (
+            <div
+              id="header-surveyor-quota-badge"
+              className="hidden md:inline-flex items-center gap-1.5 px-2.5 py-1.5 rounded-lg bg-slate-100 border border-slate-200 text-slate-700 text-xs font-medium"
+              title={`Sistem proteksi kuota Google Sheet aktif: ${sessionQuotaStatus.activeSurveyors} dari ${sessionQuotaStatus.maxSurveyorQuota} slot surveyor sedang aktif.`}
+            >
+              <Users className="w-3.5 h-3.5 text-blue-600" />
+              <span className="hidden lg:inline text-slate-500">Surveyor:</span>
+              <span
+                className={`font-mono font-bold ${
+                  sessionQuotaStatus.activeSurveyors >= sessionQuotaStatus.maxSurveyorQuota
+                    ? 'text-rose-600'
+                    : sessionQuotaStatus.activeSurveyors > 10
+                    ? 'text-amber-600'
+                    : 'text-emerald-700'
+                }`}
+              >
+                {sessionQuotaStatus.activeSurveyors}/{sessionQuotaStatus.maxSurveyorQuota}
+              </span>
+            </div>
           )}
 
           {/* Incoming Data Notification Bell */}

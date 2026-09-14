@@ -18,6 +18,7 @@ import {
   ActivityActionType,
   DataNotification,
   SheetSyncProgress,
+  SessionQuotaStatus,
 } from '../types';
 import { playNotificationChime } from '../utils/sound';
 import {
@@ -195,6 +196,11 @@ interface AppContextType {
 
   // Real-time Sheet Sync Progress Bar & Details
   sheetSyncProgress: SheetSyncProgress;
+
+  // Concurrent Surveyor Quota & Session Slot Control
+  sessionQuotaStatus: SessionQuotaStatus | null;
+  isSurveyorQuotaBlocked: boolean;
+  checkSessionSlot: () => Promise<boolean>;
 }
 
 const AppContext = createContext<AppContextType | undefined>(undefined);
@@ -1899,7 +1905,131 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
     };
   };
 
+  // Concurrent Surveyor Quota & Session Slot Control
+  const [sessionQuotaStatus, setSessionQuotaStatus] = useState<SessionQuotaStatus | null>(null);
+  const [isSurveyorQuotaBlocked, setIsSurveyorQuotaBlocked] = useState(false);
+
+  // Unique Tab Session ID for multi-tab / multi-device active slot tracking
+  const getOrCreateTabSessionId = (): string => {
+    try {
+      let sId = sessionStorage.getItem('sipandu_active_session_id');
+      if (!sId) {
+        sId = `sess_${Date.now()}_${Math.random().toString(36).substring(2, 9)}`;
+        sessionStorage.setItem('sipandu_active_session_id', sId);
+      }
+      return sId;
+    } catch {
+      return `sess_${Date.now()}_${Math.random().toString(36).substring(2, 9)}`;
+    }
+  };
+
+  const checkSessionSlot = async (): Promise<boolean> => {
+    if (!currentUser) return true;
+    try {
+      const sessionId = getOrCreateTabSessionId();
+      const res = await fetch('/api/sessions/acquire', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          sessionId,
+          userId: currentUser.id,
+          userName: currentUser.name,
+          userEmail: currentUser.email,
+          role: currentUser.role,
+          deviceInfo: typeof navigator !== 'undefined' ? navigator.userAgent.slice(0, 100) : '',
+        }),
+      });
+
+      if (res.ok) {
+        const data = await res.json();
+        setSessionQuotaStatus(data);
+        if (data.allowed) {
+          setIsSurveyorQuotaBlocked(false);
+          return true;
+        } else {
+          setIsSurveyorQuotaBlocked(true);
+          return false;
+        }
+      }
+    } catch (err) {
+      console.warn('Session acquire check notice:', err);
+    }
+    return true;
+  };
+
+  // Acquire or refresh slot on login or user change
+  useEffect(() => {
+    if (isLoggedIn && currentUser) {
+      checkSessionSlot();
+    }
+  }, [isLoggedIn, currentUser?.id, currentUser?.role]);
+
+  // Periodic Heartbeat every 30 seconds
+  useEffect(() => {
+    if (!isLoggedIn || !currentUser) return;
+
+    const interval = setInterval(async () => {
+      try {
+        const sessionId = getOrCreateTabSessionId();
+        const res = await fetch('/api/sessions/heartbeat', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({
+            sessionId,
+            role: currentUser.role,
+            userName: currentUser.name,
+          }),
+        });
+
+        if (res.ok) {
+          const data = await res.json();
+          setSessionQuotaStatus(data);
+          if (data.allowed === false && !data.isPriority) {
+            setIsSurveyorQuotaBlocked(true);
+          } else if (data.allowed) {
+            setIsSurveyorQuotaBlocked(false);
+          }
+        }
+      } catch (err) {
+        // Non-blocking network drop tolerance
+      }
+    }, 30000);
+
+    // Release session on beforeunload
+    const handleBeforeUnload = () => {
+      try {
+        const sessionId = getOrCreateTabSessionId();
+        if (navigator.sendBeacon) {
+          navigator.sendBeacon('/api/sessions/release', JSON.stringify({ sessionId }));
+        } else {
+          fetch('/api/sessions/release', {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({ sessionId }),
+            keepalive: true,
+          }).catch(() => {});
+        }
+      } catch {}
+    };
+
+    window.addEventListener('beforeunload', handleBeforeUnload);
+
+    return () => {
+      clearInterval(interval);
+      window.removeEventListener('beforeunload', handleBeforeUnload);
+    };
+  }, [isLoggedIn, currentUser?.id, currentUser?.role]);
+
   const logout = () => {
+    try {
+      const sessionId = getOrCreateTabSessionId();
+      fetch('/api/sessions/release', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ sessionId }),
+      }).catch(() => {});
+    } catch {}
+
     logUserActivity(
       'LOGOUT',
       'Autentikasi',
@@ -1908,6 +2038,7 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
       `Peran: ${ROLE_LIMITS[currentUser.role]?.title || currentUser.role}`
     );
     setIsLoggedIn(false);
+    setIsSurveyorQuotaBlocked(false);
     showToast('Anda telah keluar dari sesi.', 'info');
   };
 
@@ -3435,6 +3566,10 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
         clearLatestIncomingData,
 
         sheetSyncProgress,
+
+        sessionQuotaStatus,
+        isSurveyorQuotaBlocked,
+        checkSessionSlot,
       }}
     >
       {children}
