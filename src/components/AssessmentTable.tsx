@@ -47,12 +47,14 @@ import {
   Sparkles,
   Lock,
   BookOpen,
+  ArrowRightLeft,
 } from 'lucide-react';
 import { PhotoViewerModal } from './PhotoViewerModal';
 import { DuplicateAuditModal } from './DuplicateAuditModal';
 import { DataFulfillmentCard } from './DataFulfillmentCard';
 import { PortfolioRecapModal } from './PortfolioRecapModal';
 import { BufferQueueBanner } from './BufferQueueBanner';
+import { SheetBookSelector } from './SheetBookSelector';
 
 export const AssessmentTable: React.FC = () => {
   const {
@@ -83,6 +85,8 @@ export const AssessmentTable: React.FC = () => {
   const [selectedDisaster, setSelectedDisaster] = useState('');
   const [selectedClassification, setSelectedClassification] = useState('');
   const [selectedVerification, setSelectedVerification] = useState('');
+  const [selectedProfileFilter, setSelectedProfileFilter] = useState<string>('ALL');
+  const [selectedRowIds, setSelectedRowIds] = useState<string[]>([]);
   const [isRefreshing, setIsRefreshing] = useState(false);
 
   // Portfolio Recap Modal State
@@ -280,6 +284,14 @@ export const AssessmentTable: React.FC = () => {
           return false;
         }
 
+        // Spreadsheet Profile Filter (Daftar Halaman Buku)
+        if (selectedProfileFilter && selectedProfileFilter !== 'ALL') {
+          const itemProfileId = item.targetProfileId || (googleSheetConfig.spreadsheetProfiles?.[0]?.id || 'profile_primary_2026');
+          if (itemProfileId !== selectedProfileFilter) {
+            return false;
+          }
+        }
+
         return true;
       })
       .sort((a, b) => {
@@ -297,6 +309,8 @@ export const AssessmentTable: React.FC = () => {
     selectedDisaster,
     selectedClassification,
     selectedVerification,
+    selectedProfileFilter,
+    googleSheetConfig.spreadsheetProfiles,
     showOnlyDuplicates,
     duplicateMap,
     kecamatans,
@@ -309,6 +323,23 @@ export const AssessmentTable: React.FC = () => {
     const start = (currentPage - 1) * pageSize;
     return filteredAssessments.slice(start, start + pageSize);
   }, [filteredAssessments, currentPage, pageSize]);
+
+  // Batch Selection for Multi-Sheet Move
+  const pageRowIds = useMemo(() => paginatedAssessments.map((a) => a.id), [paginatedAssessments]);
+  const isAllPageSelected = pageRowIds.length > 0 && pageRowIds.every((id) => selectedRowIds.includes(id));
+  const isSomePageSelected = pageRowIds.some((id) => selectedRowIds.includes(id)) && !isAllPageSelected;
+
+  const toggleSelectAllPage = () => {
+    if (isAllPageSelected) {
+      setSelectedRowIds((prev) => prev.filter((id) => !pageRowIds.includes(id)));
+    } else {
+      setSelectedRowIds((prev) => Array.from(new Set([...prev, ...pageRowIds])));
+    }
+  };
+
+  const toggleSelectRow = (id: string) => {
+    setSelectedRowIds((prev) => (prev.includes(id) ? prev.filter((x) => x !== id) : [...prev, id]));
+  };
 
   // Refresh Action - Pull fresh records from Google Sheet starting from row A2
   const handleRefresh = async () => {
@@ -552,6 +583,20 @@ export const AssessmentTable: React.FC = () => {
           </div>
         </div>
       )}
+
+      {/* MULTI-SPREADSHEET "DAFTAR HALAMAN BUKU" QUICK SWITCHER & CAPACITY MONITOR */}
+      <SheetBookSelector
+        variant="compact"
+        selectedViewProfileId={selectedProfileFilter}
+        onSelectViewProfile={(pId) => {
+          setSelectedProfileFilter(pId);
+          setCurrentPage(1);
+        }}
+        selectedAssessmentIds={selectedRowIds}
+        onMovedSuccess={() => {
+          setSelectedRowIds([]);
+        }}
+      />
 
       {/* PEMENUHAN TARGET DATA QUOTA PROGRESS (COMPACT) */}
       <DataFulfillmentCard compact />
@@ -1031,7 +1076,19 @@ export const AssessmentTable: React.FC = () => {
           <table className="w-full text-left text-xs border-collapse">
             <thead>
               <tr className="border-b border-slate-200 text-slate-600 font-bold bg-slate-50 uppercase tracking-wider">
-                <th className="py-3 px-3 text-center w-12">No</th>
+                <th className="py-3 px-2 text-center w-8">
+                  <input
+                    type="checkbox"
+                    checked={isAllPageSelected}
+                    ref={(el) => {
+                      if (el) el.indeterminate = isSomePageSelected;
+                    }}
+                    onChange={toggleSelectAllPage}
+                    className="rounded text-blue-600 focus:ring-blue-500 cursor-pointer"
+                    title="Pilih seluruh baris pada halaman ini untuk dipindahkan ke volume sheet lain"
+                  />
+                </th>
+                <th className="py-3 px-2 text-center w-10">No</th>
                 <th className="py-3 px-3">Kode & Nama Bangunan</th>
                 <th className="py-3 px-3">Bencana</th>
                 <th className="py-3 px-3">Wilayah (Kec/Desa)</th>
@@ -1047,6 +1104,7 @@ export const AssessmentTable: React.FC = () => {
               {paginatedAssessments.map((item, index) => {
                 const rowNo = (currentPage - 1) * pageSize + index + 1;
                 const isRecentlySubmitted = item.id === recentlySubmittedId;
+                const isSelectedRow = selectedRowIds.includes(item.id);
                 const isVerified = item.verificationStatus === 'Terverifikasi';
                 const canEdit =
                   !isVerified &&
@@ -1068,13 +1126,26 @@ export const AssessmentTable: React.FC = () => {
                   <tr
                     key={item.id}
                     className={
-                      isRecentlySubmitted
+                      isSelectedRow
+                        ? 'bg-blue-50/90 border-l-4 border-blue-600 transition-colors'
+                        : isRecentlySubmitted
                         ? 'bg-emerald-50/90 border-2 border-emerald-500 shadow-sm transition-colors'
                         : 'hover:bg-slate-50/75 transition-colors'
                     }
                   >
+                    {/* Selection Checkbox */}
+                    <td className="py-3 px-2 text-center" onClick={(e) => e.stopPropagation()}>
+                      <input
+                        type="checkbox"
+                        checked={isSelectedRow}
+                        onChange={() => toggleSelectRow(item.id)}
+                        className="rounded text-blue-600 focus:ring-blue-500 cursor-pointer"
+                        title="Pilih data untuk dipindahkan antar sheet"
+                      />
+                    </td>
+
                     {/* Row No */}
-                    <td className="py-3 px-3 text-center text-slate-400 font-medium">
+                    <td className="py-3 px-2 text-center text-slate-400 font-medium">
                       {rowNo}
                     </td>
 
@@ -1085,6 +1156,12 @@ export const AssessmentTable: React.FC = () => {
                         {isRecentlySubmitted && (
                           <span className="inline-flex items-center gap-1 px-2 py-0.5 rounded-full bg-emerald-600 text-white text-[10px] font-extrabold shadow-xs animate-pulse">
                             <Check className="w-3 h-3" /> Baru Masuk
+                          </span>
+                        )}
+                        {item.targetProfileName && (
+                          <span className="inline-flex items-center gap-0.5 px-1.5 py-0.2 rounded bg-indigo-50 text-indigo-800 border border-indigo-200 text-[9px] font-bold">
+                            <BookOpen className="w-2.5 h-2.5" />
+                            <span className="truncate max-w-[110px]">{item.targetProfileName}</span>
                           </span>
                         )}
                         {duplicateMap.has(item.id) && (
@@ -1415,6 +1492,19 @@ export const AssessmentTable: React.FC = () => {
                           </button>
                         )}
 
+                        {/* Quick Move to Sheet Button */}
+                        {(currentUser.role === 'super_admin' || currentUser.role === 'admin' || currentUser.role === 'admin_verifikator') && (
+                          <button
+                            onClick={() => {
+                              setSelectedRowIds([item.id]);
+                            }}
+                            title="Pindahkan data ini ke Halaman / Buku Sheet Lain"
+                            className="p-1.5 rounded-lg bg-indigo-50 hover:bg-indigo-100 text-indigo-700 border border-indigo-200 transition-colors cursor-pointer"
+                          >
+                            <ArrowRightLeft className="w-3.5 h-3.5" />
+                          </button>
+                        )}
+
                         {/* Delete Button (Super Admin & Admin Only) */}
                         {canDelete && (
                           <button
@@ -1435,7 +1525,7 @@ export const AssessmentTable: React.FC = () => {
 
               {paginatedAssessments.length === 0 && (
                 <tr>
-                  <td colSpan={10} className="py-12 text-center text-slate-400">
+                  <td colSpan={11} className="py-12 text-center text-slate-400">
                     <Building className="w-10 h-10 mx-auto text-slate-300 mb-2" />
                     <p className="font-semibold text-slate-600">Tidak ada data penilaian yang cocok</p>
                     <p className="text-xs text-slate-400 mt-0.5">

@@ -441,6 +441,8 @@ export interface BuildingAssessment {
   targetSheetName?: string; // Nama sheet tab tujuan spesifik di Google Sheet (misal: 'Kec. Aesesa')
   sourceSheet?: string; // Nama sheet tab asal dari mana data dibaca di Google Sheet
   sheetRowNumber?: number; // Nomor baris asal di tab Google Sheet
+  targetProfileId?: string; // ID profil spreadsheet tempat data ini dialokasikan / dipindahkan
+  targetProfileName?: string; // Nama profil / buku spreadsheet tujuan
 
   createdBy: string;
   createdByName: string;
@@ -468,13 +470,20 @@ export interface Desa {
   createdAt: string;
 }
 
+export type SheetCapacityStatus = 'normal' | 'warning' | 'full' | 'archived';
+
 export interface SpreadsheetProfile {
   id: string;
   name: string;
+  pageNumber?: number; // Nomor urut halaman buku (e.g. 1, 2, 3...)
   spreadsheetUrl: string;
   webhookUrl?: string;
   driveFolderId?: string;
   description?: string;
+  capacityStatus?: SheetCapacityStatus; // 'normal' | 'warning' | 'full' | 'archived'
+  capacityNote?: string;
+  estimatedRowCount?: number;
+  maxCapacityRows?: number; // default e.g. 1000 atau 2000
   createdAt: string;
   lastUsedAt?: string;
   isDefault?: boolean;

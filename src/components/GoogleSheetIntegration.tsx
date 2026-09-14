@@ -42,6 +42,7 @@ import {
   BookmarkCheck,
 } from 'lucide-react';
 import { BufferQueueBanner } from './BufferQueueBanner';
+import { SheetBookSelector } from './SheetBookSelector';
 import { SpreadsheetProfile } from '../types';
 
 export const GoogleSheetIntegration: React.FC = () => {
@@ -574,6 +575,9 @@ export const GoogleSheetIntegration: React.FC = () => {
           </button>
         </div>
       </div>
+
+      {/* MULTI-SPREADSHEET QUICK SWITCHER & CAPACITY MONITOR */}
+      <SheetBookSelector variant="compact" />
 
       {/* Admin Tab Switcher (Only Visible to Super Admin & Admin) */}
       {isAdmin && (

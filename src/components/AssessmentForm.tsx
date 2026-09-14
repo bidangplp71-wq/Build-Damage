@@ -278,6 +278,12 @@ export const AssessmentForm: React.FC = () => {
       detailedAddress: detailedAddress.trim(),
       targetSheetName: targetSheetName.trim() || `Kec. ${currentKec?.name || 'Aesesa'}`,
       sourceSheet: targetSheetName.trim() || `Kec. ${currentKec?.name || 'Aesesa'}`,
+      targetProfileId: isEditMode
+        ? (selectedAssessmentForEdit?.targetProfileId || googleSheetConfig.activeProfileId || googleSheetConfig.spreadsheetProfiles?.[0]?.id)
+        : (googleSheetConfig.activeProfileId || googleSheetConfig.spreadsheetProfiles?.[0]?.id),
+      targetProfileName: isEditMode
+        ? (selectedAssessmentForEdit?.targetProfileName || googleSheetConfig.spreadsheetProfiles?.find((p) => p.id === googleSheetConfig.activeProfileId)?.name)
+        : googleSheetConfig.spreadsheetProfiles?.find((p) => p.id === googleSheetConfig.activeProfileId)?.name,
       latitude,
       longitude,
 
@@ -1122,6 +1128,12 @@ export const AssessmentForm: React.FC = () => {
       detailedAddress: detailedAddress.trim(),
       targetSheetName: targetSheetName.trim() || `Kec. ${currentKec?.name || 'Aesesa'}`,
       sourceSheet: targetSheetName.trim() || `Kec. ${currentKec?.name || 'Aesesa'}`,
+      targetProfileId: isEditMode
+        ? (selectedAssessmentForEdit?.targetProfileId || googleSheetConfig.activeProfileId || googleSheetConfig.spreadsheetProfiles?.[0]?.id)
+        : (googleSheetConfig.activeProfileId || googleSheetConfig.spreadsheetProfiles?.[0]?.id),
+      targetProfileName: isEditMode
+        ? (selectedAssessmentForEdit?.targetProfileName || googleSheetConfig.spreadsheetProfiles?.find((p) => p.id === googleSheetConfig.activeProfileId)?.name)
+        : googleSheetConfig.spreadsheetProfiles?.find((p) => p.id === googleSheetConfig.activeProfileId)?.name,
       latitude,
       longitude,
 
