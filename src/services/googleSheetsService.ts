@@ -196,8 +196,6 @@ export function formatAssessmentForGoogleSheet(item: BuildingAssessment) {
     'Nama Kepala Dinas': item.headOfDepartment?.name || '-',
     'NIP Kepala Dinas': item.headOfDepartment?.nip || '-',
     'Tim Analisis': item.analysisTeam?.join(', ') || '-',
-    'Rincian Komponen JSON': JSON.stringify(item.components || []),
-    'Foto JSON': JSON.stringify(item.photos || []),
     'Terakhir Diperbarui': new Date(item.updatedAt).toLocaleString('id-ID'),
   };
 }
@@ -596,6 +594,16 @@ function doPost(e) {
         totalRows: consRes.totalConsolidatedRows,
         sourceSheets: consRes.sourceSheets,
         masterSheet: consRes.masterTabName
+      })).setMimeType(ContentService.MimeType.JSON);
+    }
+
+    // ACTION 1C: OPTIMIZE & TRIM EMPTY CELLS / ROWS ACROSS ALL SHEETS
+    if (action === 'optimize_sheet' || action === 'trim_empty_cells' || action === 'cleanup') {
+      var optResult = trimEmptyRowsAndCols(ss);
+      return ContentService.createTextOutput(JSON.stringify({
+        status: "success",
+        message: "Spreadsheet berhasil dioptimalkan! " + optResult.totalRowsTrimmed + " baris kosong berlebih dipangkas dari " + optResult.sheetsProcessed + " tab sheet.",
+        details: optResult
       })).setMimeType(ContentService.MimeType.JSON);
     }
     
@@ -1386,30 +1394,28 @@ function doGet(e) {
   }
 
   // Fetch all building assessments (Data Penilaian Kerusakan)
-  // Otomatis satukan data dari 7 sheet kecamatan ke tab master rekapitulasi sebelum membaca
+  // Membaca murni data riil (Data-Only Range) tanpa memodifikasi sheet selama GET
   if (action === 'fetch_assessments' || action === 'fetch_all' || action === 'consolidate' || action === 'data' || !action) {
     try {
-      // 1. Jalankan konsolidasi 7 sheet kecamatan ke REKAP_SEMUA_KECAMATAN
-      var consInfo = consolidateKecamatanSheetsToRekap(ss, "REKAP_SEMUA_KECAMATAN");
-      
-      // 2. Baca dari sheet rekapitulasi utama yang telah terkonsolidasi
+      var dataList = [];
+      var seenCodes = {};
+
       var targetSheet = ss.getSheetByName("REKAP_SEMUA_KECAMATAN") 
                      || ss.getSheetByName("Data_Penilaian_Kerusakan_PUPR")
                      || ss.getSheetByName("Data_Kerusakan_PUPR")
                      || ss.getSheetByName("Master_Rekapitulasi");
-      
-      var dataList = [];
-      var seenCodes = {};
 
       if (targetSheet && targetSheet.getLastRow() > 1) {
-        var rawData = targetSheet.getDataRange().getValues();
+        var lastR = targetSheet.getLastRow();
+        var lastC = targetSheet.getLastColumn();
+        var rawData = targetSheet.getRange(1, 1, lastR, lastC).getValues();
         var headers = rawData[0];
         for (var i = 1; i < rawData.length; i++) {
           var obj = {};
           var hasVal = false;
           for (var h = 0; h < headers.length; h++) {
             var val = rawData[i][h];
-            if (val !== undefined && val !== null && val !== "") hasVal = true;
+            if (val !== undefined && val !== null && String(val).trim() !== "") hasVal = true;
             obj[headers[h]] = rawData[i][h];
           }
           if (hasVal) {
@@ -1420,9 +1426,9 @@ function doGet(e) {
         }
       }
 
-      // Pastikan baris dari 7 sheet kecamatan yang belum terindeks ikut terbaca
+      // Pastikan baris dari 7 sheet kecamatan yang belum terindeks ikut terbaca secara data-only
       var allSheets = ss.getSheets();
-      var excludedNames = ["Daftar_Pengguna", "Log_Akses_Pengguna", "00_RINGKASAN_KECAMATAN", "REKAP_SEMUA_KECAMATAN"];
+      var excludedNames = ["Daftar_Pengguna", "Log_Akses_Pengguna", "00_RINGKASAN_KECAMATAN", "REKAP_SEMUA_KECAMATAN", "Data_Penilaian_Kerusakan_PUPR"];
       
       for (var sIdx = 0; sIdx < allSheets.length; sIdx++) {
         var curSheet = allSheets[sIdx];
@@ -1430,15 +1436,17 @@ function doGet(e) {
         if (excludedNames.indexOf(sName) !== -1) continue;
         if (targetSheet && sName === targetSheet.getName()) continue;
         
-        if (curSheet.getLastRow() > 1) {
-          var sData = curSheet.getDataRange().getValues();
+        var curLastR = curSheet.getLastRow();
+        var curLastC = curSheet.getLastColumn();
+        if (curLastR > 1 && curLastC > 0) {
+          var sData = curSheet.getRange(1, 1, curLastR, curLastC).getValues();
           var sHeaders = sData[0];
           for (var rIdx = 1; rIdx < sData.length; rIdx++) {
             var sObj = {};
             var sHasVal = false;
             for (var cIdx = 0; cIdx < sHeaders.length; cIdx++) {
               var sVal = sData[rIdx][cIdx];
-              if (sVal !== undefined && sVal !== null && sVal !== "") sHasVal = true;
+              if (sVal !== undefined && sVal !== null && String(sVal).trim() !== "") sHasVal = true;
               sObj[sHeaders[cIdx]] = sData[rIdx][cIdx];
             }
             if (sHasVal) {
@@ -1456,7 +1464,6 @@ function doGet(e) {
         status: "success",
         data: dataList,
         totalRows: dataList.length,
-        consolidatedSheets: consInfo ? consInfo.sourceSheets : [],
         masterSheet: targetSheet ? targetSheet.getName() : "REKAP_SEMUA_KECAMATAN"
       })).setMimeType(ContentService.MimeType.JSON);
     } catch(err) {
@@ -1590,6 +1597,48 @@ function consolidateKecamatanSheetsToRekap(ss, targetRekapName) {
 }
 
 /**
+ * Memangkas baris dan kolom kosong berlebih di seluruh tab sheet
+ * untuk mencegah spreadsheet overload / "The document cannot be modified"
+ */
+function trimEmptyRowsAndCols(ss) {
+  var sheets = ss.getSheets();
+  var totalRowsTrimmed = 0;
+  var totalColsTrimmed = 0;
+  var processed = 0;
+
+  for (var i = 0; i < sheets.length; i++) {
+    var sheet = sheets[i];
+    var maxRows = sheet.getMaxRows();
+    var lastRow = sheet.getLastRow();
+    var maxCols = sheet.getMaxColumns();
+    var lastCol = sheet.getLastColumn();
+
+    // Pertahankan minimal 5 baris cadangan di bawah data terakhir
+    var keepRows = Math.max(lastRow + 5, 2);
+    if (maxRows > keepRows) {
+      var rowsToDelete = maxRows - keepRows;
+      sheet.deleteRows(keepRows + 1, rowsToDelete);
+      totalRowsTrimmed += rowsToDelete;
+    }
+
+    // Pangkas kolom kosong berlebih di sebelah kanan data (pertahankan 25 kolom)
+    var keepCols = Math.max(lastCol + 2, 25);
+    if (maxCols > keepCols) {
+      var colsToDelete = maxCols - keepCols;
+      sheet.deleteColumns(keepCols + 1, colsToDelete);
+      totalColsTrimmed += colsToDelete;
+    }
+    processed++;
+  }
+
+  return {
+    sheetsProcessed: processed,
+    totalRowsTrimmed: totalRowsTrimmed,
+    totalColsTrimmed: totalColsTrimmed
+  };
+}
+
+/**
  * Menu Spreadsheet Otomatis pada Google Sheets:
  * Memudahkan pengguna mengklik satu kali untuk menyatukan seluruh 7 sheet kecamatan ke sheet rekap
  */
@@ -1598,8 +1647,19 @@ function onOpen() {
     SpreadsheetApp.getUi().createMenu('SIM-PKBG PUPR')
       .addItem('🔄 Satukan 7 Sheet Kecamatan ke Sheet Rekap (REKAP_SEMUA_KECAMATAN)', 'menuConsolidateSheets')
       .addItem('📊 Perbarui Ringkasan Statistik Kecamatan (00_RINGKASAN_KECAMATAN)', 'menuUpdateStats')
+      .addItem('⚡ Optimalkan & Pangkas Baris Kosong (Trim Blank Rows)', 'menuOptimizeSheet')
       .addToUi();
   } catch(e) {}
+}
+
+function menuOptimizeSheet() {
+  var ss = SpreadsheetApp.getActiveSpreadsheet();
+  var res = trimEmptyRowsAndCols(ss);
+  SpreadsheetApp.getUi().alert(
+    "Optimasi Selesai!",
+    "Berhasil memangkas " + res.totalRowsTrimmed + " baris kosong dari " + res.sheetsProcessed + " tab sheet. Dokumen Spreadsheet sekarang ringan dan responsif.",
+    SpreadsheetApp.getUi().ButtonSet.OK
+  );
 }
 
 function menuConsolidateSheets() {
@@ -1629,6 +1689,46 @@ function menuUpdateStats() {
   }
 }
 `;
+}
+
+/**
+ * Trigger remote Google Spreadsheet optimization / blank rows trim via Apps Script Webhook
+ */
+export async function optimizeGoogleSpreadsheet(
+  config: GoogleSheetConfig
+): Promise<{ success: boolean; message: string; details?: any }> {
+  if (!config.webhookUrl || !config.webhookUrl.startsWith('http')) {
+    return { success: false, message: 'URL Webhook Google Apps Script belum diisi.' };
+  }
+
+  const spreadsheetId = extractSpreadsheetId(config.spreadsheetUrl);
+
+  try {
+    const payload = {
+      action: 'optimize_sheet',
+      spreadsheetUrl: config.spreadsheetUrl,
+      spreadsheetId: spreadsheetId || undefined,
+      timestamp: new Date().toISOString(),
+    };
+
+    const resp = await fetch(config.webhookUrl, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify(payload),
+    });
+
+    if (resp.ok) {
+      const data = await resp.json();
+      if (data && data.status === 'success') {
+        return { success: true, message: data.message || 'Spreadsheet berhasil dioptimalkan!', details: data.details };
+      }
+      return { success: false, message: data?.message || 'Gagal memproses optimasi spreadsheet.' };
+    }
+
+    return { success: false, message: `Server mengembalikan status HTTP ${resp.status}` };
+  } catch (err: any) {
+    return { success: false, message: err.message || 'Koneksi ke Webhook Apps Script gagal' };
+  }
 }
 
 /**

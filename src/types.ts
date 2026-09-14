@@ -468,6 +468,18 @@ export interface Desa {
   createdAt: string;
 }
 
+export interface SpreadsheetProfile {
+  id: string;
+  name: string;
+  spreadsheetUrl: string;
+  webhookUrl?: string;
+  driveFolderId?: string;
+  description?: string;
+  createdAt: string;
+  lastUsedAt?: string;
+  isDefault?: boolean;
+}
+
 export interface GoogleSheetConfig {
   spreadsheetUrl?: string;
   webhookUrl: string;
@@ -483,6 +495,12 @@ export interface GoogleSheetConfig {
   lastTestedAt?: string;
   lastTestStatus?: 'success' | 'error' | 'idle';
   lastTestMessage?: string;
+  // Multi-Spreadsheet Profiles & Health Warnings
+  spreadsheetProfiles?: SpreadsheetProfile[];
+  activeProfileId?: string;
+  hasCapacityWarning?: boolean;
+  capacityWarningMessage?: string;
+  onlyReadPopulatedCells?: boolean; // Fitur hemat beban: Hanya baca sel yang terisi data
 }
 
 export interface FirebaseShieldConfig {

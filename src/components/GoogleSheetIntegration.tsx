@@ -10,6 +10,7 @@ import {
   testDrivePhotoUpload,
   syncAssessmentPhotosToDrive,
   groupAssessmentsByKecamatan,
+  optimizeGoogleSpreadsheet,
 } from '../services/googleSheetsService';
 import {
   FileSpreadsheet,
@@ -34,8 +35,14 @@ import {
   Settings,
   ShieldCheck,
   Info,
+  Plus,
+  Trash2,
+  Radio,
+  Zap,
+  BookmarkCheck,
 } from 'lucide-react';
 import { BufferQueueBanner } from './BufferQueueBanner';
+import { SpreadsheetProfile } from '../types';
 
 export const GoogleSheetIntegration: React.FC = () => {
   const {
@@ -54,7 +61,7 @@ export const GoogleSheetIntegration: React.FC = () => {
   } = useApp();
 
   const isAdmin = currentUser.role === 'super_admin' || currentUser.role === 'admin';
-  const [activeSubTab, setActiveSubTab] = useState<'view_sheet' | 'settings'>('view_sheet');
+  const [activeSubTab, setActiveSubTab] = useState<'view_sheet' | 'profiles' | 'settings'>('view_sheet');
   const [isSyncingFromSheet, setIsSyncingFromSheet] = useState(false);
 
   const [spreadsheetUrlInput, setSpreadsheetUrlInput] = useState(googleSheetConfig.spreadsheetUrl || '');
@@ -64,6 +71,18 @@ export const GoogleSheetIntegration: React.FC = () => {
   const [includeMasterSummary, setIncludeMasterSummary] = useState(googleSheetConfig.includeMasterSummarySheet !== false);
   const [savePhotosToDrive, setSavePhotosToDrive] = useState(googleSheetConfig.savePhotosToDrive !== false);
   const [driveFolderIdInput, setDriveFolderIdInput] = useState(googleSheetConfig.driveFolderId || '');
+
+  // Profiles management state
+  const [isAddingProfile, setIsAddingProfile] = useState(false);
+  const [newProfileName, setNewProfileName] = useState('');
+  const [newProfileUrl, setNewProfileUrl] = useState('');
+  const [newProfileWebhook, setNewProfileWebhook] = useState(googleSheetConfig.webhookUrl || '');
+  const [newProfileDriveFolder, setNewProfileDriveFolder] = useState(googleSheetConfig.driveFolderId || '');
+  const [newProfileDesc, setNewProfileDesc] = useState('');
+
+  // Sheet optimization state
+  const [isOptimizing, setIsOptimizing] = useState(false);
+  const [optimizationResult, setOptimizationResult] = useState<{ success: boolean; message: string; details?: any } | null>(null);
 
   // Keep form inputs synchronized when googleSheetConfig updates from realtime database
   useEffect(() => {
@@ -91,6 +110,160 @@ export const GoogleSheetIntegration: React.FC = () => {
   const groupedData = groupAssessmentsByKecamatan(assessments);
   const activeKecamatanCount = Object.keys(groupedData).length;
   const spreadsheetId = extractSpreadsheetId(googleSheetConfig.spreadsheetUrl);
+
+  const rawProfiles = googleSheetConfig.spreadsheetProfiles && googleSheetConfig.spreadsheetProfiles.length > 0
+    ? googleSheetConfig.spreadsheetProfiles
+    : [
+        {
+          id: 'profile_primary_2026',
+          name: 'Spreadsheet Utama SIM-PKBG 2026 (Nagekeo)',
+          spreadsheetUrl: googleSheetConfig.spreadsheetUrl || 'https://docs.google.com/spreadsheets/d/12FNcCcnpg5QfyXeCTjM9pWfN8iSW9SpKVquRK8qZo2g/edit?usp=sharing',
+          webhookUrl: googleSheetConfig.webhookUrl || 'https://script.google.com/macros/s/AKfycbyAbubspPnACJi6KTODHJbVeAIppC6e72c8nAo__g8uc67GmY-wc1lOZWZkbLtieds/exec',
+          driveFolderId: googleSheetConfig.driveFolderId || 'https://drive.google.com/drive/folders/1xKF8SYvNY97A9-ga0B42z3jQTbcC_Tk5?usp=sharing',
+          description: 'Spreadsheet dinas utama berisi 7 tab kecamatan dan log pengguna',
+          createdAt: '2026-01-01T00:00:00Z',
+          isDefault: true,
+        },
+        {
+          id: 'profile_backup_new',
+          name: 'Spreadsheet Cadangan / Tahap Lanjutan',
+          spreadsheetUrl: '',
+          webhookUrl: googleSheetConfig.webhookUrl || 'https://script.google.com/macros/s/AKfycbyAbubspPnACJi6KTODHJbVeAIppC6e72c8nAo__g8uc67GmY-wc1lOZWZkbLtieds/exec',
+          description: 'Slot spreadsheet baru untuk arsip periode berikutnya tanpa harus menghapus spreadsheet lama',
+          createdAt: '2026-09-14T00:00:00Z',
+          isDefault: false,
+        }
+      ];
+
+  const handleSelectProfile = (profile: SpreadsheetProfile) => {
+    if (!isAdmin) {
+      showToast('Hanya Super Admin atau Admin yang dapat mengganti Spreadsheet aktif.', 'error');
+      return;
+    }
+
+    if (!profile.spreadsheetUrl) {
+      showToast('Profil ini belum memiliki link Google Sheet. Klik edit atau atur link di form pengaturan.', 'error');
+      return;
+    }
+
+    updateGoogleSheetConfig({
+      spreadsheetUrl: profile.spreadsheetUrl,
+      webhookUrl: profile.webhookUrl || googleSheetConfig.webhookUrl,
+      driveFolderId: profile.driveFolderId || googleSheetConfig.driveFolderId,
+      activeProfileId: profile.id,
+      lastTestedAt: new Date().toISOString(),
+      lastTestStatus: 'success',
+      lastTestMessage: `Terkoneksi ke profil: ${profile.name}`,
+    });
+
+    setSpreadsheetUrlInput(profile.spreadsheetUrl);
+    if (profile.webhookUrl) setWebhookUrlInput(profile.webhookUrl);
+    if (profile.driveFolderId) setDriveFolderIdInput(profile.driveFolderId);
+
+    showToast(`Berhasil beralih ke Spreadsheet: "${profile.name}"!`, 'success');
+  };
+
+  const handleAddNewProfile = (e: React.FormEvent) => {
+    e.preventDefault();
+    if (!isAdmin) {
+      showToast('Hanya Super Admin dan Admin yang dapat mendaftarkan Spreadsheet baru.', 'error');
+      return;
+    }
+
+    if (!newProfileName.trim()) {
+      showToast('Nama profil spreadsheet wajib diisi.', 'error');
+      return;
+    }
+
+    if (!newProfileUrl.trim()) {
+      showToast('Link Google Spreadsheet wajib diisi.', 'error');
+      return;
+    }
+
+    const newProfile: SpreadsheetProfile = {
+      id: `profile_${Date.now()}_${Math.random().toString(36).substring(2, 6)}`,
+      name: newProfileName.trim(),
+      spreadsheetUrl: newProfileUrl.trim(),
+      webhookUrl: newProfileWebhook.trim() || googleSheetConfig.webhookUrl,
+      driveFolderId: newProfileDriveFolder.trim() || googleSheetConfig.driveFolderId,
+      description: newProfileDesc.trim() || 'Didaftarkan oleh Super Admin',
+      createdAt: new Date().toISOString(),
+      lastUsedAt: new Date().toISOString(),
+      isDefault: false,
+    };
+
+    const updatedProfiles = [...rawProfiles, newProfile];
+
+    updateGoogleSheetConfig({
+      spreadsheetProfiles: updatedProfiles,
+      activeProfileId: newProfile.id,
+      spreadsheetUrl: newProfile.spreadsheetUrl,
+      webhookUrl: newProfile.webhookUrl,
+      driveFolderId: newProfile.driveFolderId,
+    });
+
+    setSpreadsheetUrlInput(newProfile.spreadsheetUrl);
+    if (newProfile.webhookUrl) setWebhookUrlInput(newProfile.webhookUrl);
+    if (newProfile.driveFolderId) setDriveFolderIdInput(newProfile.driveFolderId);
+
+    // Reset Form
+    setNewProfileName('');
+    setNewProfileUrl('');
+    setNewProfileDesc('');
+    setIsAddingProfile(false);
+
+    showToast(`Spreadsheet baru "${newProfile.name}" berhasil didaftarkan dan langsung diaktifkan!`, 'success');
+  };
+
+  const handleDeleteProfile = (profileId: string) => {
+    if (!isAdmin) {
+      showToast('Hanya Super Admin dan Admin yang dapat menghapus profil spreadsheet.', 'error');
+      return;
+    }
+
+    if (rawProfiles.length <= 1) {
+      showToast('Minimal harus ada satu profil spreadsheet tersimpan.', 'error');
+      return;
+    }
+
+    const filtered = rawProfiles.filter((p) => p.id !== profileId);
+    const wasActive = googleSheetConfig.activeProfileId === profileId;
+    const nextActive = wasActive ? filtered[0] : null;
+
+    updateGoogleSheetConfig({
+      spreadsheetProfiles: filtered,
+      ...(nextActive ? {
+        activeProfileId: nextActive.id,
+        spreadsheetUrl: nextActive.spreadsheetUrl,
+        webhookUrl: nextActive.webhookUrl || googleSheetConfig.webhookUrl,
+        driveFolderId: nextActive.driveFolderId || googleSheetConfig.driveFolderId,
+      } : {}),
+    });
+
+    showToast('Profil spreadsheet berhasil dihapus dari daftar.', 'info');
+  };
+
+  const handleOptimizeSheet = async () => {
+    setIsOptimizing(true);
+    setOptimizationResult(null);
+    try {
+      const res = await optimizeGoogleSpreadsheet(googleSheetConfig);
+      setOptimizationResult(res);
+      if (res.success) {
+        showToast(res.message, 'success');
+      } else {
+        showToast(res.message, 'error');
+      }
+    } catch (err: any) {
+      setOptimizationResult({
+        success: false,
+        message: 'Gagal menjalankan optimasi: ' + (err.message || 'Koneksi terputus'),
+      });
+      showToast('Gagal memproses optimasi spreadsheet.', 'error');
+    } finally {
+      setIsOptimizing(false);
+    }
+  };
 
   const handleSaveConfig = (e: React.FormEvent) => {
     e.preventDefault();
@@ -404,11 +577,11 @@ export const GoogleSheetIntegration: React.FC = () => {
 
       {/* Admin Tab Switcher (Only Visible to Super Admin & Admin) */}
       {isAdmin && (
-        <div className="flex items-center gap-2 p-1.5 bg-slate-100 rounded-2xl w-fit border border-slate-200 shadow-2xs">
+        <div className="flex flex-wrap items-center gap-2 p-1.5 bg-slate-100 rounded-2xl w-fit border border-slate-200 shadow-2xs">
           <button
             type="button"
             onClick={() => setActiveSubTab('view_sheet')}
-            className={`flex items-center gap-2 px-4 py-2 text-xs font-bold rounded-xl transition-all cursor-pointer ${
+            className={`flex items-center gap-2 px-3.5 py-2 text-xs font-bold rounded-xl transition-all cursor-pointer ${
               activeSubTab === 'view_sheet'
                 ? 'bg-white text-emerald-900 shadow-xs'
                 : 'text-slate-600 hover:text-slate-900'
@@ -419,16 +592,81 @@ export const GoogleSheetIntegration: React.FC = () => {
           </button>
           <button
             type="button"
+            onClick={() => setActiveSubTab('profiles')}
+            className={`flex items-center gap-2 px-3.5 py-2 text-xs font-bold rounded-xl transition-all cursor-pointer ${
+              activeSubTab === 'profiles'
+                ? 'bg-white text-blue-900 shadow-xs'
+                : 'text-slate-600 hover:text-slate-900'
+            }`}
+          >
+            <BookmarkCheck className="w-4 h-4 text-blue-600" />
+            <span>Daftar Spreadsheet ({rawProfiles.length})</span>
+          </button>
+          <button
+            type="button"
             onClick={() => setActiveSubTab('settings')}
-            className={`flex items-center gap-2 px-4 py-2 text-xs font-bold rounded-xl transition-all cursor-pointer ${
+            className={`flex items-center gap-2 px-3.5 py-2 text-xs font-bold rounded-xl transition-all cursor-pointer ${
               activeSubTab === 'settings'
                 ? 'bg-white text-slate-900 shadow-xs'
                 : 'text-slate-600 hover:text-slate-900'
             }`}
           >
             <Settings className="w-4 h-4 text-slate-600" />
-            <span>Pengaturan Link & Webhook (Khusus Admin)</span>
+            <span>Pengaturan Link & Webhook</span>
           </button>
+        </div>
+      )}
+
+      {/* Sheet Optimization & Data-Only Mode Banner */}
+      <div className="p-4 rounded-2xl bg-gradient-to-r from-emerald-50 via-teal-50 to-cyan-50 border border-emerald-200 text-emerald-950 flex flex-col md:flex-row items-start md:items-center justify-between gap-3 shadow-2xs">
+        <div className="flex items-start gap-3">
+          <div className="p-2 rounded-xl bg-emerald-600 text-white font-bold shrink-0 mt-0.5 md:mt-0">
+            <Zap className="w-5 h-5" />
+          </div>
+          <div>
+            <div className="flex items-center gap-2">
+              <span className="text-xs font-black uppercase tracking-wider text-emerald-950">
+                Mode Efisiensi: Pembacaan Sel Berisi Data (Data-Only Range)
+              </span>
+              <span className="text-[10px] px-2 py-0.5 rounded-full bg-emerald-200/70 text-emerald-900 font-bold border border-emerald-300">
+                Anti-Penuh
+              </span>
+            </div>
+            <p className="text-xs text-emerald-900/90 mt-0.5 leading-relaxed">
+              Sistem hanya membaca sel yang memiliki data (A2 ke bawah) dan mengabaikan baris kosong. Jika spreadsheet mendekati batas ukuran, gunakan tombol pangkas di samping untuk membersihkan baris/kolom kosong secara instan.
+            </p>
+          </div>
+        </div>
+        <div className="flex items-center gap-2 shrink-0 self-end md:self-auto">
+          {isAdmin && (
+            <button
+              type="button"
+              onClick={handleOptimizeSheet}
+              disabled={isOptimizing}
+              className="inline-flex items-center gap-1.5 px-3.5 py-2 bg-emerald-700 hover:bg-emerald-800 text-white rounded-xl text-xs font-bold transition-all shadow-xs disabled:opacity-50 cursor-pointer"
+              title="Pangkas baris dan kolom kosong di seluruh tab Google Sheet agar ringan"
+            >
+              <Zap className={`w-3.5 h-3.5 ${isOptimizing ? 'animate-spin' : ''}`} />
+              <span>{isOptimizing ? 'Memangkas Sel...' : '⚡ Pangkas Baris Kosong'}</span>
+            </button>
+          )}
+        </div>
+      </div>
+
+      {optimizationResult && (
+        <div className={`p-4 rounded-2xl border text-xs ${optimizationResult.success ? 'bg-emerald-50 border-emerald-300 text-emerald-950' : 'bg-rose-50 border-rose-300 text-rose-950'} animate-in fade-in`}>
+          <div className="flex items-start gap-2.5">
+            {optimizationResult.success ? <CheckCircle2 className="w-4 h-4 text-emerald-600 shrink-0 mt-0.5" /> : <AlertTriangle className="w-4 h-4 text-rose-600 shrink-0 mt-0.5" />}
+            <div>
+              <span className="font-bold block">{optimizationResult.message}</span>
+              {optimizationResult.details && (
+                <div className="mt-1 text-[11px] text-emerald-800 space-y-0.5">
+                  <div>Sheet yang dioptimasi: <strong>{optimizationResult.details.sheetCount || 0} tab</strong></div>
+                  <div>Baris kosong dipangkas: <strong>{optimizationResult.details.trimmedRows || 0} baris</strong></div>
+                </div>
+              )}
+            </div>
+          </div>
         </div>
       )}
 
@@ -684,6 +922,229 @@ export const GoogleSheetIntegration: React.FC = () => {
               )}
             </div>
           )}
+        </div>
+      )}
+
+      {/* PROFILES TAB: Spreadsheet Profiles & Quick Switcher for Super Admin */}
+      {isAdmin && activeSubTab === 'profiles' && (
+        <div className="space-y-6 animate-in fade-in duration-200">
+          {/* Header & Quick Action */}
+          <div className="bg-white p-6 rounded-2xl border border-slate-200 shadow-xs space-y-4">
+            <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-3 border-b border-slate-100 pb-4">
+              <div>
+                <h3 className="text-base font-bold text-slate-950 flex items-center gap-2">
+                  <BookmarkCheck className="w-5 h-5 text-blue-600" />
+                  <span>Daftar Spreadsheet & Quick Switcher</span>
+                </h3>
+                <p className="text-xs text-slate-500 mt-1">
+                  Kelola dan beralih antar dokumen Google Spreadsheet dengan 1-klik tanpa perlu bolak-balik ke Google Drive.
+                </p>
+              </div>
+              <button
+                type="button"
+                onClick={() => setIsAddingProfile((prev) => !prev)}
+                className="inline-flex items-center gap-1.5 px-4 py-2 bg-blue-600 hover:bg-blue-700 text-white rounded-xl text-xs font-bold transition-all shadow-xs shrink-0 cursor-pointer"
+              >
+                <Plus className="w-4 h-4" />
+                <span>{isAddingProfile ? 'Tutup Formulir' : 'Tambah Spreadsheet Baru'}</span>
+              </button>
+            </div>
+
+            {/* Add New Profile Form */}
+            {isAddingProfile && (
+              <form onSubmit={handleAddNewProfile} className="p-4 rounded-xl bg-blue-50/60 border border-blue-200 space-y-4 text-xs">
+                <div className="font-bold text-blue-950 text-sm flex items-center gap-2">
+                  <Plus className="w-4 h-4 text-blue-600" />
+                  <span>Daftarkan Dokumen Google Sheet Baru</span>
+                </div>
+
+                <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+                  <div>
+                    <label className="block font-semibold text-slate-800 mb-1">
+                      Nama Profil Spreadsheet <span className="text-rose-500">*</span>
+                    </label>
+                    <input
+                      type="text"
+                      value={newProfileName}
+                      onChange={(e) => setNewProfileName(e.target.value)}
+                      placeholder="Contoh: Sheet Bencana Tahap 2 (2026)"
+                      required
+                      className="w-full px-3 py-2 bg-white rounded-xl border border-slate-300 font-medium text-slate-900 focus:outline-hidden focus:ring-2 focus:ring-blue-500"
+                    />
+                  </div>
+
+                  <div>
+                    <label className="block font-semibold text-slate-800 mb-1">
+                      Link Dokumen Google Sheet <span className="text-rose-500">*</span>
+                    </label>
+                    <input
+                      type="url"
+                      value={newProfileUrl}
+                      onChange={(e) => setNewProfileUrl(e.target.value)}
+                      placeholder="https://docs.google.com/spreadsheets/d/.../edit"
+                      required
+                      className="w-full px-3 py-2 bg-white rounded-xl border border-slate-300 font-mono text-slate-900 focus:outline-hidden focus:ring-2 focus:ring-blue-500"
+                    />
+                  </div>
+
+                  <div>
+                    <label className="block font-semibold text-slate-800 mb-1">
+                      URL Webhook Apps Script (Opsional - Default Webhook Aktif)
+                    </label>
+                    <input
+                      type="url"
+                      value={newProfileWebhook}
+                      onChange={(e) => setNewProfileWebhook(e.target.value)}
+                      placeholder={googleSheetConfig.webhookUrl || 'https://script.google.com/macros/s/.../exec'}
+                      className="w-full px-3 py-2 bg-white rounded-xl border border-slate-300 font-mono text-slate-900 focus:outline-hidden focus:ring-2 focus:ring-blue-500"
+                    />
+                  </div>
+
+                  <div>
+                    <label className="block font-semibold text-slate-800 mb-1">
+                      Link / ID Folder Google Drive Foto (Opsional)
+                    </label>
+                    <input
+                      type="text"
+                      value={newProfileDriveFolder}
+                      onChange={(e) => setNewProfileDriveFolder(e.target.value)}
+                      placeholder={googleSheetConfig.driveFolderId || 'https://drive.google.com/drive/folders/...'}
+                      className="w-full px-3 py-2 bg-white rounded-xl border border-slate-300 font-mono text-slate-900 focus:outline-hidden focus:ring-2 focus:ring-blue-500"
+                    />
+                  </div>
+                </div>
+
+                <div>
+                  <label className="block font-semibold text-slate-800 mb-1">
+                    Catatan / Deskripsi Spreadsheet
+                  </label>
+                  <input
+                    type="text"
+                    value={newProfileDesc}
+                    onChange={(e) => setNewProfileDesc(e.target.value)}
+                    placeholder="Contoh: Digunakan untuk pendataan fisik gedung sekolah dan fasilitas umum"
+                    className="w-full px-3 py-2 bg-white rounded-xl border border-slate-300 text-slate-900 focus:outline-hidden focus:ring-2 focus:ring-blue-500"
+                  />
+                </div>
+
+                <div className="flex items-center justify-end gap-2 pt-2 border-t border-blue-200">
+                  <button
+                    type="button"
+                    onClick={() => setIsAddingProfile(false)}
+                    className="px-3.5 py-2 bg-white border border-slate-300 text-slate-700 rounded-xl font-semibold hover:bg-slate-50 cursor-pointer"
+                  >
+                    Batal
+                  </button>
+                  <button
+                    type="submit"
+                    className="px-4 py-2 bg-blue-600 hover:bg-blue-700 text-white rounded-xl font-bold shadow-xs cursor-pointer"
+                  >
+                    Simpan & Aktifkan Spreadsheet
+                  </button>
+                </div>
+              </form>
+            )}
+
+            {/* List of Registered Profiles */}
+            <div className="grid grid-cols-1 md:grid-cols-2 gap-4 pt-2">
+              {rawProfiles.map((profile) => {
+                const isActive = (googleSheetConfig.activeProfileId === profile.id) || 
+                  (!googleSheetConfig.activeProfileId && profile.isDefault) ||
+                  (googleSheetConfig.spreadsheetUrl && profile.spreadsheetUrl && googleSheetConfig.spreadsheetUrl.includes(extractSpreadsheetId(profile.spreadsheetUrl)));
+
+                return (
+                  <div
+                    key={profile.id}
+                    className={`p-5 rounded-2xl border transition-all ${
+                      isActive
+                        ? 'bg-gradient-to-br from-emerald-50/90 to-teal-50/70 border-emerald-300 shadow-sm ring-2 ring-emerald-500/20'
+                        : 'bg-white border-slate-200 hover:border-slate-300 shadow-2xs'
+                    }`}
+                  >
+                    <div className="flex items-start justify-between gap-3">
+                      <div className="flex items-start gap-3">
+                        <div className={`p-2.5 rounded-xl font-bold shrink-0 mt-0.5 ${isActive ? 'bg-emerald-600 text-white shadow-xs' : 'bg-slate-100 text-slate-600'}`}>
+                          <FileSpreadsheet className="w-5 h-5" />
+                        </div>
+                        <div>
+                          <div className="flex flex-wrap items-center gap-2">
+                            <h4 className="font-bold text-slate-950 text-sm">{profile.name}</h4>
+                            {isActive && (
+                              <span className="inline-flex items-center gap-1 px-2 py-0.5 rounded-full bg-emerald-100 text-emerald-800 border border-emerald-300 text-[10px] font-black uppercase tracking-wider">
+                                <CheckCircle2 className="w-3 h-3 text-emerald-600" />
+                                <span>Aktif Digunakan</span>
+                              </span>
+                            )}
+                            {profile.isDefault && (
+                              <span className="text-[10px] font-semibold text-slate-500 bg-slate-100 px-2 py-0.5 rounded-md border border-slate-200">
+                                Default PUPR
+                              </span>
+                            )}
+                          </div>
+                          <p className="text-xs text-slate-600 mt-1 leading-relaxed">
+                            {profile.description || 'Tidak ada keterangan tambahan.'}
+                          </p>
+                        </div>
+                      </div>
+                    </div>
+
+                    <div className="mt-4 pt-3 border-t border-slate-100/80 space-y-2 text-xs">
+                      {profile.spreadsheetUrl ? (
+                        <div className="flex items-center justify-between gap-2 p-2 rounded-lg bg-slate-50 border border-slate-200/80">
+                          <div className="truncate font-mono text-[11px] text-slate-700">
+                            {profile.spreadsheetUrl}
+                          </div>
+                          <a
+                            href={profile.spreadsheetUrl}
+                            target="_blank"
+                            rel="noopener noreferrer"
+                            className="inline-flex items-center gap-1 px-2 py-1 bg-white border border-slate-200 rounded-md text-emerald-700 font-bold text-[11px] hover:bg-emerald-50 shrink-0"
+                          >
+                            <span>Buka Sheet</span>
+                            <ExternalLink className="w-3 h-3" />
+                          </a>
+                        </div>
+                      ) : (
+                        <div className="p-2 rounded-lg bg-amber-50 border border-amber-200 text-amber-900 text-[11px]">
+                          Tautan spreadsheet belum disetel.
+                        </div>
+                      )}
+
+                      <div className="flex flex-wrap items-center justify-between gap-2 pt-2">
+                        {isActive ? (
+                          <div className="inline-flex items-center gap-1.5 text-xs font-bold text-emerald-700">
+                            <Check className="w-4 h-4 text-emerald-600" />
+                            <span>Dokumen ini sedang menerima sinkronisasi data</span>
+                          </div>
+                        ) : (
+                          <button
+                            type="button"
+                            onClick={() => handleSelectProfile(profile)}
+                            className="inline-flex items-center gap-1.5 px-3.5 py-1.5 bg-emerald-600 hover:bg-emerald-700 text-white rounded-xl text-xs font-bold shadow-2xs transition-colors cursor-pointer"
+                          >
+                            <BookmarkCheck className="w-3.5 h-3.5" />
+                            <span>Jadikan Sheet Aktif</span>
+                          </button>
+                        )}
+
+                        {!profile.isDefault && rawProfiles.length > 1 && (
+                          <button
+                            type="button"
+                            onClick={() => handleDeleteProfile(profile.id)}
+                            className="inline-flex items-center gap-1 px-2.5 py-1.5 text-rose-600 hover:bg-rose-50 rounded-lg text-xs font-semibold transition-colors cursor-pointer"
+                            title="Hapus profil spreadsheet ini"
+                          >
+                            <Trash2 className="w-3.5 h-3.5" />
+                            <span>Hapus</span>
+                          </button>
+                        )}
+                      </div>
+                    </div>
+                  </div>
+                );
+              })}
+            </div>
+          </div>
         </div>
       )}
 
