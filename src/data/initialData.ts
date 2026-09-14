@@ -195,7 +195,7 @@ export const DEFAULT_GOOGLE_SHEET_CONFIG: GoogleSheetConfig = {
       description: 'Spreadsheet dinas utama berisi 7 tab kecamatan dan log pengguna',
       capacityStatus: 'normal',
       estimatedRowCount: 0,
-      maxCapacityRows: 2000,
+      maxCapacityRows: 200,
       createdAt: '2026-01-01T00:00:00Z',
       isDefault: true,
     },
@@ -208,7 +208,7 @@ export const DEFAULT_GOOGLE_SHEET_CONFIG: GoogleSheetConfig = {
       description: 'Slot spreadsheet baru untuk arsip periode berikutnya tanpa harus menghapus spreadsheet lama',
       capacityStatus: 'normal',
       estimatedRowCount: 0,
-      maxCapacityRows: 2000,
+      maxCapacityRows: 200,
       createdAt: '2026-09-14T00:00:00Z',
       isDefault: false,
     }
