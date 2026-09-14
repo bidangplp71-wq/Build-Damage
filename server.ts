@@ -257,6 +257,98 @@ app.get('/api/assessments', (req, res) => {
   }
 });
 
+// Helper to forward assessment to Google Apps Script Webhook automatically from server
+async function forwardAssessmentToGoogleSheet(assessment: any, action: 'insert' | 'update' | 'delete' = 'insert') {
+  try {
+    const config = getGoogleSheetConfig();
+    const webhookUrl = config.webhookUrl;
+    if (!webhookUrl || !webhookUrl.startsWith('http')) return;
+
+    const ownerName = assessment.namaPemilikRumah || assessment.namaPemilikGedung || assessment.ownerAgency || '-';
+    const kecName = assessment.kecamatanName || 'Aesesa';
+    const kecSheetName = (assessment.targetSheetName || `Kec. ${kecName}`).replace(/[:\\/?*\[\]]/g, '').trim().substring(0, 30);
+
+    const rowData = {
+      'No Registrasi': assessment.code || assessment.id,
+      'Nama Bangunan': assessment.buildingName,
+      'Kategori / Fungsi Bangunan': assessment.buildingCategory || 'Gedung Pemerintah',
+      'Jenis Bencana': assessment.disasterType || 'Gempa Bumi',
+      'Tanggal Bencana': assessment.disasterDate || '',
+      'Tanggal Penilaian': assessment.assessmentDate || '',
+      'Pengguna / Pemilik': ownerName,
+      'Nama Pemilik Rumah': assessment.namaPemilikRumah || '-',
+      'Nama Pemilik Gedung': assessment.namaPemilikGedung || '-',
+      'NIK Pemilik': assessment.nikPemilik || '0',
+      'No KK Pemilik': assessment.noKkPemilik || '0',
+      'Dinas Teknis': assessment.responsibleDepartment || '',
+      'Kelas Bangunan': assessment.buildingClass || '',
+      'Kecamatan': assessment.kecamatanName || '',
+      'Desa / Kelurahan': assessment.desaName || '',
+      'Alamat Lengkap': assessment.detailedAddress || '',
+      'Luas Lantai (M2)': assessment.totalFloorAreaM2 || 0,
+      'Jumlah Tingkat': assessment.numberOfFloors || 1,
+      'Tahun Dibangun': assessment.yearBuilt || 2020,
+      'Tingkat Kerusakan (%)': assessment.totalDamagePercent || 0,
+      'Klasifikasi Kerusakan': assessment.damageClassification || 'Rusak Ringan',
+      'HSBGN / M2 (Rp)': assessment.hsbgnPerM2 || 0,
+      'Biaya Perawatan / M2 (Rp)': assessment.treatmentCostPerM2 || 0,
+      'Biaya Bongkaran / M2 (Rp)': assessment.demolitionCostPerM2 || 0,
+      'Total Biaya / M2 (Rp)': assessment.totalCostPerM2 || 0,
+      'Ajuan Biaya Rehab (Rp)': assessment.roundedRehabCost || 0,
+      'Format Rupiah': 'Rp ' + Number(assessment.roundedRehabCost || 0).toLocaleString('id-ID'),
+      'Terbilang': assessment.costTerbilang || '',
+      'Link Folder G-Drive (Backup Foto)': assessment.backupDriveUrl || '-',
+      'Status Verifikasi': assessment.verificationStatus || 'Menunggu Verifikasi',
+      'Diverifikasi Oleh': assessment.verifiedBy || '-',
+      'Tanggal Verifikasi': assessment.verifiedAt ? new Date(assessment.verifiedAt).toLocaleDateString('id-ID') : '-',
+      'Catatan Verifikator': assessment.verificationNotes || '-',
+      'Jumlah Foto Kerusakan': Array.isArray(assessment.photos) ? assessment.photos.length : 0,
+      'Link Folder Foto Google Drive': assessment.googleDriveFolderUrl || '-',
+      'Surveyor / Petugas': assessment.createdByName || '-',
+      'Kota Laporan': assessment.cityLocation || '',
+      'Nama Kepala Dinas': assessment.headOfDepartment?.name || '-',
+      'NIP Kepala Dinas': assessment.headOfDepartment?.nip || '-',
+      'Tim Analisis': Array.isArray(assessment.analysisTeam) ? assessment.analysisTeam.join(', ') : '-',
+      'Rincian Komponen JSON': JSON.stringify(assessment.components || []),
+      'Foto JSON': JSON.stringify(assessment.photos || []),
+      'Terakhir Diperbarui': new Date(assessment.updatedAt || Date.now()).toLocaleString('id-ID'),
+    };
+
+    const payload = {
+      action,
+      sheetName: config.sheetName || 'REKAP_SEMUA_KECAMATAN',
+      targetSheetName: kecSheetName,
+      kecamatanSheetName: kecSheetName,
+      buildingName: assessment.buildingName,
+      desaName: assessment.desaName,
+      kecamatanName: assessment.kecamatanName,
+      splitByKecamatan: config.splitByKecamatan !== false,
+      includeMasterSummary: config.includeMasterSummarySheet !== false,
+      spreadsheetUrl: config.spreadsheetUrl,
+      registrationCode: assessment.code || assessment.id,
+      previousRegistrationCode: assessment.code || assessment.id,
+      data: rowData,
+      photos: Array.isArray(assessment.photos) ? assessment.photos.map((p: any, idx: number) => ({
+        id: p.id || `photo_${idx}`,
+        caption: p.caption || '',
+        damageLocation: p.damageLocation || `Foto ${idx + 1}`,
+        url: p.url,
+      })) : [],
+      savePhotosToDrive: false,
+      timestamp: new Date().toISOString(),
+    };
+
+    const resp = await fetch(webhookUrl, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify(payload),
+    });
+    console.info(`[Server -> GoogleSheet] Synced "${assessment.buildingName}" (action: ${action}, status: ${resp.status})`);
+  } catch (err) {
+    console.warn('[Server -> GoogleSheet] Auto-sync notice:', err);
+  }
+}
+
 // POST /api/assessments - Upsert single assessment non-destructively
 app.post('/api/assessments', (req, res) => {
   try {
@@ -269,11 +361,14 @@ app.post('/api/assessments', (req, res) => {
     const updatedList = deduplicateServerAssessments([assessment, ...currentList]);
     saveStoredAssessments(updatedList);
 
+    // Auto-forward to Google Sheet Webhook asynchronously from server
+    forwardAssessmentToGoogleSheet(assessment, 'insert').catch(() => {});
+
     return res.json({
       success: true,
       count: updatedList.length,
       assessment: updatedList.find((a) => a.id === assessment.id) || assessment,
-      message: 'Data penilaian berhasil disimpan di server!',
+      message: 'Data penilaian berhasil disimpan di server & diteruskan ke Google Sheet!',
     });
   } catch (err: any) {
     console.error('Error saving assessment on server:', err);
@@ -326,14 +421,19 @@ app.delete('/api/assessments/:id', (req, res) => {
     }
 
     const currentList = getStoredAssessments();
+    const targetItem = currentList.find((a) => a.id === id);
     const filtered = currentList.filter((a) => a.id !== id);
     saveStoredAssessments(filtered);
+
+    if (targetItem) {
+      forwardAssessmentToGoogleSheet(targetItem, 'delete').catch(() => {});
+    }
 
     return res.json({
       success: true,
       deletedId: id,
       remainingCount: filtered.length,
-      message: 'Data penilaian berhasil dihapus dari server',
+      message: 'Data penilaian berhasil dihapus dari server & Google Sheet',
     });
   } catch (err: any) {
     return res.status(500).json({ success: false, message: 'Gagal menghapus penilaian: ' + err.message });

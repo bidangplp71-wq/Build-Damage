@@ -169,8 +169,8 @@ export const INITIAL_USERS: UserAccount[] = [
 export const INITIAL_ASSESSMENTS: BuildingAssessment[] = [];
 
 export const DEFAULT_GOOGLE_SHEET_CONFIG: GoogleSheetConfig = {
-  spreadsheetUrl: (typeof import.meta !== 'undefined' && (import.meta as any).env && (import.meta as any).env.VITE_SPREADSHEET_URL) || '',
-  webhookUrl: (typeof import.meta !== 'undefined' && (import.meta as any).env && (import.meta as any).env.VITE_WEBHOOK_URL) || '',
+  spreadsheetUrl: (typeof import.meta !== 'undefined' && (import.meta as any).env && (import.meta as any).env.VITE_SPREADSHEET_URL) || 'https://docs.google.com/spreadsheets/d/12FNcCcnpg5QfyXeCTjM9pWfN8iSW9SpKVquRK8qZo2g/edit?usp=sharing',
+  webhookUrl: (typeof import.meta !== 'undefined' && (import.meta as any).env && (import.meta as any).env.VITE_WEBHOOK_URL) || 'https://script.google.com/macros/s/AKfycbyAbubspPnACJi6KTODHJbVeAIppC6e72c8nAo__g8uc67GmY-wc1lOZWZkbLtieds/exec',
   driveFolderId: 'https://drive.google.com/drive/folders/1xKF8SYvNY97A9-ga0B42z3jQTbcC_Tk5?usp=sharing',
   savePhotosToDrive: true,
   sheetName: 'REKAP_SEMUA_KECAMATAN',

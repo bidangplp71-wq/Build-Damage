@@ -2379,7 +2379,14 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
 
   // Assessment operations: Guaranteed instant multi-layer save (State + LocalStorage + IndexedDB + Server + Cloud)
   const addAssessment = async (data: BuildingAssessment) => {
-    const hasGSheet = Boolean(googleSheetConfig.webhookUrl && googleSheetConfig.webhookUrl.startsWith('http'));
+    const activeWebhook = googleSheetConfig.webhookUrl || DEFAULT_GOOGLE_SHEET_CONFIG.webhookUrl;
+    const hasGSheet = Boolean(activeWebhook && activeWebhook.startsWith('http'));
+    const effectiveSheetConfig: GoogleSheetConfig = {
+      ...DEFAULT_GOOGLE_SHEET_CONFIG,
+      ...googleSheetConfig,
+      webhookUrl: activeWebhook,
+      spreadsheetUrl: googleSheetConfig.spreadsheetUrl || DEFAULT_GOOGLE_SHEET_CONFIG.spreadsheetUrl,
+    };
 
     // Ensure guaranteed unique ID for every single new assessment to prevent any collisions or overwrites
     const finalId = data.id && data.id.trim()
@@ -2501,7 +2508,7 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
     if (hasGSheet) {
       directSaveToGoogleSheet(
         assessmentToSave,
-        googleSheetConfig,
+        effectiveSheetConfig,
         'insert',
         undefined,
         assessmentToSave.targetSheetName || assessmentToSave.sourceSheet
@@ -2542,7 +2549,14 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
       };
     }
 
-    const hasGSheet = Boolean(googleSheetConfig.webhookUrl && googleSheetConfig.webhookUrl.startsWith('http'));
+    const activeWebhook = googleSheetConfig.webhookUrl || DEFAULT_GOOGLE_SHEET_CONFIG.webhookUrl;
+    const hasGSheet = Boolean(activeWebhook && activeWebhook.startsWith('http'));
+    const effectiveSheetConfig: GoogleSheetConfig = {
+      ...DEFAULT_GOOGLE_SHEET_CONFIG,
+      ...googleSheetConfig,
+      webhookUrl: activeWebhook,
+      spreadsheetUrl: googleSheetConfig.spreadsheetUrl || DEFAULT_GOOGLE_SHEET_CONFIG.spreadsheetUrl,
+    };
     const now = new Date().toISOString();
     const updatedCode = data.code || target?.code || target?.id || id;
     const mergedData: BuildingAssessment = {
@@ -2607,7 +2621,7 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
     );
 
     if (hasGSheet) {
-      directSaveToGoogleSheet(mergedData, googleSheetConfig, 'update', target?.code || target?.id).catch((e) =>
+      directSaveToGoogleSheet(mergedData, effectiveSheetConfig, 'update', target?.code || target?.id).catch((e) =>
         console.error('Direct Google Sheet update error:', e)
       );
     }
