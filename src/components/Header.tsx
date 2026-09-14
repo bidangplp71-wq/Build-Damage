@@ -1,6 +1,7 @@
-import React from 'react';
+import React, { useState } from 'react';
 import { useApp } from '../context/AppContext';
 import { ROLE_LIMITS, UserRole } from '../types';
+import { ActiveSessionsModal } from './ActiveSessionsModal';
 import {
   Menu,
   ShieldCheck,
@@ -47,6 +48,7 @@ export const Header: React.FC<HeaderProps> = ({ onToggleMobileNav }) => {
   const [roleDropdownOpen, setRoleDropdownOpen] = React.useState(false);
   const [notifDropdownOpen, setNotifDropdownOpen] = React.useState(false);
   const [isSyncing, setIsSyncing] = React.useState(false);
+  const [sessionsModalOpen, setSessionsModalOpen] = useState(false);
 
   const roleCounts = getUserCountsByRole();
   const currentRoleConfig = ROLE_LIMITS[currentUser.role];
@@ -204,13 +206,14 @@ export const Header: React.FC<HeaderProps> = ({ onToggleMobileNav }) => {
 
           {/* Concurrent Surveyor Quota Status Indicator */}
           {sessionQuotaStatus && (
-            <div
+            <button
               id="header-surveyor-quota-badge"
-              className="hidden md:inline-flex items-center gap-1.5 px-2.5 py-1.5 rounded-lg bg-slate-100 border border-slate-200 text-slate-700 text-xs font-medium"
-              title={`Sistem proteksi kuota Google Sheet aktif: ${sessionQuotaStatus.activeSurveyors} dari ${sessionQuotaStatus.maxSurveyorQuota} slot surveyor sedang aktif.`}
+              onClick={() => setSessionsModalOpen(true)}
+              className="inline-flex items-center gap-1.5 px-2.5 py-1.5 rounded-lg bg-slate-100 hover:bg-blue-50 border border-slate-200 hover:border-blue-300 text-slate-700 hover:text-blue-700 text-xs font-medium transition-colors cursor-pointer"
+              title="Klik untuk melihat daftar perangkat & surveyor yang sedang aktif"
             >
               <Users className="w-3.5 h-3.5 text-blue-600" />
-              <span className="hidden lg:inline text-slate-500">Surveyor:</span>
+              <span className="hidden sm:inline text-slate-600 font-semibold">Surveyor:</span>
               <span
                 className={`font-mono font-bold ${
                   sessionQuotaStatus.activeSurveyors >= sessionQuotaStatus.maxSurveyorQuota
@@ -222,7 +225,7 @@ export const Header: React.FC<HeaderProps> = ({ onToggleMobileNav }) => {
               >
                 {sessionQuotaStatus.activeSurveyors}/{sessionQuotaStatus.maxSurveyorQuota}
               </span>
-            </div>
+            </button>
           )}
 
           {/* Incoming Data Notification Bell */}
@@ -455,6 +458,12 @@ export const Header: React.FC<HeaderProps> = ({ onToggleMobileNav }) => {
           </div>
         </div>
       </div>
+
+      {/* Active Sessions Modal Popup */}
+      <ActiveSessionsModal
+        isOpen={sessionsModalOpen}
+        onClose={() => setSessionsModalOpen(false)}
+      />
     </header>
   );
 };
