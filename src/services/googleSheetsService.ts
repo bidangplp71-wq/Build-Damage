@@ -2581,7 +2581,14 @@ interface SheetAssessmentsCache {
   timestamp: number;
 }
 let memoryAssessmentsCache: SheetAssessmentsCache | null = null;
-const CACHE_TTL_MS = 25000; // 25 seconds fast in-memory cache
+const CACHE_TTL_MS = 60 * 60 * 1000; // 1-hour in-memory cache to prevent tab-switching reloads and browser crashes
+
+/**
+ * Clears the Google Sheet memory cache when manual sync is requested
+ */
+export function clearGoogleSheetsMemoryCache(): void {
+  memoryAssessmentsCache = null;
+}
 
 /**
  * Reads all assessment data directly from Google Sheet starting from row A2 (the first data row).

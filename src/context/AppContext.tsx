@@ -41,6 +41,7 @@ import {
   directSaveUserToGoogleSheet,
   syncAllUsersToGoogleSheet,
   fetchUsersFromGoogleSheet,
+  clearGoogleSheetsMemoryCache,
 } from '../services/googleSheetsService';
 import {
   encryptPassword,
@@ -703,6 +704,10 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
   // Track IDs of assessments deleted across all sessions to prevent accidental resurrection
   const deletedAssessmentIds = useRef<Set<string>>(getStoredDeletedAssessmentIds());
   const isInitialLoad = useRef(true);
+
+  // Single Initial Load & 1-Hour Schedule tracker (prevents re-reading Google Sheet and tab crash)
+  const hasLoadedInitialGoogleSheetRef = useRef<boolean>(false);
+  const lastSheetSyncTimestampRef = useRef<number>(0);
   
   // Load Google Sheet Config & Assessments dynamically from Express server on startup
   useEffect(() => {
@@ -2902,6 +2907,7 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
   /**
    * Pull and synchronize all assessment rows directly from Google Sheet (starting from row A2 downwards)
    * Ensures that whatever exists in the Google Sheet is fully displayed in the web app
+   * Loaded only once on initial app start or on explicit 1-hour schedule / manual click to prevent crashes
    */
   const syncFromGoogleSheet = async (showToastAlert = false, forceRefresh?: boolean): Promise<{ success: boolean; message: string; count?: number }> => {
     if (!googleSheetConfig.spreadsheetUrl || !isConfiguredSheetUrl(googleSheetConfig.spreadsheetUrl)) {
@@ -2911,8 +2917,21 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
     }
 
     try {
-      // If user clicked manual sync, always force fresh download
+      // If user clicked manual sync or 1-hour periodic schedule passed, force fresh download
       const shouldForce = forceRefresh !== undefined ? forceRefresh : Boolean(showToastAlert);
+
+      // FAST PATH: If not forced and initial sheet load already succeeded with active data, avoid heavy re-fetch on tab switches
+      if (!shouldForce && hasLoadedInitialGoogleSheetRef.current && assessments.length > 0) {
+        return {
+          success: true,
+          message: 'Data Google Sheet telah termuat saat pembukaan awal.',
+          count: assessments.length,
+        };
+      }
+
+      if (shouldForce) {
+        clearGoogleSheetsMemoryCache();
+      }
       
       const defaultKecamatans = [
         'Aesesa',
@@ -3002,6 +3021,10 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
 
       const result = await fetchAssessmentsFromGoogleSheet(googleSheetConfig, shouldForce, onProgressStream);
       
+      // Mark initial load as completed and record timestamp
+      hasLoadedInitialGoogleSheetRef.current = true;
+      lastSheetSyncTimestampRef.current = Date.now();
+
       // Update progress to 100% finished
       setSheetSyncProgress((prev) => ({
         ...prev,
@@ -3138,7 +3161,7 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
     try {
       showToast('Memproses penyatuan data dari 7 sheet kecamatan ke satu Sheet Rekap...', 'info');
       const consResult = await consolidateSheetsInGoogleSheet(googleSheetConfig, assessments);
-      const syncResult = await syncFromGoogleSheet(false);
+      const syncResult = await syncFromGoogleSheet(false, true);
       const totalCount = syncResult.count || assessments.length;
       const finalMsg = consResult.success
         ? `Berhasil menyatukan data 7 sheet kecamatan ke Sheet Rekap ("${googleSheetConfig.sheetName || 'REKAP_SEMUA_KECAMATAN'}"). Total ${totalCount} data termuat.`
@@ -3188,18 +3211,32 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
     return res;
   };
 
-  // Automatically synchronize assessments and users from Google Sheet if URL or Webhook is configured
+  // Synchronize from Google Sheet ONLY ONCE on initial startup, and strictly every 1 hour thereafter
+  // (Prevents continuous reloading, high memory usage, and browser crashes when switching tabs)
   useEffect(() => {
     const hasSpreadsheet = Boolean(googleSheetConfig.spreadsheetUrl && isConfiguredSheetUrl(googleSheetConfig.spreadsheetUrl));
     const hasWebhook = Boolean(googleSheetConfig.webhookUrl && googleSheetConfig.webhookUrl.startsWith('http'));
-    if (hasSpreadsheet || hasWebhook) {
-      syncFromGoogleSheet(false);
-      fetchUsersFromSheet();
 
-      // Periodic background sync every 45 seconds to automatically fetch any new data entered in Google Sheets
+    if (hasSpreadsheet || hasWebhook) {
+      // 1. Initial Load: Run only once upon opening the application
+      if (!hasLoadedInitialGoogleSheetRef.current) {
+        hasLoadedInitialGoogleSheetRef.current = true;
+        lastSheetSyncTimestampRef.current = Date.now();
+        syncFromGoogleSheet(false, false);
+        fetchUsersFromSheet();
+      }
+
+      // 2. Strict 1-Hour Schedule (3,600,000 ms) as specified by user
+      const ONE_HOUR_MS = 60 * 60 * 1000;
       const intervalId = setInterval(() => {
-        syncFromGoogleSheet(false);
-      }, 45000);
+        const now = Date.now();
+        if (now - lastSheetSyncTimestampRef.current >= ONE_HOUR_MS) {
+          lastSheetSyncTimestampRef.current = now;
+          clearGoogleSheetsMemoryCache();
+          syncFromGoogleSheet(false, true);
+          fetchUsersFromSheet();
+        }
+      }, ONE_HOUR_MS);
 
       return () => clearInterval(intervalId);
     }

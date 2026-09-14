@@ -738,7 +738,7 @@ export const AssessmentTable: React.FC = () => {
           {googleSheetConfig.spreadsheetUrl && (
             <div className="flex items-center gap-1.5 flex-wrap">
               <button
-                onClick={() => syncFromGoogleSheet(true)}
+                onClick={() => syncFromGoogleSheet(true, true)}
                 disabled={isRefreshing || isConsolidating}
                 title="Tarik seluruh data survei langsung dari ke-7 Sheet Kecamatan"
                 className="flex items-center gap-1.5 px-3 py-2 text-xs font-bold text-indigo-900 bg-indigo-50 hover:bg-indigo-100 rounded-xl border border-indigo-200 transition-colors cursor-pointer shadow-2xs"
