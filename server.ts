@@ -262,13 +262,13 @@ async function forwardAssessmentToGoogleSheet(assessment: any, action: 'insert' 
   try {
     const config = getGoogleSheetConfig();
     const webhookUrl = config.webhookUrl;
-    if (!webhookUrl || !webhookUrl.startsWith('http')) return;
+    if (!webhookUrl || !webhookUrl.startsWith('http')) return { success: false, message: 'URL Webhook belum diatur' };
 
     const ownerName = assessment.namaPemilikRumah || assessment.namaPemilikGedung || assessment.ownerAgency || '-';
     const kecName = assessment.kecamatanName || 'Aesesa';
     const kecSheetName = (assessment.targetSheetName || `Kec. ${kecName}`).replace(/[:\\/?*\[\]]/g, '').trim().substring(0, 30);
 
-    const rowData = {
+    const rowData: Record<string, any> = {
       'No Registrasi': assessment.code || assessment.id,
       'Nama Bangunan': assessment.buildingName,
       'Kategori / Fungsi Bangunan': assessment.buildingCategory || 'Gedung Pemerintah',
@@ -309,8 +309,6 @@ async function forwardAssessmentToGoogleSheet(assessment: any, action: 'insert' 
       'Nama Kepala Dinas': assessment.headOfDepartment?.name || '-',
       'NIP Kepala Dinas': assessment.headOfDepartment?.nip || '-',
       'Tim Analisis': Array.isArray(assessment.analysisTeam) ? assessment.analysisTeam.join(', ') : '-',
-      'Rincian Komponen JSON': JSON.stringify(assessment.components || []),
-      'Foto JSON': JSON.stringify(assessment.photos || []),
       'Terakhir Diperbarui': new Date(assessment.updatedAt || Date.now()).toLocaleString('id-ID'),
     };
 
@@ -332,7 +330,7 @@ async function forwardAssessmentToGoogleSheet(assessment: any, action: 'insert' 
         id: p.id || `photo_${idx}`,
         caption: p.caption || '',
         damageLocation: p.damageLocation || `Foto ${idx + 1}`,
-        url: p.url,
+        url: p.url && (p.url.startsWith('http') || p.url.startsWith('/uploads/')) ? p.url : '',
       })) : [],
       savePhotosToDrive: false,
       timestamp: new Date().toISOString(),
@@ -343,11 +341,41 @@ async function forwardAssessmentToGoogleSheet(assessment: any, action: 'insert' 
       headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify(payload),
     });
+
+    const responseText = await resp.text();
+    let responseJson: any = null;
+    try {
+      responseJson = JSON.parse(responseText);
+    } catch {
+      responseJson = { status: resp.ok ? 'success' : 'error', message: responseText };
+    }
+
+    if (responseJson.status === 'error') {
+      console.warn(`[Server -> GoogleSheet] Google Apps Script error for "${assessment.buildingName}":`, responseJson.message);
+      return { success: false, message: responseJson.message };
+    }
+
     console.info(`[Server -> GoogleSheet] Synced "${assessment.buildingName}" (action: ${action}, status: ${resp.status})`);
-  } catch (err) {
-    console.warn('[Server -> GoogleSheet] Auto-sync notice:', err);
+    return { success: true, message: responseJson.message || 'Sinkronisasi Google Sheet berhasil' };
+  } catch (err: any) {
+    console.warn('[Server -> GoogleSheet] Auto-sync notice:', err?.message || err);
+    return { success: false, message: err?.message || 'Gagal terhubung ke Google Apps Script Webhook' };
   }
 }
+
+// POST /api/google-sheet/sync - Proxy endpoint to execute Google Sheet sync and report exact status
+app.post('/api/google-sheet/sync', async (req, res) => {
+  try {
+    const { assessment, action } = req.body;
+    if (!assessment) {
+      return res.status(400).json({ success: false, message: 'Data assessment wajib diisi' });
+    }
+    const result = await forwardAssessmentToGoogleSheet(assessment, action || 'insert');
+    return res.json(result);
+  } catch (err: any) {
+    return res.status(500).json({ success: false, message: err?.message || 'Internal server error' });
+  }
+});
 
 // POST /api/assessments - Upsert single assessment non-destructively
 app.post('/api/assessments', (req, res) => {

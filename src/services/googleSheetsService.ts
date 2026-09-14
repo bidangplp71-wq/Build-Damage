@@ -300,7 +300,34 @@ export async function directSaveToGoogleSheet(
   };
 
   try {
-    // Google Apps Script endpoint requires no-cors for direct browser POST
+    // 1. Try sending via backend proxy first to get exact status & error details from Google Apps Script
+    try {
+      const proxyResp = await fetch('/api/google-sheet/sync', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ assessment: hydratedAssessment, action }),
+      });
+      if (proxyResp.ok) {
+        const proxyData = await proxyResp.json();
+        if (proxyData && proxyData.success === false) {
+          const errMsg = proxyData.message || '';
+          if (errMsg.includes('grown too large') || errMsg.includes('cannot be modified')) {
+            return {
+              success: false,
+              message: `Peringatan Google Sheet: Dokumen Spreadsheet "${config.spreadsheetUrl.slice(-15)}" penuh / melebihi kapasitas ("The document cannot be modified. Perhaps it has grown too large?"). Silakan hapus baris kosong di tab Google Sheet atau ganti dengan Google Sheet baru di menu Pengaturan.`,
+            };
+          }
+          return {
+            success: false,
+            message: `Peringatan Google Sheet: ${errMsg}`,
+          };
+        }
+      }
+    } catch {
+      // If server proxy is unavailable (e.g. static Cloudflare hosting), proceed to direct fetch below
+    }
+
+    // 2. Direct browser fetch with mode: 'no-cors' as fallback
     await fetch(config.webhookUrl, {
       method: 'POST',
       mode: 'no-cors',
