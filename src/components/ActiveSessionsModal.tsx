@@ -1,4 +1,5 @@
 import React, { useState, useEffect } from 'react';
+import { useApp } from '../context/AppContext';
 import {
   Users,
   ShieldCheck,
@@ -13,44 +14,23 @@ import {
   Info,
 } from 'lucide-react';
 
-interface ActiveSessionItem {
-  sessionId: string;
-  userName: string;
-  role: string;
-  isPriority: boolean;
-  loginAt: string;
-  lastHeartbeatAgoSec: number;
-}
-
 interface ActiveSessionsModalProps {
   isOpen: boolean;
   onClose: () => void;
 }
 
 export const ActiveSessionsModal: React.FC<ActiveSessionsModalProps> = ({ isOpen, onClose }) => {
+  const { sessionQuotaStatus, activeSessionsList, refreshActiveSessions } = useApp();
   const [loading, setLoading] = useState(false);
-  const [activeSurveyors, setActiveSurveyors] = useState(0);
-  const [maxSurveyorQuota, setMaxSurveyorQuota] = useState(15);
-  const [activePriorityUsers, setActivePriorityUsers] = useState(0);
-  const [sessions, setSessions] = useState<ActiveSessionItem[]>([]);
   const [lastUpdated, setLastUpdated] = useState<string>('');
 
-  const fetchSessionStatus = async () => {
+  const handleRefresh = async () => {
     setLoading(true);
     try {
-      const res = await fetch('/api/sessions/status');
-      if (res.ok) {
-        const data = await res.json();
-        if (data.success) {
-          setActiveSurveyors(data.activeSurveyors || 0);
-          setMaxSurveyorQuota(data.maxSurveyorQuota || 15);
-          setActivePriorityUsers(data.activePriorityUsers || 0);
-          setSessions(data.activeSessions || []);
-          setLastUpdated(new Date().toLocaleTimeString('id-ID'));
-        }
-      }
+      await refreshActiveSessions();
+      setLastUpdated(new Date().toLocaleTimeString('id-ID'));
     } catch (err) {
-      console.warn('Failed to load active sessions:', err);
+      console.warn('Refresh error:', err);
     } finally {
       setLoading(false);
     }
@@ -58,16 +38,21 @@ export const ActiveSessionsModal: React.FC<ActiveSessionsModalProps> = ({ isOpen
 
   useEffect(() => {
     if (isOpen) {
-      fetchSessionStatus();
-      const interval = setInterval(fetchSessionStatus, 10000);
+      handleRefresh();
+      const interval = setInterval(handleRefresh, 10000);
       return () => clearInterval(interval);
     }
   }, [isOpen]);
 
   if (!isOpen) return null;
 
+  const activeSurveyors = sessionQuotaStatus?.activeSurveyors || 1;
+  const maxSurveyorQuota = sessionQuotaStatus?.maxSurveyorQuota || 15;
+  const activePriorityUsers = sessionQuotaStatus?.activePriorityUsers || 0;
   const availableSlots = Math.max(0, maxSurveyorQuota - activeSurveyors);
   const percentFilled = Math.min(100, Math.round((activeSurveyors / maxSurveyorQuota) * 100));
+
+  const now = Date.now();
 
   return (
     <div className="fixed inset-0 z-50 flex items-center justify-center p-4 bg-slate-950/70 backdrop-blur-xs animate-in fade-in duration-200">
@@ -86,13 +71,13 @@ export const ActiveSessionsModal: React.FC<ActiveSessionsModalProps> = ({ isOpen
                 </span>
               </h3>
               <p className="text-xs text-slate-400">
-                Informasi perangkat & surveyor yang sedang membuka aplikasi bersamaan
+                Informasi perangkat & surveyor yang sedang membuka aplikasi bersamaan (Cloudflare & Multi-Device)
               </p>
             </div>
           </div>
           <button
             onClick={onClose}
-            className="p-2 rounded-lg text-slate-400 hover:text-white hover:bg-slate-800 transition-colors"
+            className="p-2 rounded-lg text-slate-400 hover:text-white hover:bg-slate-800 transition-colors cursor-pointer"
           >
             <X className="w-5 h-5" />
           </button>
@@ -158,7 +143,7 @@ export const ActiveSessionsModal: React.FC<ActiveSessionsModalProps> = ({ isOpen
           <div className="bg-blue-50 border border-blue-200 rounded-xl p-3 text-xs text-blue-900 flex items-start gap-2.5">
             <Info className="w-4 h-4 text-blue-600 shrink-0 mt-0.5" />
             <div className="leading-relaxed">
-              <strong>Proteksi Kuota Bersama:</strong> Akun seperti <strong>Kabnagekeo</strong> dapat dibuka oleh banyak surveyor di berbagai ponsel secara bersamaan hingga maksimal <strong>15 surveyor aktif</strong>. Jika surveyor menutup browser atau tidak aktif selama 3 menit, slotnya akan otomatis dilepas untuk rekan lain.
+              <strong>Proteksi Kuota Bersama:</strong> Akun bersama seperti <strong>Kabnagekeo</strong> dapat dibuka oleh banyak surveyor di berbagai perangkat secara bersamaan hingga maksimal <strong>15 surveyor aktif</strong>. Jika pengguna menutup browser atau tidak aktif selama 3 menit, slotnya otomatis dibebaskan ke pengguna lain.
             </div>
           </div>
 
@@ -169,11 +154,11 @@ export const ActiveSessionsModal: React.FC<ActiveSessionsModalProps> = ({ isOpen
                 <Smartphone className="w-4 h-4 text-slate-500" />
                 <span>Daftar Perangkat / Sesi yang Sedang Membuka</span>
                 <span className="text-[11px] font-mono px-1.5 py-0.2 bg-slate-200 text-slate-700 rounded-full font-bold">
-                  {sessions.length}
+                  {activeSessionsList.length || activeSurveyors}
                 </span>
               </div>
               <button
-                onClick={fetchSessionStatus}
+                onClick={handleRefresh}
                 disabled={loading}
                 className="text-xs text-blue-600 hover:text-blue-800 font-semibold flex items-center gap-1 transition-colors cursor-pointer"
               >
@@ -182,53 +167,75 @@ export const ActiveSessionsModal: React.FC<ActiveSessionsModalProps> = ({ isOpen
               </button>
             </div>
 
-            {sessions.length === 0 ? (
-              <div className="p-6 text-center text-xs text-slate-500">
-                Tidak ada sesi aktif terdeteksi saat ini.
+            {activeSessionsList.length === 0 ? (
+              <div className="p-4 bg-white flex items-center justify-between text-xs">
+                <div className="flex items-center gap-3">
+                  <div className="w-8 h-8 rounded-lg flex items-center justify-center font-bold text-xs bg-blue-100 text-blue-700 border border-blue-300">
+                    1
+                  </div>
+                  <div>
+                    <div className="font-bold text-slate-800 flex items-center gap-2">
+                      <span>Perangkat Anda (Sesi Aktif)</span>
+                      <span className="text-[10px] px-1.5 py-0.2 rounded font-semibold bg-blue-50 text-blue-700 border border-blue-200">
+                        Slot Surveyor
+                      </span>
+                    </div>
+                    <div className="text-[11px] text-slate-500 flex items-center gap-2 mt-0.5">
+                      <span>Online terhubung ke sistem</span>
+                    </div>
+                  </div>
+                </div>
+                <span className="inline-flex items-center gap-1 px-2 py-0.5 rounded-full text-[10px] font-semibold bg-emerald-50 text-emerald-700 border border-emerald-200">
+                  <span className="w-1.5 h-1.5 rounded-full bg-emerald-500 animate-pulse" />
+                  Online
+                </span>
               </div>
             ) : (
               <div className="divide-y divide-slate-100 max-h-60 overflow-y-auto">
-                {sessions.map((s, idx) => (
-                  <div key={s.sessionId || idx} className="p-3 hover:bg-slate-50 flex items-center justify-between text-xs">
-                    <div className="flex items-center gap-3">
-                      <div
-                        className={`w-8 h-8 rounded-lg flex items-center justify-center font-bold text-xs ${
-                          s.isPriority
-                            ? 'bg-emerald-100 text-emerald-700 border border-emerald-300'
-                            : 'bg-blue-100 text-blue-700 border border-blue-300'
-                        }`}
-                      >
-                        {idx + 1}
-                      </div>
-                      <div>
-                        <div className="font-bold text-slate-800 flex items-center gap-2">
-                          <span>{s.userName || 'Pengguna'}</span>
-                          <span
-                            className={`text-[10px] px-1.5 py-0.2 rounded font-semibold ${
-                              s.isPriority
-                                ? 'bg-emerald-50 text-emerald-700 border border-emerald-200'
-                                : 'bg-blue-50 text-blue-700 border border-blue-200'
-                            }`}
-                          >
-                            {s.isPriority ? 'Akses Prioritas' : 'Slot Surveyor'}
-                          </span>
+                {activeSessionsList.map((s, idx) => {
+                  const secAgo = s.lastHeartbeat ? Math.max(0, Math.round((now - s.lastHeartbeat) / 1000)) : 0;
+                  return (
+                    <div key={s.sessionId || idx} className="p-3 hover:bg-slate-50 flex items-center justify-between text-xs">
+                      <div className="flex items-center gap-3">
+                        <div
+                          className={`w-8 h-8 rounded-lg flex items-center justify-center font-bold text-xs ${
+                            s.isPriority
+                              ? 'bg-emerald-100 text-emerald-700 border border-emerald-300'
+                              : 'bg-blue-100 text-blue-700 border border-blue-300'
+                          }`}
+                        >
+                          {idx + 1}
                         </div>
-                        <div className="text-[11px] text-slate-500 flex items-center gap-2 mt-0.5">
-                          <span>Peran: <strong className="text-slate-600">{s.role}</strong></span>
-                          <span>•</span>
-                          <span>Aktif sejak: {s.loginAt ? new Date(s.loginAt).toLocaleTimeString('id-ID') : '-'}</span>
+                        <div>
+                          <div className="font-bold text-slate-800 flex items-center gap-2">
+                            <span>{s.userName || 'Surveyor'}</span>
+                            <span
+                              className={`text-[10px] px-1.5 py-0.2 rounded font-semibold ${
+                                s.isPriority
+                                  ? 'bg-emerald-50 text-emerald-700 border border-emerald-200'
+                                  : 'bg-blue-50 text-blue-700 border border-blue-200'
+                              }`}
+                            >
+                              {s.isPriority ? 'Akses Prioritas' : 'Slot Surveyor'}
+                            </span>
+                          </div>
+                          <div className="text-[11px] text-slate-500 flex items-center gap-2 mt-0.5">
+                            <span>Peran: <strong className="text-slate-600">{s.role}</strong></span>
+                            <span>•</span>
+                            <span>Aktif sejak: {s.loginAt ? new Date(s.loginAt).toLocaleTimeString('id-ID') : '-'}</span>
+                          </div>
                         </div>
                       </div>
-                    </div>
 
-                    <div className="text-right">
-                      <span className="inline-flex items-center gap-1 px-2 py-0.5 rounded-full text-[10px] font-semibold bg-emerald-50 text-emerald-700 border border-emerald-200">
-                        <span className="w-1.5 h-1.5 rounded-full bg-emerald-500 animate-pulse" />
-                        Online ({s.lastHeartbeatAgoSec}s lalu)
-                      </span>
+                      <div className="text-right">
+                        <span className="inline-flex items-center gap-1 px-2 py-0.5 rounded-full text-[10px] font-semibold bg-emerald-50 text-emerald-700 border border-emerald-200">
+                          <span className="w-1.5 h-1.5 rounded-full bg-emerald-500 animate-pulse" />
+                          Online {secAgo > 0 ? `(${secAgo}s lalu)` : ''}
+                        </span>
+                      </div>
                     </div>
-                  </div>
-                ))}
+                  );
+                })}
               </div>
             )}
           </div>
@@ -237,7 +244,7 @@ export const ActiveSessionsModal: React.FC<ActiveSessionsModalProps> = ({ isOpen
         {/* Modal Footer */}
         <div className="p-4 bg-white border-t border-slate-200 flex items-center justify-between">
           <div className="text-[11px] text-slate-500">
-            Pembaruan otomatis tiap 10 detik. Terakhir: <strong className="text-slate-700">{lastUpdated || '-'}</strong>
+            Sinkronisasi otomatis (Firestore / Cloudflare). Terakhir: <strong className="text-slate-700">{lastUpdated || '-'}</strong>
           </div>
           <button
             onClick={onClose}

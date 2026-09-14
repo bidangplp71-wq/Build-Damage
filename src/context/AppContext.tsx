@@ -19,6 +19,7 @@ import {
   DataNotification,
   SheetSyncProgress,
   SessionQuotaStatus,
+  ActiveSessionInfo,
 } from '../types';
 import { playNotificationChime } from '../utils/sound';
 import {
@@ -199,9 +200,11 @@ interface AppContextType {
   sheetSyncProgress: SheetSyncProgress;
 
   // Concurrent Surveyor Quota & Session Slot Control
-  sessionQuotaStatus: SessionQuotaStatus | null;
+  sessionQuotaStatus: SessionQuotaStatus;
   isSurveyorQuotaBlocked: boolean;
+  activeSessionsList: ActiveSessionInfo[];
   checkSessionSlot: () => Promise<boolean>;
+  refreshActiveSessions: () => Promise<void>;
 }
 
 const AppContext = createContext<AppContextType | undefined>(undefined);
@@ -1910,8 +1913,17 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
     };
   };
 
-  // Concurrent Surveyor Quota & Session Slot Control
-  const [sessionQuotaStatus, setSessionQuotaStatus] = useState<SessionQuotaStatus | null>(null);
+  // Concurrent Surveyor Quota & Session Slot Control (Cloudflare & Server dual-mode support)
+  const [sessionQuotaStatus, setSessionQuotaStatus] = useState<SessionQuotaStatus>({
+    allowed: true,
+    isPriority: false,
+    activeSurveyors: 1,
+    maxSurveyorQuota: 15,
+    activePriorityUsers: 0,
+    reason: 'ACTIVE',
+    message: 'Sesi aktif',
+  });
+  const [activeSessionsList, setActiveSessionsList] = useState<ActiveSessionInfo[]>([]);
   const [isSurveyorQuotaBlocked, setIsSurveyorQuotaBlocked] = useState(false);
 
   // Unique Tab Session ID for multi-tab / multi-device active slot tracking
@@ -1928,21 +1940,168 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
     }
   };
 
+  // Real-time Firestore Active Sessions Listener (works seamlessly on Cloudflare Pages & Static hosting)
+  useEffect(() => {
+    if (!db) return;
+
+    const unsubscribe = onSnapshot(
+      collection(db, 'active_sessions'),
+      (snapshot) => {
+        const now = Date.now();
+        const activeList: ActiveSessionInfo[] = [];
+
+        snapshot.docs.forEach((d) => {
+          const data = d.data() as ActiveSessionInfo;
+          // Active if heartbeat was within last 3 minutes (180,000 ms)
+          if (data && data.lastHeartbeat && now - data.lastHeartbeat < 180000) {
+            activeList.push(data);
+          } else if (data && data.sessionId) {
+            // Prune stale session silently
+            deleteDoc(doc(db, 'active_sessions', data.sessionId)).catch(() => {});
+          }
+        });
+
+        // If active list is empty but current user is logged in, ensure current user session is counted
+        if (activeList.length === 0 && isLoggedIn && currentUser) {
+          activeList.push({
+            sessionId: getOrCreateTabSessionId(),
+            userId: currentUser.id,
+            userName: currentUser.name,
+            userEmail: currentUser.email,
+            role: currentUser.role,
+            isPriority: currentUser.role !== 'admin_user',
+            lastHeartbeat: now,
+            loginAt: new Date().toISOString(),
+          });
+        }
+
+        setActiveSessionsList(activeList);
+
+        const activeSurveyorCount = activeList.filter(
+          (s) => s.role === 'admin_user' || !s.isPriority
+        ).length;
+        const activePriorityCount = activeList.filter(
+          (s) => s.role !== 'admin_user' && s.isPriority
+        ).length;
+
+        const currentSessId = getOrCreateTabSessionId();
+        const isPriorityUser = currentUser && currentUser.role !== 'admin_user';
+
+        let isBlocked = false;
+        if (!isPriorityUser && activeSurveyorCount > 15) {
+          const surveyorSessions = activeList
+            .filter((s) => s.role === 'admin_user' || !s.isPriority)
+            .sort(
+              (a, b) =>
+                (new Date(a.loginAt).getTime() || 0) - (new Date(b.loginAt).getTime() || 0)
+            );
+          const mySlotIndex = surveyorSessions.findIndex((s) => s.sessionId === currentSessId);
+          if (mySlotIndex >= 15) {
+            isBlocked = true;
+          }
+        }
+
+        setSessionQuotaStatus({
+          allowed: !isBlocked,
+          isPriority: Boolean(isPriorityUser),
+          activeSurveyors: Math.max(1, activeSurveyorCount),
+          maxSurveyorQuota: 15,
+          activePriorityUsers: activePriorityCount,
+          reason: isBlocked ? 'QUOTA_FULL' : isPriorityUser ? 'PRIORITY_GRANTED' : 'ACTIVE',
+          message: isBlocked
+            ? 'Kuota 15 surveyor telah penuh. Mohon tunggu sesi berikutnya.'
+            : 'Sesi aktif',
+        });
+        setIsSurveyorQuotaBlocked(isBlocked);
+      },
+      (err) => {
+        console.warn('Firestore active_sessions listener notice:', err?.message || err);
+      }
+    );
+
+    return () => unsubscribe();
+  }, [db, isLoggedIn, currentUser?.role, currentUser?.id]);
+
+  const refreshActiveSessions = async () => {
+    // 1. Try server API
+    try {
+      const res = await fetch('/api/sessions/status');
+      if (res.ok) {
+        const data = await res.json();
+        if (data.success) {
+          setSessionQuotaStatus({
+            allowed: data.allowed !== false,
+            isPriority: Boolean(data.isPriority),
+            activeSurveyors: data.activeSurveyors || 1,
+            maxSurveyorQuota: data.maxSurveyorQuota || 15,
+            activePriorityUsers: data.activePriorityUsers || 0,
+            reason: data.reason || 'ACTIVE',
+            message: data.message || 'Sesi aktif',
+          });
+          if (Array.isArray(data.activeSessions)) {
+            setActiveSessionsList(data.activeSessions);
+          }
+          return;
+        }
+      }
+    } catch {}
+
+    // 2. If server API failed (e.g. on Cloudflare Pages static hosting), query Firestore
+    if (db) {
+      try {
+        const snap = await getDocs(collection(db, 'active_sessions'));
+        const now = Date.now();
+        const activeList: ActiveSessionInfo[] = [];
+        snap.docs.forEach((d) => {
+          const data = d.data() as ActiveSessionInfo;
+          if (data && data.lastHeartbeat && now - data.lastHeartbeat < 180000) {
+            activeList.push(data);
+          }
+        });
+        setActiveSessionsList(activeList);
+        const surveyorCount = activeList.filter((s) => s.role === 'admin_user' || !s.isPriority).length;
+        const priorityCount = activeList.filter((s) => s.role !== 'admin_user' && s.isPriority).length;
+        setSessionQuotaStatus((prev) => ({
+          ...prev,
+          activeSurveyors: Math.max(1, surveyorCount),
+          activePriorityUsers: priorityCount,
+        }));
+      } catch (err) {
+        console.warn('Firestore manual session refresh notice:', err);
+      }
+    }
+  };
+
   const checkSessionSlot = async (): Promise<boolean> => {
     if (!currentUser) return true;
+    const sessionId = getOrCreateTabSessionId();
+    const sessionPayload: ActiveSessionInfo = {
+      sessionId,
+      userId: currentUser.id,
+      userName: currentUser.name,
+      userEmail: currentUser.email,
+      role: currentUser.role,
+      isPriority: currentUser.role !== 'admin_user',
+      lastHeartbeat: Date.now(),
+      loginAt: new Date().toISOString(),
+      deviceInfo: typeof navigator !== 'undefined' ? navigator.userAgent.slice(0, 100) : '',
+    };
+
+    // Sync to Firestore for Cloudflare Pages / Static Hosting support
+    if (db) {
+      try {
+        await setDoc(doc(db, 'active_sessions', sessionId), sessionPayload, { merge: true });
+      } catch (err) {
+        console.warn('Firestore active_sessions write notice:', err);
+      }
+    }
+
+    // Also sync to server API if fullstack
     try {
-      const sessionId = getOrCreateTabSessionId();
       const res = await fetch('/api/sessions/acquire', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({
-          sessionId,
-          userId: currentUser.id,
-          userName: currentUser.name,
-          userEmail: currentUser.email,
-          role: currentUser.role,
-          deviceInfo: typeof navigator !== 'undefined' ? navigator.userAgent.slice(0, 100) : '',
-        }),
+        body: JSON.stringify(sessionPayload),
       });
 
       if (res.ok) {
@@ -1957,7 +2116,7 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
         }
       }
     } catch (err) {
-      console.warn('Session acquire check notice:', err);
+      // Non-blocking for static hosting
     }
     return true;
   };
@@ -1969,21 +2128,34 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
     }
   }, [isLoggedIn, currentUser?.id, currentUser?.role]);
 
-  // Periodic Heartbeat every 30 seconds
+  // Periodic Heartbeat every 25 seconds
   useEffect(() => {
     if (!isLoggedIn || !currentUser) return;
 
     const interval = setInterval(async () => {
+      const sessionId = getOrCreateTabSessionId();
+      const heartbeatPayload = {
+        sessionId,
+        userId: currentUser.id,
+        userName: currentUser.name,
+        role: currentUser.role,
+        isPriority: currentUser.role !== 'admin_user',
+        lastHeartbeat: Date.now(),
+      };
+
+      // 1. Sync Heartbeat to Firestore (Works on Cloudflare Pages)
+      if (db) {
+        try {
+          await setDoc(doc(db, 'active_sessions', sessionId), heartbeatPayload, { merge: true });
+        } catch {}
+      }
+
+      // 2. Sync Heartbeat to Server API
       try {
-        const sessionId = getOrCreateTabSessionId();
         const res = await fetch('/api/sessions/heartbeat', {
           method: 'POST',
           headers: { 'Content-Type': 'application/json' },
-          body: JSON.stringify({
-            sessionId,
-            role: currentUser.role,
-            userName: currentUser.name,
-          }),
+          body: JSON.stringify(heartbeatPayload),
         });
 
         if (res.ok) {
@@ -1995,15 +2167,16 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
             setIsSurveyorQuotaBlocked(false);
           }
         }
-      } catch (err) {
-        // Non-blocking network drop tolerance
-      }
-    }, 30000);
+      } catch {}
+    }, 25000);
 
-    // Release session on beforeunload
+    // Release session on beforeunload / close tab
     const handleBeforeUnload = () => {
       try {
         const sessionId = getOrCreateTabSessionId();
+        if (db) {
+          deleteDoc(doc(db, 'active_sessions', sessionId)).catch(() => {});
+        }
         if (navigator.sendBeacon) {
           navigator.sendBeacon('/api/sessions/release', JSON.stringify({ sessionId }));
         } else {
@@ -2023,11 +2196,14 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
       clearInterval(interval);
       window.removeEventListener('beforeunload', handleBeforeUnload);
     };
-  }, [isLoggedIn, currentUser?.id, currentUser?.role]);
+  }, [db, isLoggedIn, currentUser?.id, currentUser?.role]);
 
   const logout = () => {
     try {
       const sessionId = getOrCreateTabSessionId();
+      if (db) {
+        deleteDoc(doc(db, 'active_sessions', sessionId)).catch(() => {});
+      }
       fetch('/api/sessions/release', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
@@ -3606,7 +3782,9 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
 
         sessionQuotaStatus,
         isSurveyorQuotaBlocked,
+        activeSessionsList,
         checkSessionSlot,
+        refreshActiveSessions,
       }}
     >
       {children}
