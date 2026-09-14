@@ -1238,20 +1238,20 @@ export const PortfolioRecapModal: React.FC<Props> = ({
                     </button>
                   </div>
                 ) : (
-                  <div className="border border-slate-300 rounded-xl overflow-hidden">
-                    <table className={`w-full text-left ${printOrientation === 'landscape' ? 'text-[11px]' : 'text-[10px]'}`}>
+                  <div className="portfolio-table-container border border-slate-300 rounded-xl overflow-x-auto print:overflow-visible print:border-slate-400">
+                    <table className={`portfolio-matrix-table w-full text-left ${printOrientation === 'landscape' ? 'text-[11px]' : 'text-[10px]'}`}>
                       <thead className="bg-slate-900 text-white font-bold">
                         <tr>
-                          <th className="p-2 text-center w-8">No</th>
-                          <th className="p-2">No. Registrasi</th>
-                          <th className="p-2">Nama Bangunan</th>
-                          <th className="p-2">Pemilik / Instansi</th>
-                          <th className="p-2">Kecamatan</th>
-                          <th className="p-2">Desa</th>
-                          <th className="p-2 text-center">Status</th>
-                          <th className="p-2 text-center">Kerusakan</th>
-                          <th className="p-2 text-center">Klasifikasi</th>
-                          <th className="p-2 text-right">Estimasi Biaya</th>
+                          <th className="p-2 text-center w-[3%]">No</th>
+                          <th className="p-2 w-[11%]">No. Registrasi</th>
+                          <th className="p-2 w-[18%]">Nama Bangunan</th>
+                          <th className="p-2 w-[11%]">Kategori</th>
+                          <th className="p-2 w-[13%]">Pemilik / Instansi</th>
+                          <th className="p-2 w-[12%]">Kecamatan & Desa</th>
+                          <th className="p-2 text-center w-[7%]">Status</th>
+                          <th className="p-2 text-center w-[6%]">Kerusakan</th>
+                          <th className="p-2 text-center w-[8%]">Klasifikasi</th>
+                          <th className="p-2 text-right w-[11%]">Estimasi Biaya</th>
                         </tr>
                       </thead>
                       <tbody className="divide-y divide-slate-200">
@@ -1261,46 +1261,49 @@ export const PortfolioRecapModal: React.FC<Props> = ({
 
                           return (
                             <tr key={item.id || idx} className="hover:bg-slate-50">
-                              <td className="p-2 text-center font-bold text-slate-600">{idx + 1}</td>
-                              <td className="p-2 font-mono font-bold text-slate-800">{item.code || '-'}</td>
-                              <td className="p-2 font-bold text-slate-950">{item.buildingName}</td>
-                              <td className="p-2 text-slate-700">{item.ownerAgency || item.namaPemilikRumah || '-'}</td>
-                              <td className="p-2 font-semibold text-slate-800">{item.kecamatanName}</td>
-                              <td className="p-2 text-slate-700">{item.desaName}</td>
-                              <td className="p-2 text-center">
-                                <span className={`px-2 py-0.5 rounded text-[9px] font-bold ${
+                              <td className="p-2 text-center font-bold text-slate-600 align-middle">{idx + 1}</td>
+                              <td className="p-2 font-mono font-bold text-slate-800 break-all align-middle">{item.code || '-'}</td>
+                              <td className="p-2 font-bold text-slate-950 break-words align-middle">{item.buildingName}</td>
+                              <td className="p-2 text-slate-700 text-[10px] break-words align-middle">{item.buildingCategory || 'Gedung Pemerintah'}</td>
+                              <td className="p-2 text-slate-700 break-words align-middle">{item.ownerAgency || item.namaPemilikRumah || item.namaPemilikGedung || '-'}</td>
+                              <td className="p-2 text-slate-800 text-[10px] break-words align-middle">
+                                <span className="font-semibold block">{item.kecamatanName}</span>
+                                <span className="text-slate-500">{item.desaName}</span>
+                              </td>
+                              <td className="p-2 text-center align-middle">
+                                <span className={`inline-block px-1.5 py-0.5 rounded text-[9px] font-bold ${
                                   item.verificationStatus === 'Terverifikasi'
-                                    ? 'bg-emerald-100 text-emerald-800'
+                                    ? 'bg-emerald-100 text-emerald-800 border border-emerald-200'
                                     : item.verificationStatus === 'Perlu Revisi'
-                                    ? 'bg-rose-100 text-rose-800'
-                                    : 'bg-slate-100 text-slate-700'
+                                    ? 'bg-rose-100 text-rose-800 border border-rose-200'
+                                    : 'bg-slate-100 text-slate-700 border border-slate-200'
                                 }`}>
                                   {item.verificationStatus || 'Belum'}
                                 </span>
                               </td>
-                              <td className="p-2 text-center font-bold text-slate-900">{pct.toFixed(1)}%</td>
-                              <td className="p-2 text-center">
-                                <span className={`px-2 py-0.5 rounded text-[9px] font-bold ${
+                              <td className="p-2 text-center font-bold text-slate-900 font-mono align-middle">{pct.toFixed(1)}%</td>
+                              <td className="p-2 text-center align-middle">
+                                <span className={`inline-block px-1.5 py-0.5 rounded text-[9px] font-bold ${
                                   item.damageClassification === 'Rusak Berat'
-                                    ? 'bg-rose-100 text-rose-800'
+                                    ? 'bg-rose-100 text-rose-800 border border-rose-200'
                                     : item.damageClassification === 'Rusak Sedang'
-                                    ? 'bg-amber-100 text-amber-800'
-                                    : 'bg-emerald-100 text-emerald-800'
+                                    ? 'bg-amber-100 text-amber-800 border border-amber-200'
+                                    : 'bg-emerald-100 text-emerald-800 border border-emerald-200'
                                 }`}>
                                   {item.damageClassification || 'Tidak Rusak'}
                                 </span>
                               </td>
-                              <td className="p-2 text-right font-bold text-slate-950">{formatRupiah(cost)}</td>
+                              <td className="p-2 text-right font-bold text-slate-950 font-mono whitespace-nowrap align-middle">{formatRupiah(cost)}</td>
                             </tr>
                           );
                         })}
                       </tbody>
                       <tfoot className="bg-slate-100 font-bold border-t-2 border-slate-300 text-[11px]">
                         <tr>
-                          <td colSpan={7} className="p-2.5 text-right uppercase text-slate-700">Total Kebutuhan Anggaran:</td>
-                          <td className="p-2.5 text-center text-slate-950">{filteredData.length} Unit</td>
+                          <td colSpan={7} className="p-2.5 text-right uppercase text-slate-700">Total Kebutuhan Anggaran ({filteredData.length} Gedung):</td>
+                          <td className="p-2.5 text-center text-slate-950 font-mono">{filteredData.length} Unit</td>
                           <td className="p-2.5"></td>
-                          <td className="p-2.5 text-right text-slate-950 text-xs">{formatRupiah(stats.totalCost)}</td>
+                          <td className="p-2.5 text-right text-slate-950 text-xs font-mono font-black">{formatRupiah(stats.totalCost)}</td>
                         </tr>
                       </tfoot>
                     </table>
