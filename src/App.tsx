@@ -17,6 +17,7 @@ import { FirebaseProtection } from './components/FirebaseProtection';
 import { UserActivityLogView } from './components/UserActivityLogView';
 import { HsbgnSettings } from './components/HsbgnSettings';
 import { SessionLockScreen } from './components/SessionLockScreen';
+import { SheetSyncProgressBanner } from './components/SheetSyncProgressBanner';
 import { CheckCircle2, AlertCircle, Info, X, ShieldAlert, BellRing, Building2, ArrowRight } from 'lucide-react';
 
 const MainLayout: React.FC = () => {
@@ -180,6 +181,9 @@ const MainLayout: React.FC = () => {
           </div>
         </aside>
       )}
+
+      {/* Real-time Progressive Sheet Sync Bar / Status */}
+      <SheetSyncProgressBanner />
 
       {/* Global Toast Notification */}
       {toastMessage && (

@@ -578,4 +578,19 @@ export interface DataFulfillmentSummary {
   pendingCount: number;
 }
 
+export interface SheetSyncProgress {
+  isLoading: boolean;
+  currentKecamatan: string;
+  currentStep: number;
+  totalSteps: number;
+  percent: number;
+  totalLoaded: number;
+  loadedKecamatans: Array<{
+    name: string;
+    count: number;
+    status: 'pending' | 'loading' | 'completed';
+  }>;
+  statusMessage: string;
+}
+
 

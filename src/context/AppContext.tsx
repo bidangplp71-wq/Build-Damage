@@ -17,6 +17,7 @@ import {
   UserActivityLog,
   ActivityActionType,
   DataNotification,
+  SheetSyncProgress,
 } from '../types';
 import { playNotificationChime } from '../utils/sound';
 import {
@@ -191,6 +192,9 @@ interface AppContextType {
   clearNotifications: () => void;
   latestIncomingData: DataNotification | null;
   clearLatestIncomingData: () => void;
+
+  // Real-time Sheet Sync Progress Bar & Details
+  sheetSyncProgress: SheetSyncProgress;
 }
 
 const AppContext = createContext<AppContextType | undefined>(undefined);
@@ -638,6 +642,27 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
   });
 
   const [latestIncomingData, setLatestIncomingData] = useState<DataNotification | null>(null);
+
+  // Real-time Sheet Sync Progress & Status Bar State
+  const initialKecList = [
+    'Aesesa',
+    'Aesesa Selatan',
+    'Boawae',
+    'Mauponggo',
+    'Nangaroro',
+    'Keo Tengah',
+    'Wolowae',
+  ];
+  const [sheetSyncProgress, setSheetSyncProgress] = useState<SheetSyncProgress>({
+    isLoading: false,
+    currentKecamatan: '',
+    currentStep: 0,
+    totalSteps: 7,
+    percent: 0,
+    totalLoaded: 0,
+    loadedKecamatans: initialKecList.map((k) => ({ name: k, count: 0, status: 'pending' })),
+    statusMessage: '',
+  });
 
   const unreadNotificationCount = notifications.filter((n) => !n.isRead).length;
 
@@ -2747,8 +2772,60 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
       // If user clicked manual sync, always force fresh download
       const shouldForce = forceRefresh !== undefined ? forceRefresh : Boolean(showToastAlert);
       
+      const defaultKecamatans = [
+        'Aesesa',
+        'Aesesa Selatan',
+        'Boawae',
+        'Mauponggo',
+        'Nangaroro',
+        'Keo Tengah',
+        'Wolowae',
+      ];
+
+      // Initialize Live Progress State
+      setSheetSyncProgress({
+        isLoading: true,
+        currentKecamatan: 'Aesesa',
+        currentStep: 1,
+        totalSteps: defaultKecamatans.length,
+        percent: 10,
+        totalLoaded: assessments.length,
+        loadedKecamatans: defaultKecamatans.map((k, idx) => ({
+          name: k,
+          count: 0,
+          status: idx === 0 ? 'loading' : 'pending',
+        })),
+        statusMessage: 'Memulai pembacaan sheet kecamatan secara berurutan...',
+      });
+
       const onProgressStream = (prog: { currentKec: string; count: number; totalSoFar: number; step: number; totalSteps: number; partialData: BuildingAssessment[] }) => {
-        if (!prog.partialData || prog.partialData.length === 0) return;
+        if (!prog.partialData) return;
+        
+        // Update live progress bar details
+        const calculatedPercent = Math.min(99, Math.round((prog.step / prog.totalSteps) * 100));
+        setSheetSyncProgress((prev) => {
+          const updatedKecs = prev.loadedKecamatans.map((k, idx) => {
+            if (k.name.toLowerCase() === prog.currentKec.toLowerCase() || prog.currentKec.toLowerCase().includes(k.name.toLowerCase())) {
+              return { ...k, count: prog.count, status: 'completed' as const };
+            }
+            if (idx === prog.step) {
+              return { ...k, status: 'loading' as const };
+            }
+            return k;
+          });
+
+          return {
+            isLoading: true,
+            currentKecamatan: prog.currentKec,
+            currentStep: prog.step,
+            totalSteps: prog.totalSteps,
+            percent: calculatedPercent,
+            totalLoaded: prog.totalSoFar,
+            loadedKecamatans: updatedKecs,
+            statusMessage: `Sheet Kec. ${prog.currentKec} selesai dibaca (+${prog.count} baris). Melanjutkan ke sheet berikutnya...`,
+          };
+        });
+
         setAssessments((prev) => {
           const prevPhotosMap = new Map<string, any[]>();
           const prevDriveMap = new Map<string, string>();
@@ -2782,6 +2859,17 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
       };
 
       const result = await fetchAssessmentsFromGoogleSheet(googleSheetConfig, shouldForce, onProgressStream);
+      
+      // Update progress to 100% finished
+      setSheetSyncProgress((prev) => ({
+        ...prev,
+        isLoading: false,
+        percent: 100,
+        totalLoaded: result.data ? result.data.length : prev.totalLoaded,
+        statusMessage: `Selesai! Seluruh ${result.data ? result.data.length : 0} data gedung siap ditampilkan.`,
+        loadedKecamatans: prev.loadedKecamatans.map((k) => ({ ...k, status: 'completed' as const })),
+      }));
+
       if (!result.success || !result.data) {
         if (showToastAlert) showToast(result.message, 'info');
         return { success: false, message: result.message, count: 0 };
@@ -3334,6 +3422,8 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
         clearNotifications,
         latestIncomingData,
         clearLatestIncomingData,
+
+        sheetSyncProgress,
       }}
     >
       {children}

@@ -49,6 +49,7 @@ export const GoogleSheetIntegration: React.FC = () => {
     fetchUsersFromSheet,
     showToast,
     currentUser,
+    sheetSyncProgress,
   } = useApp();
 
   const isAdmin = currentUser.role === 'super_admin' || currentUser.role === 'admin';
@@ -427,6 +428,71 @@ export const GoogleSheetIntegration: React.FC = () => {
             <Settings className="w-4 h-4 text-slate-600" />
             <span>Pengaturan Link & Webhook (Khusus Admin)</span>
           </button>
+        </div>
+      )}
+
+      {/* LIVE PROGRESS STATUS IN GOOGLE SHEET INTEGRATION TAB */}
+      {sheetSyncProgress && sheetSyncProgress.isLoading && (
+        <div className="bg-gradient-to-r from-blue-950 via-slate-900 to-indigo-950 border-2 border-blue-500/50 rounded-2xl p-5 text-white shadow-xl animate-in fade-in duration-200">
+          <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-3 mb-3">
+            <div className="flex items-center gap-3">
+              <div className="p-2.5 rounded-xl bg-blue-500/20 text-blue-400">
+                <RefreshCw className="w-5 h-5 animate-spin text-blue-400" />
+              </div>
+              <div>
+                <div className="flex items-center gap-2">
+                  <span className="text-xs font-black uppercase tracking-wider text-cyan-300">
+                    Sedang Mengunduh Data Google Sheet ({sheetSyncProgress.percent}%)
+                  </span>
+                  <span className="text-[11px] px-2 py-0.5 rounded-full bg-blue-900/80 text-blue-200 border border-blue-700 font-mono">
+                    Tahap {sheetSyncProgress.currentStep} dari {sheetSyncProgress.totalSteps}
+                  </span>
+                </div>
+                <p className="text-xs text-slate-300 mt-1">
+                  Membaca Tab Sheet: <span className="text-white font-bold">{sheetSyncProgress.currentKecamatan ? `Kecamatan ${sheetSyncProgress.currentKecamatan}` : 'Menghubungkan...'}</span> ({sheetSyncProgress.totalLoaded} gedung terdata)
+                </p>
+              </div>
+            </div>
+            <div className="text-right">
+              <span className="text-2xl font-black font-mono text-cyan-400">
+                {sheetSyncProgress.percent}%
+              </span>
+              <div className="text-[11px] text-slate-400">
+                Lalulintas antrean aman
+              </div>
+            </div>
+          </div>
+
+          <div className="w-full bg-slate-800 rounded-full h-2.5 overflow-hidden my-2.5 border border-slate-700">
+            <div
+              className="bg-gradient-to-r from-blue-500 via-cyan-400 to-emerald-400 h-full transition-all duration-300 ease-out"
+              style={{ width: `${Math.max(5, sheetSyncProgress.percent)}%` }}
+            />
+          </div>
+
+          <div className="grid grid-cols-2 sm:grid-cols-4 md:grid-cols-7 gap-2 mt-3 pt-3 border-t border-slate-800">
+            {sheetSyncProgress.loadedKecamatans.map((kec) => (
+              <div
+                key={kec.name}
+                className={`p-2 rounded-xl flex items-center justify-between text-xs transition-colors ${
+                  kec.status === 'completed'
+                    ? 'bg-emerald-950/80 text-emerald-300 border border-emerald-500/40 font-semibold'
+                    : kec.status === 'loading'
+                    ? 'bg-blue-900 text-cyan-200 border border-cyan-400 font-bold animate-pulse'
+                    : 'bg-slate-800/60 text-slate-400 border border-slate-700/40'
+                }`}
+              >
+                <span className="truncate">{kec.name}</span>
+                {kec.status === 'completed' ? (
+                  <span className="text-[10px] text-emerald-400 font-mono shrink-0 ml-1">+{kec.count}</span>
+                ) : kec.status === 'loading' ? (
+                  <span className="w-2 h-2 rounded-full bg-cyan-300 animate-ping shrink-0 ml-1" />
+                ) : (
+                  <span className="text-[10px] text-slate-500 shrink-0 ml-1">-</span>
+                )}
+              </div>
+            ))}
+          </div>
         </div>
       )}
 
