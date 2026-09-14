@@ -736,14 +736,16 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
       .then((res) => res.json())
       .then((data) => {
         if (data.success && data.config) {
-          const { spreadsheetUrl, webhookUrl, driveFolderId } = data.config;
-          if (spreadsheetUrl || webhookUrl || driveFolderId) {
+          const { spreadsheetUrl, webhookUrl, driveFolderId, spreadsheetProfiles, activeProfileId } = data.config;
+          if (spreadsheetUrl || webhookUrl || driveFolderId || spreadsheetProfiles) {
             setGoogleSheetConfig((prev) => {
               const updated = {
                 ...prev,
                 spreadsheetUrl: spreadsheetUrl || prev.spreadsheetUrl,
                 webhookUrl: webhookUrl || prev.webhookUrl,
                 driveFolderId: driveFolderId || prev.driveFolderId,
+                spreadsheetProfiles: spreadsheetProfiles || prev.spreadsheetProfiles,
+                activeProfileId: activeProfileId || prev.activeProfileId,
               };
               try {
                 localStorage.setItem(STORAGE_KEYS.GOOGLE_SHEET, JSON.stringify(updated));

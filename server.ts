@@ -1470,13 +1470,15 @@ app.get('/api/sheets/kecamatan-raw', handleKecamatanRawFetch);
 // ==========================================
 // 2. API route to update Google Sheet config (called by Super Admin)
 app.post('/api/config', (req, res) => {
-  const { spreadsheetUrl, webhookUrl, driveFolderId } = req.body;
+  const { spreadsheetUrl, webhookUrl, driveFolderId, spreadsheetProfiles, activeProfileId } = req.body;
   const currentConfig = getGoogleSheetConfig();
   const config = {
     ...currentConfig,
     spreadsheetUrl: spreadsheetUrl !== undefined ? spreadsheetUrl : currentConfig.spreadsheetUrl,
     webhookUrl: webhookUrl !== undefined ? webhookUrl : currentConfig.webhookUrl,
     driveFolderId: driveFolderId !== undefined ? driveFolderId : currentConfig.driveFolderId,
+    spreadsheetProfiles: spreadsheetProfiles !== undefined ? spreadsheetProfiles : currentConfig.spreadsheetProfiles,
+    activeProfileId: activeProfileId !== undefined ? activeProfileId : currentConfig.activeProfileId,
   };
 
   try {
