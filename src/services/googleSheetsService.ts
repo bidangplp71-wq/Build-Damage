@@ -196,6 +196,7 @@ export function formatAssessmentForGoogleSheet(item: BuildingAssessment) {
     'Nama Kepala Dinas': item.headOfDepartment?.name || '-',
     'NIP Kepala Dinas': item.headOfDepartment?.nip || '-',
     'Tim Analisis': item.analysisTeam?.join(', ') || '-',
+    'Komponen JSON': JSON.stringify((item.components || []).map(c => [c.id, c.damagePercentInput || 0, c.calculatedScore || 0, c.notes || ''])).substring(0, 25000),
     'Terakhir Diperbarui': new Date(item.updatedAt).toLocaleString('id-ID'),
   };
 }
@@ -1975,92 +1976,25 @@ export function formatActivityLogForGoogleSheet(log: UserActivityLog, index?: nu
 }
 
 /**
- * Directly stream a single activity log to Google Sheet
+ * Directly stream a single activity log to Google Sheet (Disabled to protect sheet capacity)
  */
 export async function directSaveActivityLogToGoogleSheet(
   log: UserActivityLog,
   config: GoogleSheetConfig
 ): Promise<{ success: boolean; message: string }> {
-  if (!config.webhookUrl || !config.webhookUrl.startsWith('http')) {
-    return { success: false, message: 'Webhook Google Sheet belum dikonfigurasi.' };
-  }
-
-  const spreadsheetId = extractSpreadsheetId(config.spreadsheetUrl);
-  const rowData = formatActivityLogForGoogleSheet(log);
-
-  const payload: GoogleSheetRowPayload = {
-    action: 'log_user_access',
-    sheetName: config.sheetName || 'Data_Kerusakan_PUPR',
-    logSheetName: config.logSheetName || 'Log_Akses_Pengguna',
-    spreadsheetUrl: config.spreadsheetUrl,
-    spreadsheetId: spreadsheetId || undefined,
-    data: rowData,
-    timestamp: new Date().toISOString(),
-  };
-
-  try {
-    await fetch(config.webhookUrl, {
-      method: 'POST',
-      mode: 'no-cors',
-      headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify(payload),
-    });
-    return { success: true, message: 'Log akses tercatat di Google Sheet!' };
-  } catch (err: any) {
-    console.warn('Activity log direct save notice:', err?.message || err);
-    return { success: false, message: err.message || 'Gagal menyimpan log ke Google Sheet' };
-  }
+  // Logs are kept locally in-app only, not sent to Google Sheets to prevent sheet quota/capacity crash
+  return { success: true, message: 'Log dicatat secara lokal (sinkronisasi ke Google Sheet dinonaktifkan untuk menjaga kapasitas sheet).' };
 }
 
 /**
- * Sync multiple activity logs to the dedicated 'Log_Akses_Pengguna' sheet tab in Google Sheets
+ * Sync multiple activity logs to the dedicated 'Log_Akses_Pengguna' sheet tab in Google Sheets (Disabled)
  */
 export async function syncActivityLogsToGoogleSheet(
   logs: UserActivityLog[],
   config: GoogleSheetConfig
 ): Promise<{ success: boolean; message: string; count: number }> {
-  if (!config.webhookUrl || !config.webhookUrl.startsWith('http')) {
-    return { success: false, message: 'Webhook Google Sheet belum dikonfigurasi.', count: 0 };
-  }
-
-  if (logs.length === 0) {
-    return { success: false, message: 'Belum ada data log aktivitas untuk disinkronkan.', count: 0 };
-  }
-
-  const rows = logs.map((l, idx) => formatActivityLogForGoogleSheet(l, idx));
-  const spreadsheetId = extractSpreadsheetId(config.spreadsheetUrl);
-  const logTab = config.logSheetName || 'Log_Akses_Pengguna';
-
-  const payload: GoogleSheetRowPayload = {
-    action: 'sync_activity_logs',
-    sheetName: config.sheetName || 'Data_Kerusakan_PUPR',
-    logSheetName: logTab,
-    spreadsheetUrl: config.spreadsheetUrl,
-    spreadsheetId: spreadsheetId || undefined,
-    data: rows,
-    timestamp: new Date().toISOString(),
-  };
-
-  try {
-    await fetch(config.webhookUrl, {
-      method: 'POST',
-      mode: 'no-cors',
-      headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify(payload),
-    });
-
-    return {
-      success: true,
-      message: `Berhasil sinkronisasi ${logs.length} catatan log akses ke tab "${logTab}" di Google Sheet!`,
-      count: logs.length,
-    };
-  } catch (err: any) {
-    return {
-      success: false,
-      message: `Gagal sinkronisasi log ke Google Sheet: ${err.message}`,
-      count: 0,
-    };
-  }
+  // Logs are kept locally in-app only, not sent to Google Sheets to prevent sheet quota/capacity crash
+  return { success: true, message: 'Sinkronisasi log ke Google Sheet dinonaktifkan.', count: 0 };
 }
 
 /**
@@ -2515,11 +2449,51 @@ export function parseExtractedRowsToAssessments(
     const analysisTeam = rawTeam ? rawTeam.split(',').map(s => s.trim()).filter(Boolean) : [];
 
     const rawComponentsJson = getVal(rowObj, ['Rincian Komponen JSON', 'Komponen JSON', 'Rincian Komponen', 'Komponen']);
-    let parsedComponents: any[] = [];
+    let parsedComponents: any[] = getInitialSubComponents();
     if (rawComponentsJson && typeof rawComponentsJson === 'string' && rawComponentsJson.trim().startsWith('[')) {
       try {
-        parsedComponents = JSON.parse(rawComponentsJson);
-      } catch (e) {}
+        const decoded = JSON.parse(rawComponentsJson);
+        if (Array.isArray(decoded) && decoded.length > 0) {
+          const templateComps = getInitialSubComponents();
+          if (Array.isArray(decoded[0])) {
+            // Compact array format: [[id, damage, score, notes], ...]
+            parsedComponents = templateComps.map(t => {
+              const found = decoded.find((item: any) => item[0] === t.id);
+              if (found) {
+                const dmg = Number(found[1]) || 0;
+                const score = Number(found[2]) || (dmg * t.bobotPercent * t.kerusakanMaxPercent / 10000);
+                return {
+                  ...t,
+                  damagePercentInput: dmg,
+                  calculatedScore: score,
+                  notes: String(found[3] || '')
+                };
+              }
+              return t;
+            });
+          } else if (typeof decoded[0] === 'object' && decoded[0] !== null) {
+            // Full object format
+            parsedComponents = templateComps.map(t => {
+              const found = decoded.find((item: any) => item.id === t.id);
+              if (found) {
+                const dmg = Number(found.damagePercentInput ?? found.damage ?? 0) || 0;
+                const score = Number(found.calculatedScore ?? found.score ?? 0) || (dmg * t.bobotPercent * t.kerusakanMaxPercent / 10000);
+                return {
+                  ...t,
+                  damagePercentInput: dmg,
+                  calculatedScore: score,
+                  notes: String(found.notes ?? found.n ?? '')
+                };
+              }
+              return t;
+            });
+          }
+        }
+      } catch (e) {
+        parsedComponents = getInitialSubComponents();
+      }
+    } else {
+      parsedComponents = getInitialSubComponents();
     }
 
     const rawPhotosJson = getVal(rowObj, ['Foto JSON', 'Daftar Foto JSON', 'Photos JSON', 'Foto', 'Link Foto', 'Foto Kerusakan', 'Dokumentasi Foto', 'URL Foto']);
