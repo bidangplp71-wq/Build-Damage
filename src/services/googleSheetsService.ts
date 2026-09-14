@@ -2871,8 +2871,48 @@ export async function fetchAssessmentsFromGoogleSheet(
 
   try {
     // ==========================================
+    // STEP 0: Ultra-Fast Direct Webhook Fastpath (Single unthrottled request, reads all 7 kecamatan tabs instantly)
+    // ==========================================
+    if (hasWebhook && config.webhookUrl) {
+      try {
+        const getUrl = `${config.webhookUrl}${config.webhookUrl.includes('?') ? '&' : '?'}action=fetch_assessments&_t=${cacheBuster}`;
+        const whRes = await fetch(getUrl, { signal: AbortSignal.timeout(6000), cache: 'no-store' });
+        if (whRes.ok) {
+          const json = await whRes.json();
+          if (json && (json.status === 'success' || Array.isArray(json.data) || Array.isArray(json))) {
+            const rawList = Array.isArray(json.data) ? json.data : Array.isArray(json) ? json : [];
+            if (rawList.length > 0) {
+              const parsed = parseExtractedRowsToAssessments(
+                rawList.map((r: any, idx: number) => ({
+                  rowObj: r,
+                  sheetRowNumber: idx + 2,
+                  sourceSheet: r['Kecamatan'] ? `Kec. ${r['Kecamatan']}` : undefined,
+                }))
+              );
+              if (parsed.length > 0) {
+                memoryAssessmentsCache = {
+                  spreadsheetId,
+                  data: parsed,
+                  timestamp: Date.now(),
+                };
+                return {
+                  success: true,
+                  data: parsed,
+                  totalRows: parsed.length,
+                  message: `Berhasil memuat seluruh ${parsed.length} data penilaian dari Google Sheet via koneksi terpadu!`,
+                };
+              }
+            }
+          }
+        }
+      } catch (whErr) {
+        // Fallback to queue scanner
+      }
+    }
+
+    // ==========================================
     // STEP 1: Fast Server Datacenter Fetch (Direct peering in asia-southeast1, <500ms)
-    // Strictly reads only from the 7 kecamatan sheets
+    // Strictly reads only from the 7 kecamatan sheets via server queue
     // ==========================================
     try {
       const serverResp = await fetch('/api/sheets/kecamatan-raw', {
@@ -2895,18 +2935,18 @@ export async function fetchAssessmentsFromGoogleSheet(
               success: true,
               data: parsed,
               totalRows: parsed.length,
-              message: `Berhasil memuat cepat seluruh ${parsed.length} data penilaian secara serentak dari spreadsheet!`,
+              message: `Berhasil memuat cepat seluruh ${parsed.length} data penilaian secara teratur dari server!`,
             };
           }
         }
       }
     } catch (serverErr) {
-      console.warn('Server kecamatan-raw notice (proceeding with direct parallel browser scan):', serverErr);
+      console.warn('Server kecamatan-raw notice (proceeding with direct queue scan):', serverErr);
     }
 
     // ==========================================
-    // STEP 2: Ultra-Fast Parallel Multi-Stream Client Fetch across the 7 Kecamatan Sheets ONLY
-    // Strictly NO non-kecamatan sheets (no Rekap, no Users, no Logs, no Sheet1/DefaultSheet)
+    // STEP 2: Throttled Queue Fetch across the 7 Kecamatan Sheets ONLY
+    // Paced queue with backoff retry to prevent 429 Too Many Requests
     // ==========================================
     const CONFIRMED_TABS_KEY = 'sipandukerusakan_confirmed_kecamatan_tabs';
     let confirmedTabs: Record<string, string> = {};
@@ -2917,66 +2957,65 @@ export async function fetchAssessmentsFromGoogleSheet(
 
     const updatedConfirmedTabs: Record<string, string> = { ...confirmedTabs };
 
-    const kecamatanResults = await Promise.all(
-      kecamatanTabGroups.map(async (group) => {
-        // If we already know the exact tab name that works and starts with Kec, test it first
-        const knownAlias = confirmedTabs[group.name];
-        const validKnown = knownAlias && knownAlias.toLowerCase().startsWith('kec') ? knownAlias : null;
-        const initialAliases = validKnown
-          ? [validKnown, `Kec. ${group.name}`, `Kec ${group.name}`]
-          : [`Kec. ${group.name}`, `Kec ${group.name}`, `KEC. ${group.name.toUpperCase()}`];
+    const fetchSingleWithRetry = async (alias: string): Promise<{ rows: ExtractedRow[]; matchedAlias: string } | null> => {
+      if (!alias.toLowerCase().startsWith('kec')) return null;
+      const gvizUrl = `https://docs.google.com/spreadsheets/d/${spreadsheetId}/gviz/tq?sheet=${encodeURIComponent(alias)}&_t=${cacheBuster}`;
 
-        const prioritizedAliases = Array.from(
-          new Set([...initialAliases, ...group.aliases])
-        ).filter((a) => a.toLowerCase().startsWith('kec'));
+      for (let attempt = 0; attempt < 2; attempt++) {
+        try {
+          const controller = new AbortController();
+          const timeoutId = setTimeout(() => controller.abort(), 12000);
+          const res = await fetch(gvizUrl, { signal: controller.signal });
+          clearTimeout(timeoutId);
+          lastStatus = res.status;
 
-        // Check top 2 aliases in parallel first
-        const probeTop = prioritizedAliases.slice(0, 2);
+          if (res.status === 429) {
+            // Google rate limiting: pause and back off
+            await new Promise((r) => setTimeout(r, 1000 * (attempt + 1)));
+            continue;
+          }
 
-        const fetchSingle = async (alias: string) => {
-          if (!alias.toLowerCase().startsWith('kec')) return null;
-          const gvizUrl = `https://docs.google.com/spreadsheets/d/${spreadsheetId}/gviz/tq?sheet=${encodeURIComponent(alias)}&_t=${cacheBuster}`;
-          try {
-            const controller = new AbortController();
-            const timeoutId = setTimeout(() => controller.abort(), 12000);
-            const res = await fetch(gvizUrl, { signal: controller.signal });
-            clearTimeout(timeoutId);
-            lastStatus = res.status;
-            if (res.ok) {
-              const text = await res.text();
-              if (text && text.includes('google.visualization.Query.setResponse')) {
-                const parsedRows = parseGvizResponseToRows(text, alias);
-                if (parsedRows.length > 0 && !isMasterRekapFallback(parsedRows, group.name)) {
-                  return { rows: parsedRows, matchedAlias: alias };
-                }
+          if (res.ok) {
+            const text = await res.text();
+            if (text && text.includes('google.visualization.Query.setResponse')) {
+              const parsedRows = parseGvizResponseToRows(text, alias);
+              if (parsedRows.length > 0 && !isMasterRekapFallback(parsedRows, alias)) {
+                return { rows: parsedRows, matchedAlias: alias };
               }
             }
-          } catch {}
-          return null;
-        };
-
-        // Probe top 2 simultaneously
-        const topRes = await Promise.all(probeTop.map(fetchSingle));
-        for (const tr of topRes) {
-          if (tr && tr.rows.length > 0) {
-            updatedConfirmedTabs[group.name] = tr.matchedAlias;
-            return { success: true, rows: tr.rows };
           }
-        }
+        } catch {}
+      }
+      return null;
+    };
 
-        // Check remaining aliases if top 2 failed
-        const remaining = prioritizedAliases.slice(2);
-        for (const alias of remaining) {
-          const remRes = await fetchSingle(alias);
-          if (remRes && remRes.rows.length > 0) {
-            updatedConfirmedTabs[group.name] = remRes.matchedAlias;
-            return { success: true, rows: remRes.rows };
-          }
-        }
+    // Sequentially process each kecamatan with queue interval to avoid traffic congestion
+    for (const group of kecamatanTabGroups) {
+      const knownAlias = confirmedTabs[group.name];
+      const validKnown = knownAlias && knownAlias.toLowerCase().startsWith('kec') ? knownAlias : null;
+      const initialAliases = validKnown
+        ? [validKnown, `Kec. ${group.name}`, `Kec ${group.name}`]
+        : [`Kec. ${group.name}`, `Kec ${group.name}`, `KEC. ${group.name.toUpperCase()}`];
 
-        return { success: false, rows: [] };
-      })
-    );
+      const prioritizedAliases = Array.from(
+        new Set([...initialAliases, ...group.aliases])
+      ).filter((a) => a.toLowerCase().startsWith('kec'));
+
+      for (const alias of prioritizedAliases) {
+        const res = await fetchSingleWithRetry(alias);
+        if (res && res.rows.length > 0) {
+          updatedConfirmedTabs[group.name] = res.matchedAlias;
+          allExtractedRows.push(...res.rows);
+          successfulFetches++;
+          break;
+        }
+        // Small pause between alias probes
+        await new Promise((r) => setTimeout(r, 80));
+      }
+
+      // Pacing interval between kecamatan tabs
+      await new Promise((r) => setTimeout(r, 120));
+    }
 
     try {
       localStorage.setItem(CONFIRMED_TABS_KEY, JSON.stringify(updatedConfirmedTabs));

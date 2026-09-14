@@ -12,6 +12,17 @@ const app = express();
 const PORT = 3000;
 const CONFIG_FILE_PATH = path.join(process.cwd(), 'google_sheet_config.json');
 
+// Enable CORS and OPTIONS handling for all endpoints
+app.use((req, res, next) => {
+  res.header('Access-Control-Allow-Origin', '*');
+  res.header('Access-Control-Allow-Methods', 'GET, POST, PUT, DELETE, OPTIONS');
+  res.header('Access-Control-Allow-Headers', 'Origin, X-Requested-With, Content-Type, Accept, Authorization');
+  if (req.method === 'OPTIONS') {
+    return res.sendStatus(200);
+  }
+  next();
+});
+
 // Middleware to parse JSON bodies with high limit for image uploads
 app.use(express.json({ limit: '50mb' }));
 app.use(express.urlencoded({ extended: true, limit: '50mb' }));
@@ -750,43 +761,50 @@ async function fetchKecamatanRowsOnServer(
     new Set([`Kec. ${kec.name}`, `Kec ${kec.name}`, ...kec.aliases])
   ).filter((a) => a.toLowerCase().startsWith('kec'));
 
-  const probeTopTwo = prioritized.slice(0, 2);
-
-  const fetchSingleAlias = async (alias: string) => {
+  const fetchSingleAliasWithRetry = async (alias: string): Promise<{ rows: any[]; matchedTab: string } | null> => {
     if (!alias.toLowerCase().startsWith('kec')) return null;
     const url = `https://docs.google.com/spreadsheets/d/${spreadsheetId}/gviz/tq?sheet=${encodeURIComponent(alias)}&_t=${cacheBuster}`;
-    const controller = new AbortController();
-    const timeout = setTimeout(() => controller.abort(), 12000);
-    try {
-      const resp = await fetch(url, { signal: controller.signal });
-      clearTimeout(timeout);
-      if (!resp.ok) return null;
-      const text = await resp.text();
-      const parsed = parseServerGvizTextToRows(text, alias);
-      if (parsed.length === 0 || isMasterRekapFallbackServer(parsed, kec.name)) return null;
 
-      return { rows: parsed, matchedTab: alias };
-    } catch {
-      clearTimeout(timeout);
-      return null;
+    // Try up to 2 times with exponential backoff on 429
+    for (let attempt = 0; attempt < 2; attempt++) {
+      const controller = new AbortController();
+      const timeout = setTimeout(() => controller.abort(), 12000);
+      try {
+        const resp = await fetch(url, {
+          signal: controller.signal,
+          headers: {
+            'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36',
+          },
+        });
+        clearTimeout(timeout);
+
+        if (resp.status === 429) {
+          // Rate limited: wait 1000ms before retry
+          await new Promise((r) => setTimeout(r, 1000 * (attempt + 1)));
+          continue;
+        }
+
+        if (!resp.ok) return null;
+        const text = await resp.text();
+        const parsed = parseServerGvizTextToRows(text, alias);
+        if (parsed.length === 0 || isMasterRekapFallbackServer(parsed, kec.name)) return null;
+
+        return { rows: parsed, matchedTab: alias };
+      } catch {
+        clearTimeout(timeout);
+      }
     }
+    return null;
   };
 
-  // Run top two variants concurrently
-  const topResults = await Promise.all(probeTopTwo.map(fetchSingleAlias));
-  for (const res of topResults) {
+  // Check aliases sequentially in queue with small pause to avoid rate limiting
+  for (const alias of prioritized) {
+    const res = await fetchSingleAliasWithRetry(alias);
     if (res && res.rows.length > 0) {
       return { success: true, rows: res.rows, matchedTab: res.matchedTab };
     }
-  }
-
-  // Check remaining aliases if top two yielded no data
-  const remaining = prioritized.slice(2);
-  for (const alias of remaining) {
-    const res = await fetchSingleAlias(alias);
-    if (res && res.rows.length > 0) {
-      return { success: true, rows: res.rows, matchedTab: res.matchedTab };
-    }
+    // Small pause between alias probes
+    await new Promise((r) => setTimeout(r, 80));
   }
 
   return { success: false, rows: [] };
@@ -819,20 +837,23 @@ const handleKecamatanRawFetch = async (req: express.Request, res: express.Respon
     }
 
     const cacheBuster = Date.now();
-    // Concurrently fetch ONLY the 7 kecamatan sheets - strictly no rekap or summary sheets
-    const kecResults = await Promise.all(
-      KECAMATAN_SPECS.map(kec => fetchKecamatanRowsOnServer(spreadsheetId, kec, cacheBuster))
-    );
-
     const allRows: Array<{ rowObj: Record<string, any>; sheetRowNumber: number; sourceSheet: string }> = [];
     const scannedSheets: string[] = [];
 
-    kecResults.forEach((r, idx) => {
-      if (r.success && r.rows.length > 0) {
-        allRows.push(...r.rows);
-        scannedSheets.push(r.matchedTab || KECAMATAN_SPECS[idx].name);
+    // Sequentially fetch the 7 kecamatan sheets with queue delay to prevent 429 rate limiting
+    for (const kec of KECAMATAN_SPECS) {
+      try {
+        const resKec = await fetchKecamatanRowsOnServer(spreadsheetId, kec, cacheBuster);
+        if (resKec.success && resKec.rows.length > 0) {
+          allRows.push(...resKec.rows);
+          scannedSheets.push(resKec.matchedTab || kec.name);
+        }
+      } catch (err) {
+        console.warn(`Server queue notice for ${kec.name}:`, err);
       }
-    });
+      // Pacing interval between kecamatan fetches
+      await new Promise((r) => setTimeout(r, 120));
+    }
 
     if (allRows.length > 0) {
       serverKecamatanCache = {
@@ -848,7 +869,7 @@ const handleKecamatanRawFetch = async (req: express.Request, res: express.Respon
       rows: allRows,
       scannedSheets,
       cached: false,
-      message: `Berhasil memuat ${allRows.length} baris data murni dari ke-7 sheet kecamatan.`,
+      message: `Berhasil memuat ${allRows.length} baris data murni dari ke-7 sheet kecamatan via antrian teratur.`,
     });
   } catch (err: any) {
     console.error('Error fetching kecamatan sheets on server:', err);

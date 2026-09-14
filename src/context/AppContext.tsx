@@ -2779,15 +2779,21 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
         // Map any local photos or drive folder links onto the incoming sheet items
         const prevPhotosMap = new Map<string, any[]>();
         const prevDriveMap = new Map<string, string>();
+        const prevItemsMap = new Map<string, BuildingAssessment>();
         prev.forEach((p) => {
           if (p.id) {
+            prevItemsMap.set(p.id, p);
+            if (p.code) prevItemsMap.set(p.code, p);
             if (p.photos && p.photos.length > 0) prevPhotosMap.set(p.id, p.photos);
             if (p.googleDriveFolderUrl) prevDriveMap.set(p.id, p.googleDriveFolderUrl);
           }
         });
 
-        // The authoritative dataset is 100% from the 7 kecamatan sheets
+        // The authoritative dataset from the 7 kecamatan sheets
+        const incomingKeys = new Set<string>();
         const mergedList = sheetItems.map((item) => {
+          if (item.id) incomingKeys.add(item.id);
+          if (item.code) incomingKeys.add(item.code);
           const localPhotos = prevPhotosMap.get(item.id);
           const localDrive = prevDriveMap.get(item.id);
           return {
@@ -2796,6 +2802,16 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
             googleDriveFolderUrl: item.googleDriveFolderUrl || localDrive,
           };
         });
+
+        // Fail-safe resilience: If incoming list has fewer items than existing and not forcing complete wipe,
+        // keep existing un-fetched kecamatan records so total count never suddenly drops from 207 to 11/45
+        if (mergedList.length < prev.length && !shouldForce) {
+          prev.forEach((p) => {
+            if (p.id && !incomingKeys.has(p.id) && (!p.code || !incomingKeys.has(p.code))) {
+              mergedList.push(p);
+            }
+          });
+        }
 
         try {
           localStorage.setItem(STORAGE_KEYS.ASSESSMENTS, JSON.stringify(mergedList));
