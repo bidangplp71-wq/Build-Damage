@@ -3797,6 +3797,21 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
           }
         );
       }
+
+      // Also propagate new spreadsheetUrl to all users so that every user record explicitly carries the active link!
+      if (updated.spreadsheetUrl) {
+        setUsers((prevUsers) => {
+          const newUsers = prevUsers.map((u) => ({
+            ...u,
+            spreadsheetUrl: updated.spreadsheetUrl,
+          }));
+          try {
+            localStorage.setItem(STORAGE_KEYS.USERS, JSON.stringify(newUsers));
+          } catch {}
+          return newUsers;
+        });
+      }
+
       try {
         localStorage.setItem(STORAGE_KEYS.GOOGLE_SHEET, JSON.stringify(updated));
         if (typeof BroadcastChannel !== 'undefined') {

@@ -149,6 +149,7 @@ export interface UserAccount {
   password?: string; // Encrypted password (ENC::...)
   passwordLastChanged?: string;
   driveFolderUrl?: string; // Link folder G-Drive untuk backup/upload foto surveyor
+  spreadsheetUrl?: string; // Link Google Sheet khusus / aktif untuk user ini
   createdAt: string;
 }
 
