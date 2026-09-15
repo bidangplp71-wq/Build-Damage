@@ -1,6 +1,7 @@
 import React, { useState } from 'react';
 import { useApp } from '../context/AppContext';
 import { SpreadsheetProfile, SheetCapacityStatus, BuildingAssessment } from '../types';
+import { GlobalSheetRecapModal } from './GlobalSheetRecapModal';
 import {
   BookOpen,
   BookmarkCheck,
@@ -20,6 +21,7 @@ import {
   Check,
   X,
   FileSpreadsheet,
+  LayoutList,
 } from 'lucide-react';
 
 interface SheetBookSelectorProps {
@@ -45,6 +47,7 @@ export const SheetBookSelector: React.FC<SheetBookSelectorProps> = ({
   onMovedSuccess,
   hideAddButton = false,
 }) => {
+  const [showGlobalRecapModal, setShowGlobalRecapModal] = useState(false);
   const {
     googleSheetConfig,
     updateGoogleSheetConfig,
@@ -419,6 +422,17 @@ export const SheetBookSelector: React.FC<SheetBookSelectorProps> = ({
                 <span>Semua Halaman ({assessments.length})</span>
               </button>
             )}
+            
+            {/* Global Recap Matrix Button */}
+            <button
+              type="button"
+              onClick={() => setShowGlobalRecapModal(true)}
+              className="inline-flex items-center gap-1.5 px-3 py-1.5 bg-blue-50 text-blue-700 hover:bg-blue-100 border border-blue-200 hover:border-blue-300 rounded-xl text-xs font-bold transition-all cursor-pointer shadow-xs"
+              title="Cetak Matriks Rekapitulasi Data Seluruh Sheet"
+            >
+              <LayoutList className="w-3.5 h-3.5" />
+              <span>Matriks Rekap</span>
+            </button>
 
             {/* Batch Move Data Action Button */}
             {selectedAssessmentIds.length > 0 && (isAdmin || isVerifikator) && (
@@ -929,6 +943,15 @@ export const SheetBookSelector: React.FC<SheetBookSelectorProps> = ({
             </form>
           </div>
         </div>
+      )}
+
+      {showGlobalRecapModal && (
+        <GlobalSheetRecapModal
+          isOpen={showGlobalRecapModal}
+          onClose={() => setShowGlobalRecapModal(false)}
+          profiles={profiles}
+          assessments={assessments}
+        />
       )}
     </div>
   );
