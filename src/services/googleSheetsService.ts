@@ -151,11 +151,62 @@ export function sanitizeSheetName(name: string): string {
 }
 
 /**
+ * Peta nama kolom tabel Google Sheets untuk 21 rincian komponen PUPR
+ * Setiap komponen memiliki kolom terpisah sehingga setiap sel hanya berisi angka/teks pendek (< 50 karakter)
+ * dan TIDAK PERNAH membebani sel sampai 50.000 karakter.
+ */
+export const COMPONENT_COLUMNS_MAP: Record<string, string> = {
+  pondasi_1: 'Pondasi (%)',
+  struktur_kolom_balok: 'Kolom & Balok (%)',
+  struktur_plesteran: 'Struktur Plesteran (%)',
+  atap_kuda_kuda: 'Atap Kuda-kuda (%)',
+  atap_gording: 'Atap Gording (%)',
+  atap_penutup: 'Atap Penutup (%)',
+  langit_rangka: 'Rangka Langit (%)',
+  langit_penutup: 'Penutup Langit (%)',
+  dinding_bata: 'Dinding Bata (%)',
+  dinding_plesteran: 'Dinding Plesteran (%)',
+  dinding_kaca: 'Dinding Kaca (%)',
+  dinding_pintu: 'Dinding Pintu (%)',
+  dinding_kosen: 'Dinding Kosen (%)',
+  lantai_penutup: 'Penutup Lantai (%)',
+  utilitas_listrik: 'Instalasi Listrik (%)',
+  utilitas_air: 'Instalasi Air (%)',
+  utilitas_drainase: 'Drainase Limbah (%)',
+  finishing_struktur: 'Cat Struktur (%)',
+  finishing_langit: 'Cat Langit (%)',
+  finishing_dinding: 'Cat Dinding (%)',
+  finishing_kosen_pintu: 'Cat Kosen Pintu (%)',
+};
+
+/**
+ * Memastikan nilai setiap sel tidak pernah melebihi 25.000 karakter
+ * (sangat aman di bawah batas 50.000 karakter Google Sheets)
+ */
+export function sanitizeCell<T>(val: T, maxChars = 25000): T {
+  if (typeof val === 'string' && val.length > maxChars) {
+    console.warn(`[CellSanitizer] Nilai sel melebihi ${maxChars} karakter (panjang: ${val.length}), dipotong otomatis demi menjaga kapasitas sel Google Sheets.`);
+    return val.substring(0, maxChars) as unknown as T;
+  }
+  return val;
+}
+
+/**
  * Formats assessment data into tabular row columns for Google Sheets & Excel
+ * Seluruh komponen penilaian dipecah menjadi kolom-kolom tabel individual
  */
 export function formatAssessmentForGoogleSheet(item: BuildingAssessment) {
   const ownerName = item.namaPemilikRumah || item.namaPemilikGedung || item.ownerAgency || '-';
-  return {
+
+  // Pemetaan nilai kerusakan 21 komponen ke kolom tabel individual
+  const compMap: Record<string, number> = {};
+  if (item.components && Array.isArray(item.components)) {
+    item.components.forEach(c => {
+      compMap[c.id] = c.damagePercentInput || 0;
+    });
+  }
+
+  const rawRow: Record<string, any> = {
     'No Registrasi': item.code || item.id,
     'Nama Bangunan': item.buildingName,
     'Kategori / Fungsi Bangunan': item.buildingCategory || 'Gedung Pemerintah',
@@ -177,6 +228,29 @@ export function formatAssessmentForGoogleSheet(item: BuildingAssessment) {
     'Tahun Dibangun': item.yearBuilt,
     'Tingkat Kerusakan (%)': item.totalDamagePercent,
     'Klasifikasi Kerusakan': item.damageClassification,
+    // 21 Kolom Komponen Tabel Individual (Mencegah beban JSON pada 1 sel)
+    'Pondasi (%)': compMap['pondasi_1'] ?? 0,
+    'Kolom & Balok (%)': compMap['struktur_kolom_balok'] ?? 0,
+    'Struktur Plesteran (%)': compMap['struktur_plesteran'] ?? 0,
+    'Atap Kuda-kuda (%)': compMap['atap_kuda_kuda'] ?? 0,
+    'Atap Gording (%)': compMap['atap_gording'] ?? 0,
+    'Atap Penutup (%)': compMap['atap_penutup'] ?? 0,
+    'Rangka Langit (%)': compMap['langit_rangka'] ?? 0,
+    'Penutup Langit (%)': compMap['langit_penutup'] ?? 0,
+    'Dinding Bata (%)': compMap['dinding_bata'] ?? 0,
+    'Dinding Plesteran (%)': compMap['dinding_plesteran'] ?? 0,
+    'Dinding Kaca (%)': compMap['dinding_kaca'] ?? 0,
+    'Dinding Pintu (%)': compMap['dinding_pintu'] ?? 0,
+    'Dinding Kosen (%)': compMap['dinding_kosen'] ?? 0,
+    'Penutup Lantai (%)': compMap['lantai_penutup'] ?? 0,
+    'Instalasi Listrik (%)': compMap['utilitas_listrik'] ?? 0,
+    'Instalasi Air (%)': compMap['utilitas_air'] ?? 0,
+    'Drainase Limbah (%)': compMap['utilitas_drainase'] ?? 0,
+    'Cat Struktur (%)': compMap['finishing_struktur'] ?? 0,
+    'Cat Langit (%)': compMap['finishing_langit'] ?? 0,
+    'Cat Dinding (%)': compMap['finishing_dinding'] ?? 0,
+    'Cat Kosen Pintu (%)': compMap['finishing_kosen_pintu'] ?? 0,
+    // Nilai Anggaran & Estimasi Biaya
     'HSBGN / M2 (Rp)': item.hsbgnPerM2,
     'Biaya Perawatan / M2 (Rp)': item.treatmentCostPerM2,
     'Biaya Bongkaran / M2 (Rp)': item.demolitionCostPerM2,
@@ -196,9 +270,15 @@ export function formatAssessmentForGoogleSheet(item: BuildingAssessment) {
     'Nama Kepala Dinas': item.headOfDepartment?.name || '-',
     'NIP Kepala Dinas': item.headOfDepartment?.nip || '-',
     'Tim Analisis': item.analysisTeam?.join(', ') || '-',
-    'Komponen JSON': JSON.stringify((item.components || []).map(c => [c.id, c.damagePercentInput || 0, c.calculatedScore || 0, c.notes || ''])).substring(0, 25000),
     'Terakhir Diperbarui': new Date(item.updatedAt).toLocaleString('id-ID'),
   };
+
+  // Sanitasi semua nilai sel agar tidak ada satupun sel yang melebihi 25.000 karakter
+  const sanitizedRow: Record<string, any> = {};
+  for (const [key, val] of Object.entries(rawRow)) {
+    sanitizedRow[key] = sanitizeCell(val, 25000);
+  }
+  return sanitizedRow;
 }
 
 /**
@@ -941,6 +1021,17 @@ function deleteMatchingRow(sheet, regCode, prevRegCode, buildingName, sheetRowNu
 }
 
 /**
+ * Memastikan nilai setiap sel aman dan tidak melebihi batas 25.000 karakter Google Sheets
+ */
+function safeCellValue(val) {
+  if (val === null || val === undefined) return "";
+  if (typeof val === 'string' && val.length > 25000) {
+    return val.substring(0, 25000);
+  }
+  return val;
+}
+
+/**
  * Menyimpan atau memperbarui satu baris data pada sheet tertentu
  */
 function saveOrUpdateRow(sheet, rowData, regCode, prevRegCode, action, headerBgColor, extraParams) {
@@ -1026,7 +1117,7 @@ function saveOrUpdateRow(sheet, rowData, regCode, prevRegCode, action, headerBgC
         var updateValues = [];
         for (var cu = 0; cu < currentHeaders.length; cu++) {
           var hNameU = currentHeaders[cu];
-          updateValues.push(rowData[hNameU] !== undefined ? rowData[hNameU] : "");
+          updateValues.push(safeCellValue(rowData[hNameU] !== undefined ? rowData[hNameU] : ""));
         }
         sheet.getRange(foundIndex, 1, 1, currentHeaders.length).setValues([updateValues]);
         return;
@@ -1039,7 +1130,7 @@ function saveOrUpdateRow(sheet, rowData, regCode, prevRegCode, action, headerBgC
     var newRow = [];
     for (var c2 = 0; c2 < currentHeaders.length; c2++) {
       var hName2 = currentHeaders[c2];
-      newRow.push(rowData[hName2] !== undefined ? rowData[hName2] : "");
+      newRow.push(safeCellValue(rowData[hName2] !== undefined ? rowData[hName2] : ""));
     }
     sheet.appendRow(newRow);
   }
@@ -1058,7 +1149,7 @@ function writeTableToSheet(sheet, rows, headerBgColor) {
   for (var i = 0; i < rows.length; i++) {
     var row = [];
     for (var h = 0; h < headers.length; h++) {
-      row.push(rows[i][headers[h]] !== undefined ? rows[i][headers[h]] : "");
+      row.push(safeCellValue(rows[i][headers[h]] !== undefined ? rows[i][headers[h]] : ""));
     }
     tableData.push(row);
   }
@@ -2494,6 +2585,29 @@ export function parseExtractedRowsToAssessments(
       }
     } else {
       parsedComponents = getInitialSubComponents();
+    }
+
+    // Periksa apakah data memiliki kolom-kolom komponen tabel individual (misal 'Pondasi (%)', 'Kolom & Balok (%)', dsb.)
+    const templateCompsCheck = getInitialSubComponents();
+    let foundColumnComp = false;
+    const compsFromColumns = templateCompsCheck.map(t => {
+      const colHeader = COMPONENT_COLUMNS_MAP[t.id];
+      const val = getVal(rowObj, [colHeader, `${t.subComponentName} (%)`, t.subComponentName]);
+      if (val !== undefined && val !== null && String(val).trim() !== '' && String(val).trim() !== '-') {
+        foundColumnComp = true;
+        const dmg = parseFloat(String(val).replace('%', '').trim()) || 0;
+        const score = (dmg * t.bobotPercent * t.kerusakanMaxPercent) / 10000;
+        return {
+          ...t,
+          damagePercentInput: dmg,
+          calculatedScore: score,
+        };
+      }
+      return null;
+    });
+
+    if (foundColumnComp) {
+      parsedComponents = templateCompsCheck.map((t, idx) => compsFromColumns[idx] || t);
     }
 
     const rawPhotosJson = getVal(rowObj, ['Foto JSON', 'Daftar Foto JSON', 'Photos JSON', 'Foto', 'Link Foto', 'Foto Kerusakan', 'Dokumentasi Foto', 'URL Foto']);

@@ -1678,11 +1678,17 @@ export const AssessmentTable: React.FC = () => {
               </div>
 
               <div>
-                <label className="block font-semibold text-slate-700 mb-1">
-                  Catatan Verifikator / Tim Ahli Struktur:
-                </label>
+                <div className="flex items-center justify-between mb-1">
+                  <label className="block font-semibold text-slate-700">
+                    Catatan Verifikator / Tim Ahli Struktur:
+                  </label>
+                  <span className={`text-[11px] font-medium ${verifyNotesInput.length >= 25000 ? 'text-rose-600 font-bold' : verifyNotesInput.length >= 20000 ? 'text-amber-600' : 'text-slate-400'}`}>
+                    {verifyNotesInput.length.toLocaleString('id-ID')} / 25.000 karakter
+                  </span>
+                </div>
                 <textarea
                   rows={3}
+                  maxLength={25000}
                   value={verifyNotesInput}
                   onChange={(e) => setVerifyNotesInput(e.target.value)}
                   placeholder={
@@ -1690,8 +1696,18 @@ export const AssessmentTable: React.FC = () => {
                       ? 'Tuliskan catatan detail bagian apa yang perlu diperiksa atau diperbaiki oleh surveyor...'
                       : 'Contoh: Perhitungan kerusakan komponen kolom dan gording telah sesuai. Disetujui untuk pengajuan rehabilitasi TA 2026.'
                   }
-                  className="w-full p-2.5 rounded-xl border border-slate-200 text-xs focus:outline-none focus:ring-2 focus:ring-amber-500"
+                  className={`w-full p-2.5 rounded-xl border text-xs focus:outline-none focus:ring-2 ${
+                    verifyNotesInput.length >= 25000 
+                      ? 'border-rose-400 focus:ring-rose-500 bg-rose-50/30' 
+                      : 'border-slate-200 focus:ring-amber-500'
+                  }`}
                 ></textarea>
+                {verifyNotesInput.length >= 25000 && (
+                  <p className="text-[11px] text-rose-600 font-medium mt-1 flex items-center gap-1">
+                    <span className="w-1.5 h-1.5 rounded-full bg-rose-500 inline-block"></span>
+                    Maksimal 25.000 karakter tercapai demi menjaga keamanan batas sel Google Sheets.
+                  </p>
+                )}
               </div>
 
               {/* Quick Preset Feedback Templates for Perlu Revisi */}
