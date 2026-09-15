@@ -149,6 +149,9 @@ export const AssessmentForm: React.FC = () => {
   const [targetSheetName, setTargetSheetName] = useState<string>('Kec. Aesesa');
   const [latitude, setLatitude] = useState<number | undefined>(-8.6754);
   const [longitude, setLongitude] = useState<number | undefined>(121.3021);
+  
+  const [targetProfileId, setTargetProfileId] = useState<string>('');
+
 
   // Dukcapil NIK/KK and citizen search
   const [nikPemilik, setNikPemilik] = useState('');
@@ -278,12 +281,8 @@ export const AssessmentForm: React.FC = () => {
       detailedAddress: detailedAddress.trim(),
       targetSheetName: targetSheetName.trim() || `Kec. ${currentKec?.name || 'Aesesa'}`,
       sourceSheet: targetSheetName.trim() || `Kec. ${currentKec?.name || 'Aesesa'}`,
-      targetProfileId: isEditMode
-        ? (selectedAssessmentForEdit?.targetProfileId || googleSheetConfig.activeProfileId || googleSheetConfig.spreadsheetProfiles?.[0]?.id)
-        : (googleSheetConfig.activeProfileId || googleSheetConfig.spreadsheetProfiles?.[0]?.id),
-      targetProfileName: isEditMode
-        ? (selectedAssessmentForEdit?.targetProfileName || googleSheetConfig.spreadsheetProfiles?.find((p) => p.id === googleSheetConfig.activeProfileId)?.name)
-        : googleSheetConfig.spreadsheetProfiles?.find((p) => p.id === googleSheetConfig.activeProfileId)?.name,
+      targetProfileId: targetProfileId || googleSheetConfig.activeProfileId || googleSheetConfig.spreadsheetProfiles?.[0]?.id,
+      targetProfileName: googleSheetConfig.spreadsheetProfiles?.find((p) => p.id === (targetProfileId || googleSheetConfig.activeProfileId))?.name,
       latitude,
       longitude,
 
@@ -408,6 +407,7 @@ export const AssessmentForm: React.FC = () => {
 
       setDetailedAddress(a.detailedAddress || '');
       setTargetSheetName(a.targetSheetName || a.sourceSheet || (a.kecamatanName ? `Kec. ${a.kecamatanName}` : 'Kec. Aesesa'));
+      setTargetProfileId(a.targetProfileId || googleSheetConfig.activeProfileId || googleSheetConfig.spreadsheetProfiles?.[0]?.id || '');
       setLatitude(a.latitude ?? -8.6754);
       setLongitude(a.longitude ?? 121.3021);
       setHsbgnPerM2(a.hsbgnPerM2 && a.hsbgnPerM2 > 0 ? a.hsbgnPerM2 : getCategoryConfig(cat).defaultHsbgn);
@@ -1128,12 +1128,8 @@ export const AssessmentForm: React.FC = () => {
       detailedAddress: detailedAddress.trim(),
       targetSheetName: targetSheetName.trim() || `Kec. ${currentKec?.name || 'Aesesa'}`,
       sourceSheet: targetSheetName.trim() || `Kec. ${currentKec?.name || 'Aesesa'}`,
-      targetProfileId: isEditMode
-        ? (selectedAssessmentForEdit?.targetProfileId || googleSheetConfig.activeProfileId || googleSheetConfig.spreadsheetProfiles?.[0]?.id)
-        : (googleSheetConfig.activeProfileId || googleSheetConfig.spreadsheetProfiles?.[0]?.id),
-      targetProfileName: isEditMode
-        ? (selectedAssessmentForEdit?.targetProfileName || googleSheetConfig.spreadsheetProfiles?.find((p) => p.id === googleSheetConfig.activeProfileId)?.name)
-        : googleSheetConfig.spreadsheetProfiles?.find((p) => p.id === googleSheetConfig.activeProfileId)?.name,
+      targetProfileId: targetProfileId || googleSheetConfig.activeProfileId || googleSheetConfig.spreadsheetProfiles?.[0]?.id,
+      targetProfileName: googleSheetConfig.spreadsheetProfiles?.find((p) => p.id === (targetProfileId || googleSheetConfig.activeProfileId))?.name,
       latitude,
       longitude,
 
@@ -2440,6 +2436,29 @@ export const AssessmentForm: React.FC = () => {
             </p>
           </div>
         </div>
+
+        {/* Pemilihan Target Halaman Sheet (Hanya tampil jika ada > 1 buku) */}
+        {googleSheetConfig.spreadsheetProfiles && googleSheetConfig.spreadsheetProfiles.length > 1 && (
+          <div className="mb-4 p-4 rounded-xl border border-indigo-100 bg-indigo-50/50">
+            <label className="block text-[11px] font-bold text-indigo-900 mb-1.5 uppercase tracking-wide">
+              Pilih Halaman / Buku Google Sheet Tujuan
+            </label>
+            <select
+              value={targetProfileId}
+              onChange={(e) => setTargetProfileId(e.target.value)}
+              className="w-full px-3 py-2 bg-white rounded-lg border border-indigo-200 text-sm font-semibold text-slate-800 focus:outline-hidden focus:ring-2 focus:ring-indigo-500 cursor-pointer"
+            >
+              {googleSheetConfig.spreadsheetProfiles.map((p) => (
+                <option key={p.id} value={p.id}>
+                  {p.name} {p.id === googleSheetConfig.activeProfileId ? '(Sheet Aktif Global)' : ''}
+                </option>
+              ))}
+            </select>
+            <p className="text-[10px] text-indigo-700/70 font-medium mt-1.5 leading-snug">
+              Jika surveyor tidak memilih, data akan masuk ke Sheet Aktif Global secara otomatis.
+            </p>
+          </div>
+        )}
 
         {/* Indikator Otomatis Masuk ke Tab Google Sheet Sesuai Kecamatan */}
         <div className="flex flex-wrap items-center justify-between gap-3 px-4 py-2.5 bg-emerald-50/80 border border-emerald-200 rounded-xl text-xs text-emerald-950">

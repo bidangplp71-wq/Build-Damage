@@ -747,56 +747,83 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
   
   // Load Google Sheet Config & Assessments dynamically from Express server on startup
   useEffect(() => {
-    // 1. Load server configuration
-    fetch('/api/config')
-      .then((res) => res.json())
-      .then((data) => {
-        if (data.success && data.config) {
-          const { spreadsheetUrl, webhookUrl, driveFolderId, spreadsheetProfiles, activeProfileId } = data.config;
-          if (spreadsheetUrl || webhookUrl || driveFolderId || spreadsheetProfiles) {
+    // Load Google Sheet Config dynamically from Firestore (Primary) & Express server (Fallback)
+    if (db && !isFirestoreQuotaExceeded) {
+      const unsubConfig = onSnapshot(doc(db, 'system_configs', 'google_sheet'), (snapshot) => {
+        if (snapshot.exists()) {
+          const data = snapshot.data();
+          if (data && (data.spreadsheetUrl || data.webhookUrl || data.driveFolderId || data.spreadsheetProfiles)) {
             setGoogleSheetConfig((prev) => {
               const updated = {
                 ...prev,
-                spreadsheetUrl: spreadsheetUrl || prev.spreadsheetUrl,
-                webhookUrl: webhookUrl || prev.webhookUrl,
-                driveFolderId: driveFolderId || prev.driveFolderId,
-                spreadsheetProfiles: spreadsheetProfiles || prev.spreadsheetProfiles,
-                activeProfileId: activeProfileId || prev.activeProfileId,
+                spreadsheetUrl: data.spreadsheetUrl || prev.spreadsheetUrl,
+                webhookUrl: data.webhookUrl || prev.webhookUrl,
+                driveFolderId: data.driveFolderId || prev.driveFolderId,
+                spreadsheetProfiles: data.spreadsheetProfiles || prev.spreadsheetProfiles,
+                activeProfileId: data.activeProfileId || prev.activeProfileId,
               };
               try {
                 localStorage.setItem(STORAGE_KEYS.GOOGLE_SHEET, JSON.stringify(updated));
               } catch {}
               return updated;
             });
-
-            // If we fetched a new config, trigger user list sync to make sure login credentials work instantly!
-            fetchUsersFromGoogleSheet({
-              spreadsheetUrl: spreadsheetUrl || '',
-              webhookUrl: webhookUrl || '',
-              sheetName: 'Daftar_Pengguna',
-              logSheetName: 'Log_Akses_Pengguna',
-              autoSync: true,
-              directSaveEnabled: true,
-            }).then((res) => {
-              if (res.success && res.users && res.users.length > 0) {
-                setUsers((prev) => {
-                  const deletedUserIds = getStoredDeletedUserIds();
-                  const userMap = new Map<string, UserAccount>();
-                  INITIAL_USERS.forEach((u) => { if (!deletedUserIds.has(u.id)) userMap.set(u.id, u); });
-                  prev.forEach((u) => { if (u && u.id && !deletedUserIds.has(u.id)) userMap.set(u.id, u); });
-                  res.users.forEach((u) => { if (u && u.id && !deletedUserIds.has(u.id)) userMap.set(u.id, u); });
-                  const merged = Array.from(userMap.values());
-                  try {
-                    localStorage.setItem(STORAGE_KEYS.USERS, JSON.stringify(merged));
-                  } catch {}
-                  return merged;
-                });
-              }
-            }).catch((err) => console.warn('Background user fetch from Sheet failed:', err));
           }
         }
-      })
-      .catch((err) => console.warn('Failed to load server-side google sheet config:', err));
+      }, (err) => {
+        console.warn('Firebase config sync failed, using fallback:', err);
+      });
+      return () => unsubConfig();
+    } else {
+      // Fallback 1. Load server configuration
+      fetch('/api/config')
+        .then((res) => res.json())
+        .then((data) => {
+          if (data.success && data.config) {
+            const { spreadsheetUrl, webhookUrl, driveFolderId, spreadsheetProfiles, activeProfileId } = data.config;
+            if (spreadsheetUrl || webhookUrl || driveFolderId || spreadsheetProfiles) {
+              setGoogleSheetConfig((prev) => {
+                const updated = {
+                  ...prev,
+                  spreadsheetUrl: spreadsheetUrl || prev.spreadsheetUrl,
+                  webhookUrl: webhookUrl || prev.webhookUrl,
+                  driveFolderId: driveFolderId || prev.driveFolderId,
+                  spreadsheetProfiles: spreadsheetProfiles || prev.spreadsheetProfiles,
+                  activeProfileId: activeProfileId || prev.activeProfileId,
+                };
+                try {
+                  localStorage.setItem(STORAGE_KEYS.GOOGLE_SHEET, JSON.stringify(updated));
+                } catch {}
+                return updated;
+              });
+              // If we fetched a new config, trigger user list sync to make sure login credentials work instantly!
+              fetchUsersFromGoogleSheet({
+                spreadsheetUrl: spreadsheetUrl || '',
+                webhookUrl: webhookUrl || '',
+                sheetName: 'Daftar_Pengguna',
+                logSheetName: 'Log_Akses_Pengguna',
+                autoSync: true,
+                directSaveEnabled: true,
+              }).then((res) => {
+                if (res.success && res.users && res.users.length > 0) {
+                  setUsers((prev) => {
+                    const deletedUserIds = getStoredDeletedUserIds();
+                    const userMap = new Map<string, UserAccount>();
+                    INITIAL_USERS.forEach((u) => { if (!deletedUserIds.has(u.id)) userMap.set(u.id, u); });
+                    prev.forEach((u) => { if (u && u.id && !deletedUserIds.has(u.id)) userMap.set(u.id, u); });
+                    res.users.forEach((u) => { if (u && u.id && !deletedUserIds.has(u.id)) userMap.set(u.id, u); });
+                    const merged = Array.from(userMap.values());
+                    try {
+                      localStorage.setItem(STORAGE_KEYS.USERS, JSON.stringify(merged));
+                    } catch {}
+                    return merged;
+                  });
+                }
+              }).catch((err) => console.warn('Background user fetch from Sheet failed:', err));
+            }
+          }
+        })
+        .catch((err) => console.warn('Failed to load server-side google sheet config:', err));
+    }
 
     // 2. Load assessments from server (/api/assessments) for zero-quota persistence & cross-device sharing
     fetch('/api/assessments')
