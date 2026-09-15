@@ -136,6 +136,7 @@ interface AppContextType {
   syncAssessmentToSheet: (id: string) => Promise<{ success: boolean; message: string }>;
   syncAllToSheet: () => Promise<{ success: boolean; message: string; count?: number }>;
   syncFromGoogleSheet: (showToastAlert?: boolean, forceRefresh?: boolean) => Promise<{ success: boolean; message: string; count?: number }>;
+  syncAllProfiles: (options?: { forceRefresh?: boolean; showToastAlert?: boolean }) => Promise<{ success: boolean; message: string; count?: number; countPerProfile?: Record<string, number> }>;
   consolidateAndSyncSheets: () => Promise<{ success: boolean; message: string; count?: number }>;
   recoverAndSyncPhotos: (targetAssessmentId?: string) => Promise<{ recoveredCount: number; success: boolean; message: string }>;
   attachPhotoToAssessment: (assessmentId: string, photoId: string, dataUrl: string) => Promise<boolean>;
@@ -3380,6 +3381,11 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
    * Loaded only once on initial app start or on explicit 1-hour schedule / manual click to prevent crashes
    */
   const syncFromGoogleSheet = async (showToastAlert = false, forceRefresh?: boolean): Promise<{ success: boolean; message: string; count?: number }> => {
+    // If multiple worksheet profiles are configured, synchronize across all sheets so data from all 5 sheets is read
+    if (googleSheetConfig.spreadsheetProfiles && googleSheetConfig.spreadsheetProfiles.length > 1) {
+      return syncAllProfiles({ forceRefresh, showToastAlert });
+    }
+
     if (!googleSheetConfig.spreadsheetUrl || !isConfiguredSheetUrl(googleSheetConfig.spreadsheetUrl)) {
       const msg = 'Tautan Google Sheet belum diatur atau masih menggunakan template contoh.';
       if (showToastAlert) showToast(msg, 'info');
@@ -3561,9 +3567,9 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
           };
         });
 
-        // Fail-safe resilience: If incoming list has fewer items than existing and not forcing complete wipe,
-        // keep existing un-fetched kecamatan records so total count never suddenly drops from 207 to 11/45
-        if (mergedList.length < prev.length && !shouldForce) {
+        // Fail-safe resilience: If incoming list has fewer items than existing,
+        // keep existing un-fetched records so total count never suddenly drops from 207 to 11/45
+        if (mergedList.length < prev.length) {
           prev.forEach((p) => {
             if (p.id && !incomingKeys.has(p.id) && (!p.code || !incomingKeys.has(p.code))) {
               mergedList.push(p);
@@ -3621,6 +3627,167 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
       if (showToastAlert) showToast(errMsg, 'error');
       return { success: false, message: errMsg, count: 0 };
     }
+  };
+
+  /**
+   * Synchronize all configured worksheet books / pages sequentially.
+   * Reads from all 5 sheets (and any future ones), tagging each record with targetProfileId
+   * and merging them safely without losing any data.
+   */
+  const syncAllProfiles = async (options?: { forceRefresh?: boolean; showToastAlert?: boolean }): Promise<{ success: boolean; message: string; count?: number; countPerProfile?: Record<string, number> }> => {
+    const forceRefresh = options?.forceRefresh ?? false;
+    const showToastAlert = options?.showToastAlert ?? true;
+
+    const profilesList = (googleSheetConfig.spreadsheetProfiles && googleSheetConfig.spreadsheetProfiles.length > 0)
+      ? googleSheetConfig.spreadsheetProfiles
+      : [
+          {
+            id: 'profile_primary_2026',
+            pageNumber: 1,
+            name: 'Buku 1: Spreadsheet Utama SIM-PKBG 2026 (Nagekeo)',
+            spreadsheetUrl: googleSheetConfig.spreadsheetUrl || '',
+            isDefault: true,
+          },
+        ];
+
+    const validProfiles = profilesList.filter((p) => p.spreadsheetUrl && isConfiguredSheetUrl(p.spreadsheetUrl));
+    if (validProfiles.length === 0) {
+      if (googleSheetConfig.spreadsheetUrl && isConfiguredSheetUrl(googleSheetConfig.spreadsheetUrl)) {
+        return syncFromGoogleSheet(showToastAlert, forceRefresh);
+      }
+      const msg = 'Tidak ada profil worksheet dengan URL Google Sheet yang valid.';
+      if (showToastAlert) showToast(msg, 'info');
+      return { success: false, message: msg, count: 0 };
+    }
+
+    if (showToastAlert) {
+      showToast(`Memulai sinkronisasi data dari seluruh ${validProfiles.length} worksheet/buku...`, 'info');
+    }
+
+    setSheetSyncProgress({
+      isLoading: true,
+      currentKecamatan: 'Semua Sheet',
+      currentStep: 1,
+      totalSteps: validProfiles.length,
+      percent: 10,
+      totalLoaded: assessments.length,
+      loadedKecamatans: validProfiles.map((p, idx) => ({
+        name: p.name,
+        count: 0,
+        status: idx === 0 ? 'loading' : 'pending',
+      })),
+      statusMessage: `Membaca data dari ${validProfiles.length} worksheet...`,
+    });
+
+    const countPerProfile: Record<string, number> = {};
+    const allFetchedItems: BuildingAssessment[] = [];
+
+    for (let i = 0; i < validProfiles.length; i++) {
+      const prof = validProfiles[i];
+      try {
+        setSheetSyncProgress((prev) => ({
+          ...prev,
+          currentStep: i + 1,
+          percent: Math.round(((i + 1) / validProfiles.length) * 90),
+          statusMessage: `Sedang membaca worksheet ${i + 1}/${validProfiles.length}: ${prof.name}...`,
+        }));
+
+        const tempConfig: GoogleSheetConfig = {
+          ...googleSheetConfig,
+          spreadsheetUrl: prof.spreadsheetUrl,
+          webhookUrl: prof.webhookUrl || googleSheetConfig.webhookUrl,
+          sheetName: prof.sheetName || googleSheetConfig.sheetName,
+        };
+
+        const res = await fetchAssessmentsFromGoogleSheet(tempConfig, forceRefresh);
+        if (res.success && Array.isArray(res.data) && res.data.length > 0) {
+          const tagged = res.data.map((item) => ({
+            ...item,
+            targetProfileId: item.targetProfileId || prof.id,
+            targetProfileName: item.targetProfileName || prof.name,
+          }));
+          allFetchedItems.push(...tagged);
+          countPerProfile[prof.id] = tagged.length;
+        } else {
+          countPerProfile[prof.id] = 0;
+        }
+      } catch (err) {
+        console.warn(`Sync notice for profile ${prof.name}:`, err);
+        countPerProfile[prof.id] = 0;
+      }
+    }
+
+    // Merge allFetchedItems into assessments safely without dropping existing assessments
+    setAssessments((prev) => {
+      const prevMap = new Map<string, BuildingAssessment>();
+      const prevPhotosMap = new Map<string, any[]>();
+      const prevDriveMap = new Map<string, string>();
+
+      prev.forEach((p) => {
+        if (p.id) {
+          prevMap.set(p.id, p);
+          if (p.photos && p.photos.length > 0) prevPhotosMap.set(p.id, p.photos);
+          if (p.googleDriveFolderUrl) prevDriveMap.set(p.id, p.googleDriveFolderUrl);
+        }
+        if (p.code) prevMap.set(p.code, p);
+      });
+
+      const incomingKeys = new Set<string>();
+      const mergedList = allFetchedItems.map((item) => {
+        if (item.id) incomingKeys.add(item.id);
+        if (item.code) incomingKeys.add(item.code);
+        const existing = (item.id && prevMap.get(item.id)) || (item.code && prevMap.get(item.code));
+        return {
+          ...item,
+          photos: (item.photos && item.photos.length > 0) ? item.photos : (existing?.photos || prevPhotosMap.get(item.id) || []),
+          googleDriveFolderUrl: item.googleDriveFolderUrl || existing?.googleDriveFolderUrl || prevDriveMap.get(item.id),
+          verificationStatus: item.verificationStatus || existing?.verificationStatus || 'Menunggu Verifikasi',
+        };
+      });
+
+      // Keep any un-fetched existing items (such as the 207 historical records) so no data is ever lost
+      prev.forEach((p) => {
+        if (p.id && !incomingKeys.has(p.id) && (!p.code || !incomingKeys.has(p.code))) {
+          mergedList.push(p);
+        }
+      });
+
+      try {
+        localStorage.setItem(STORAGE_KEYS.ASSESSMENTS, JSON.stringify(mergedList));
+      } catch {
+        try {
+          const lightweight = mergedList.map((a) => ({
+            ...a,
+            photos: a.photos?.map((p) => ({
+              ...p,
+              url: p.url && (p.url.startsWith('http') || p.url.startsWith('/uploads/') || p.url.startsWith('data:') || p.url.length < 300) ? p.url : '',
+            })) || [],
+          }));
+          localStorage.setItem(STORAGE_KEYS.ASSESSMENTS, JSON.stringify(lightweight));
+        } catch {}
+      }
+
+      fetch('/api/assessments/sync-batch', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ assessments: mergedList, replace: true }),
+      }).catch((err) => console.warn('Server sync-batch notice:', err));
+
+      return mergedList;
+    });
+
+    setSheetSyncProgress((prev) => ({
+      ...prev,
+      isLoading: false,
+      percent: 100,
+      totalLoaded: allFetchedItems.length,
+      statusMessage: `Selesai! Seluruh ${allFetchedItems.length} data dari ${validProfiles.length} worksheet berhasil disinkronkan.`,
+    }));
+
+    const totalCount = allFetchedItems.length;
+    const msg = `Berhasil membaca & menyinkronkan data dari seluruh ${validProfiles.length} sheet (Total ${totalCount} data termuat)!`;
+    if (showToastAlert) showToast(msg, 'success');
+    return { success: true, message: msg, count: totalCount, countPerProfile };
   };
 
   /**
@@ -4029,6 +4196,7 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
         syncAssessmentToSheet,
         syncAllToSheet,
         syncFromGoogleSheet,
+        syncAllProfiles,
         consolidateAndSyncSheets,
         recoverAndSyncPhotos,
         attachPhotoToAssessment,

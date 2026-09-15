@@ -2911,16 +2911,16 @@ export async function fetchAssessmentsFromGoogleSheet(
   ];
 
   const isExcludedRekapSheet = (name: string): boolean => {
-    if (!name) return true;
+    if (!name) return false;
     const clean = name.trim().toUpperCase().replace(/[\s_-]+/g, '_');
-    // Reject summary/rekap sheets explicitly
+    // Only exclude purely administrative non-assessment metadata tabs
     if (
-      clean.includes('REKAP') ||
-      clean.includes('RINGKASAN') ||
-      clean.includes('DATA_PENILAIAN') ||
-      clean.includes('PENGGUNA') ||
-      clean.includes('DUKCAPIL') ||
-      clean.includes('REFERENSI')
+      clean === 'PENGGUNA' ||
+      clean === 'DAFTAR_PENGGUNA' ||
+      clean === 'LOG_PENGGUNA' ||
+      clean === 'LOG_AKTIVITAS' ||
+      clean === 'REFERENSI_WILAYAH' ||
+      clean === 'RINGKASAN_EKSEKUTIF'
     ) {
       return true;
     }
@@ -3206,7 +3206,6 @@ export async function fetchAssessmentsFromGoogleSheet(
     const updatedConfirmedTabs: Record<string, string> = { ...confirmedTabs };
 
     const fetchSingleWithRetry = async (alias: string): Promise<{ rows: ExtractedRow[]; matchedAlias: string } | null> => {
-      if (!alias.toLowerCase().startsWith('kec')) return null;
       const gvizUrl = `https://docs.google.com/spreadsheets/d/${spreadsheetId}/gviz/tq?sheet=${encodeURIComponent(alias)}&_t=${cacheBuster}`;
 
       for (let attempt = 0; attempt < 2; attempt++) {
@@ -3282,6 +3281,69 @@ export async function fetchAssessmentsFromGoogleSheet(
 
       // Pacing interval between kecamatan tabs
       await new Promise((r) => setTimeout(r, 120));
+    }
+
+    // Fallback: If 0 rows found in 7 kecamatan tabs, probe single sheet / custom tabs (e.g. Data Terverifikasi / Sheet1 / gid)
+    if (allExtractedRows.length === 0) {
+      const gidMatch = (config.spreadsheetUrl || '').match(/[#&?]gid=([0-9]+)/);
+      const gid = gidMatch ? gidMatch[1] : null;
+
+      const fallbackUrls: Array<{ url: string; label: string }> = [];
+      if (gid) {
+        fallbackUrls.push({
+          url: `https://docs.google.com/spreadsheets/d/${spreadsheetId}/gviz/tq?gid=${encodeURIComponent(gid)}&_t=${cacheBuster}`,
+          label: `Sheet (gid=${gid})`,
+        });
+      }
+
+      // Default active sheet
+      fallbackUrls.push({
+        url: `https://docs.google.com/spreadsheets/d/${spreadsheetId}/gviz/tq?_t=${cacheBuster}`,
+        label: 'Sheet Utama',
+      });
+
+      // Common custom tab names
+      const customTabNames = [
+        config.sheetName,
+        'Data_Terverifikasi',
+        'Data Terverifikasi',
+        'Data_Kerusakan',
+        'Data Kerusakan',
+        'Data_Penilaian',
+        'Sheet1',
+        'Halaman 2',
+        'Halaman 3',
+        'Halaman 4',
+        'Halaman 5',
+      ].filter(Boolean) as string[];
+
+      for (const tab of customTabNames) {
+        fallbackUrls.push({
+          url: `https://docs.google.com/spreadsheets/d/${spreadsheetId}/gviz/tq?sheet=${encodeURIComponent(tab)}&_t=${cacheBuster}`,
+          label: tab,
+        });
+      }
+
+      for (const target of fallbackUrls) {
+        try {
+          const controller = new AbortController();
+          const timeoutId = setTimeout(() => controller.abort(), 10000);
+          const res = await fetch(target.url, { signal: controller.signal });
+          clearTimeout(timeoutId);
+          if (res.ok) {
+            const text = await res.text();
+            if (text && text.includes('google.visualization.Query.setResponse')) {
+              const parsedRows = parseGvizResponseToRows(text, target.label);
+              if (parsedRows.length > 0) {
+                allExtractedRows.push(...parsedRows);
+                successfulFetches++;
+                break;
+              }
+            }
+          }
+        } catch {}
+        await new Promise((r) => setTimeout(r, 60));
+      }
     }
 
     try {

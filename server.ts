@@ -1359,15 +1359,15 @@ function isMasterRekapFallbackServer(
 
 function parseServerGvizTextToRows(rawText: string, sheetName: string): Array<{ rowObj: Record<string, any>; sheetRowNumber: number; sourceSheet: string }> {
   if (!rawText || !rawText.includes('google.visualization.Query.setResponse')) return [];
-  if (!sheetName || !sheetName.toLowerCase().startsWith('kec')) return [];
-  const clean = sheetName.trim().toUpperCase().replace(/[\s_-]+/g, '_');
+  const clean = (sheetName || '').trim().toUpperCase().replace(/[\s_-]+/g, '_');
+  // Only exclude purely administrative non-assessment metadata tabs
   if (
-    clean.includes('REKAP') ||
-    clean.includes('RINGKASAN') ||
-    clean.includes('DATA_PENILAIAN') ||
-    clean.includes('PENGGUNA') ||
-    clean.includes('DUKCAPIL') ||
-    clean.includes('REFERENSI')
+    clean === 'PENGGUNA' ||
+    clean === 'DAFTAR_PENGGUNA' ||
+    clean === 'LOG_PENGGUNA' ||
+    clean === 'LOG_AKTIVITAS' ||
+    clean === 'REFERENSI_WILAYAH' ||
+    clean === 'RINGKASAN_EKSEKUTIF'
   ) {
     return [];
   }
@@ -1518,6 +1518,70 @@ const handleKecamatanRawFetch = async (req: express.Request, res: express.Respon
       }
       // Pacing interval between kecamatan fetches
       await new Promise((r) => setTimeout(r, 120));
+    }
+
+    // Fallback: If 0 rows found from the 7 kecamatan tabs, probe single sheet / custom tabs (e.g. Data Terverifikasi / Sheet1 / gid)
+    if (allRows.length === 0) {
+      const gidMatch = spreadsheetUrl.match(/[#&?]gid=([0-9]+)/);
+      const gid = gidMatch ? gidMatch[1] : null;
+
+      const fallbackUrls: Array<{ url: string; label: string }> = [];
+      if (gid) {
+        fallbackUrls.push({
+          url: `https://docs.google.com/spreadsheets/d/${spreadsheetId}/gviz/tq?gid=${encodeURIComponent(gid)}&_t=${cacheBuster}`,
+          label: `Sheet (gid=${gid})`,
+        });
+      }
+
+      // Default active sheet
+      fallbackUrls.push({
+        url: `https://docs.google.com/spreadsheets/d/${spreadsheetId}/gviz/tq?_t=${cacheBuster}`,
+        label: 'Sheet Utama',
+      });
+
+      // Common custom tab names (e.g. Data Terverifikasi, Sheet1)
+      const customTabNames = [
+        'Data_Terverifikasi',
+        'Data Terverifikasi',
+        'Data_Kerusakan',
+        'Data Kerusakan',
+        'Data_Penilaian',
+        'Sheet1',
+        'Halaman 2',
+        'Halaman 3',
+        'Halaman 4',
+        'Halaman 5',
+      ];
+      for (const tab of customTabNames) {
+        fallbackUrls.push({
+          url: `https://docs.google.com/spreadsheets/d/${spreadsheetId}/gviz/tq?sheet=${encodeURIComponent(tab)}&_t=${cacheBuster}`,
+          label: tab,
+        });
+      }
+
+      for (const target of fallbackUrls) {
+        try {
+          const controller = new AbortController();
+          const timeout = setTimeout(() => controller.abort(), 10000);
+          const resp = await fetch(target.url, {
+            signal: controller.signal,
+            headers: {
+              'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36',
+            },
+          });
+          clearTimeout(timeout);
+          if (resp.ok) {
+            const text = await resp.text();
+            const parsed = parseServerGvizTextToRows(text, target.label);
+            if (parsed.length > 0) {
+              allRows.push(...parsed);
+              scannedSheets.push(target.label);
+              break;
+            }
+          }
+        } catch {}
+        await new Promise((r) => setTimeout(r, 60));
+      }
     }
 
     if (allRows.length > 0) {
