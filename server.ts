@@ -258,15 +258,28 @@ app.get('/api/assessments', (req, res) => {
 });
 
 // Helper to forward assessment to Google Apps Script Webhook automatically from server
-async function forwardAssessmentToGoogleSheet(assessment: any, action: 'insert' | 'update' | 'delete' = 'insert') {
+async function forwardAssessmentToGoogleSheet(
+  assessment: any,
+  action: 'insert' | 'update' | 'delete' = 'insert',
+  customConfig?: any,
+  explicitTargetSheetName?: string
+) {
   try {
-    const config = getGoogleSheetConfig();
+    const config = customConfig || getGoogleSheetConfig();
     const webhookUrl = config.webhookUrl;
     if (!webhookUrl || !webhookUrl.startsWith('http')) return { success: false, message: 'URL Webhook belum diatur' };
 
     const ownerName = assessment.namaPemilikRumah || assessment.namaPemilikGedung || assessment.ownerAgency || '-';
     const kecName = assessment.kecamatanName || 'Aesesa';
-    const kecSheetName = (assessment.targetSheetName || `Kec. ${kecName}`).replace(/[:\\/?*\[\]]/g, '').trim().substring(0, 30);
+    const targetSheetName = (explicitTargetSheetName || assessment.targetSheetName || `Kec. ${kecName}`).replace(/[:\\/?*\[\]]/g, '').trim().substring(0, 30);
+
+    // Pemetaan 21 komponen individual
+    const compMap: Record<string, number> = {};
+    if (assessment.components && Array.isArray(assessment.components)) {
+      assessment.components.forEach((c: any) => {
+        if (c && c.id) compMap[c.id] = c.damagePercentInput || 0;
+      });
+    }
 
     const rowData: Record<string, any> = {
       'No Registrasi': assessment.code || assessment.id,
@@ -290,6 +303,28 @@ async function forwardAssessmentToGoogleSheet(assessment: any, action: 'insert' 
       'Tahun Dibangun': assessment.yearBuilt || 2020,
       'Tingkat Kerusakan (%)': assessment.totalDamagePercent || 0,
       'Klasifikasi Kerusakan': assessment.damageClassification || 'Rusak Ringan',
+      // 21 Kolom Komponen Individual
+      'Pondasi (%)': compMap['pondasi_1'] ?? 0,
+      'Kolom & Balok (%)': compMap['struktur_kolom_balok'] ?? 0,
+      'Struktur Plesteran (%)': compMap['struktur_plesteran'] ?? 0,
+      'Atap Kuda-kuda (%)': compMap['atap_kuda_kuda'] ?? 0,
+      'Atap Gording (%)': compMap['atap_gording'] ?? 0,
+      'Atap Penutup (%)': compMap['atap_penutup'] ?? 0,
+      'Rangka Langit (%)': compMap['langit_rangka'] ?? 0,
+      'Penutup Langit (%)': compMap['langit_penutup'] ?? 0,
+      'Dinding Bata (%)': compMap['dinding_bata'] ?? 0,
+      'Dinding Plesteran (%)': compMap['dinding_plesteran'] ?? 0,
+      'Dinding Kaca (%)': compMap['dinding_kaca'] ?? 0,
+      'Dinding Pintu (%)': compMap['dinding_pintu'] ?? 0,
+      'Dinding Kosen (%)': compMap['dinding_kosen'] ?? 0,
+      'Penutup Lantai (%)': compMap['lantai_penutup'] ?? 0,
+      'Instalasi Listrik (%)': compMap['utilitas_listrik'] ?? 0,
+      'Instalasi Air (%)': compMap['utilitas_air'] ?? 0,
+      'Drainase Limbah (%)': compMap['utilitas_drainase'] ?? 0,
+      'Cat Struktur (%)': compMap['finishing_struktur'] ?? 0,
+      'Cat Langit (%)': compMap['finishing_langit'] ?? 0,
+      'Cat Dinding (%)': compMap['finishing_dinding'] ?? 0,
+      'Cat Kosen Pintu (%)': compMap['finishing_kosen_pintu'] ?? 0,
       'HSBGN / M2 (Rp)': assessment.hsbgnPerM2 || 0,
       'Biaya Perawatan / M2 (Rp)': assessment.treatmentCostPerM2 || 0,
       'Biaya Bongkaran / M2 (Rp)': assessment.demolitionCostPerM2 || 0,
@@ -312,16 +347,17 @@ async function forwardAssessmentToGoogleSheet(assessment: any, action: 'insert' 
       'Terakhir Diperbarui': new Date(assessment.updatedAt || Date.now()).toLocaleString('id-ID'),
     };
 
+    const isExplicit = Boolean(explicitTargetSheetName && explicitTargetSheetName.trim());
     const payload = {
       action,
-      sheetName: config.sheetName || 'REKAP_SEMUA_KECAMATAN',
-      targetSheetName: kecSheetName,
-      kecamatanSheetName: kecSheetName,
+      sheetName: explicitTargetSheetName || config.sheetName || 'REKAP_SEMUA_KECAMATAN',
+      targetSheetName,
+      kecamatanSheetName: targetSheetName,
       buildingName: assessment.buildingName,
       desaName: assessment.desaName,
       kecamatanName: assessment.kecamatanName,
-      splitByKecamatan: config.splitByKecamatan !== false,
-      includeMasterSummary: config.includeMasterSummarySheet !== false,
+      splitByKecamatan: isExplicit ? false : (config.splitByKecamatan !== false),
+      includeMasterSummary: isExplicit ? false : (config.includeMasterSummarySheet !== false),
       spreadsheetUrl: config.spreadsheetUrl,
       registrationCode: assessment.code || assessment.id,
       previousRegistrationCode: assessment.code || assessment.id,
@@ -355,7 +391,7 @@ async function forwardAssessmentToGoogleSheet(assessment: any, action: 'insert' 
       return { success: false, message: responseJson.message };
     }
 
-    console.info(`[Server -> GoogleSheet] Synced "${assessment.buildingName}" (action: ${action}, status: ${resp.status})`);
+    console.info(`[Server -> GoogleSheet] Synced "${assessment.buildingName}" (action: ${action}, target: ${targetSheetName}, status: ${resp.status})`);
     return { success: true, message: responseJson.message || 'Sinkronisasi Google Sheet berhasil' };
   } catch (err: any) {
     console.warn('[Server -> GoogleSheet] Auto-sync notice:', err?.message || err);
@@ -366,11 +402,16 @@ async function forwardAssessmentToGoogleSheet(assessment: any, action: 'insert' 
 // POST /api/google-sheet/sync - Proxy endpoint to execute Google Sheet sync and report exact status
 app.post('/api/google-sheet/sync', async (req, res) => {
   try {
-    const { assessment, action } = req.body;
+    const { assessment, action, targetSheetName, config: clientConfig } = req.body;
     if (!assessment) {
       return res.status(400).json({ success: false, message: 'Data assessment wajib diisi' });
     }
-    const result = await forwardAssessmentToGoogleSheet(assessment, action || 'insert');
+    const result = await forwardAssessmentToGoogleSheet(
+      assessment,
+      action || 'insert',
+      clientConfig,
+      targetSheetName
+    );
     return res.json(result);
   } catch (err: any) {
     return res.status(500).json({ success: false, message: err?.message || 'Internal server error' });

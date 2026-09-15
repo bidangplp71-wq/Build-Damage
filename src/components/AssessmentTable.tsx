@@ -64,6 +64,7 @@ export const AssessmentTable: React.FC = () => {
     currentUser,
     deleteAssessment,
     verifyAssessment,
+    batchVerifyAssessments,
     syncAssessmentToSheet,
     setSelectedAssessmentForDetail,
     setSelectedAssessmentForEdit,
@@ -91,6 +92,26 @@ export const AssessmentTable: React.FC = () => {
 
   // Portfolio Recap Modal State
   const [showPortfolioModal, setShowPortfolioModal] = useState(false);
+
+  // Available spreadsheet profiles
+  const availableProfiles = (googleSheetConfig.spreadsheetProfiles && googleSheetConfig.spreadsheetProfiles.length > 0)
+    ? googleSheetConfig.spreadsheetProfiles
+    : [
+        {
+          id: 'profile_primary_2026',
+          pageNumber: 1,
+          name: 'Buku 1: Spreadsheet Utama SIM-PKBG 2026',
+          spreadsheetUrl: googleSheetConfig.spreadsheetUrl || '',
+          webhookUrl: googleSheetConfig.webhookUrl,
+          driveFolderId: googleSheetConfig.driveFolderId,
+          description: 'Spreadsheet dinas utama',
+          capacityStatus: 'normal' as const,
+          estimatedRowCount: assessments.length || 0,
+          maxCapacityRows: 2000,
+          createdAt: '2026-01-01T00:00:00Z',
+          isDefault: true,
+        },
+      ];
 
   // Recently submitted assessment highlight & toast
   const [recentlySubmittedId, setRecentlySubmittedId] = useState<string | null>(null);
@@ -139,6 +160,25 @@ export const AssessmentTable: React.FC = () => {
   const [itemToVerify, setItemToVerify] = useState<BuildingAssessment | null>(null);
   const [verifyStatusChoice, setVerifyStatusChoice] = useState<VerificationStatus>('Terverifikasi');
   const [verifyNotesInput, setVerifyNotesInput] = useState('');
+  const [targetWorksheetInput, setTargetWorksheetInput] = useState<string>('Data_Terverifikasi');
+  const [enableSheetSync, setEnableSheetSync] = useState<boolean>(true);
+  const [selectedTargetProfileId, setSelectedTargetProfileId] = useState<string>('profile_primary_2026');
+  const [useCustomSheetUrl, setUseCustomSheetUrl] = useState<boolean>(false);
+  const [customSpreadsheetUrl, setCustomSpreadsheetUrl] = useState<string>('');
+  const [customWebhookUrl, setCustomWebhookUrl] = useState<string>('');
+  const [isSubmittingVerify, setIsSubmittingVerify] = useState<boolean>(false);
+
+  // Batch Verification modal & states
+  const [showBatchVerifyModal, setShowBatchVerifyModal] = useState<boolean>(false);
+  const [batchVerifyStatus, setBatchVerifyStatus] = useState<VerificationStatus>('Terverifikasi');
+  const [batchVerifyNotes, setBatchVerifyNotes] = useState<string>('');
+  const [batchTargetWorksheet, setBatchTargetWorksheet] = useState<string>('Data_Terverifikasi');
+  const [batchTargetProfileId, setBatchTargetProfileId] = useState<string>('profile_primary_2026');
+  const [batchEnableSheetSync, setBatchEnableSheetSync] = useState<boolean>(true);
+  const [batchUseCustomSheetUrl, setBatchUseCustomSheetUrl] = useState<boolean>(false);
+  const [batchCustomSpreadsheetUrl, setBatchCustomSpreadsheetUrl] = useState<string>('');
+  const [batchCustomWebhookUrl, setBatchCustomWebhookUrl] = useState<string>('');
+  const [isSubmittingBatchVerify, setIsSubmittingBatchVerify] = useState<boolean>(false);
 
   // Photo viewer lightbox state
   const [photoViewerAssessment, setPhotoViewerAssessment] = useState<BuildingAssessment | null>(null);
@@ -393,14 +433,64 @@ export const AssessmentTable: React.FC = () => {
   // Verify Action
   const handleConfirmVerify = async () => {
     if (!itemToVerify) return;
-    const res = await verifyAssessment(itemToVerify.id, verifyStatusChoice, verifyNotesInput);
-    if (res.success) {
-      showToast(res.message, 'success');
-    } else {
-      showToast(res.message, 'error');
+    setIsSubmittingVerify(true);
+    try {
+      const res = await verifyAssessment(
+        itemToVerify.id,
+        verifyStatusChoice,
+        verifyNotesInput,
+        {
+          syncToSheet: enableSheetSync,
+          targetWorksheetName: targetWorksheetInput.trim() || 'Data_Terverifikasi',
+          targetProfileId: selectedTargetProfileId,
+          targetSpreadsheetUrl: useCustomSheetUrl && customSpreadsheetUrl.trim() ? customSpreadsheetUrl.trim() : undefined,
+          targetWebhookUrl: useCustomSheetUrl && customWebhookUrl.trim() ? customWebhookUrl.trim() : undefined,
+        }
+      );
+      if (res.success) {
+        showToast(res.message, 'success');
+      } else {
+        showToast(res.message, 'error');
+      }
+      setItemToVerify(null);
+      setVerifyNotesInput('');
+    } catch (err: any) {
+      showToast('Gagal memproses validasi: ' + (err?.message || 'Terjadi kesalahan'), 'error');
+    } finally {
+      setIsSubmittingVerify(false);
     }
-    setItemToVerify(null);
-    setVerifyNotesInput('');
+  };
+
+  // Batch Verify Action
+  const handleConfirmBatchVerify = async () => {
+    if (selectedRowIds.length === 0) return;
+    setIsSubmittingBatchVerify(true);
+    try {
+      const res = await batchVerifyAssessments(
+        selectedRowIds,
+        batchVerifyStatus,
+        batchVerifyNotes,
+        {
+          syncToSheet: batchEnableSheetSync,
+          targetWorksheetName: batchTargetWorksheet.trim() || 'Data_Terverifikasi',
+          targetProfileId: batchTargetProfileId,
+          targetSpreadsheetUrl: batchUseCustomSheetUrl && batchCustomSpreadsheetUrl.trim() ? batchCustomSpreadsheetUrl.trim() : undefined,
+          targetWebhookUrl: batchUseCustomSheetUrl && batchCustomWebhookUrl.trim() ? batchCustomWebhookUrl.trim() : undefined,
+        }
+      );
+      if (res.success) {
+        showToast(res.message, 'success');
+        setSelectedRowIds([]);
+        setShowBatchVerifyModal(false);
+        setBatchVerifyNotes('');
+      } else {
+        showToast(res.message, 'error');
+      }
+    } catch (err: any) {
+      showToast('Gagal memproses validasi massal: ' + (err?.message || 'Terjadi kesalahan'), 'error');
+    } finally {
+      setIsSubmittingBatchVerify(false);
+    }
   };
 
   // Individual Sync to Google Sheet
@@ -1070,6 +1160,45 @@ export const AssessmentTable: React.FC = () => {
         )}
       </div>
 
+      {/* Batch Action Toolbar for Selected Rows */}
+      {selectedRowIds.length > 0 && (
+        <div className="flex flex-wrap items-center justify-between gap-3 p-3.5 bg-gradient-to-r from-blue-900 to-indigo-950 rounded-2xl text-white shadow-lg border border-blue-500/30 animate-in fade-in slide-in-from-top-2 duration-200">
+          <div className="flex items-center gap-2.5">
+            <span className="w-2.5 h-2.5 rounded-full bg-cyan-400 animate-pulse"></span>
+            <span className="text-xs font-bold text-cyan-200">
+              <strong className="text-white text-sm font-mono">{selectedRowIds.length}</strong> data terpilih
+            </span>
+            <span className="text-xs text-slate-300 hidden sm:inline">| Aksi Validasi & Pemindahan ke Sheet Baru</span>
+          </div>
+          <div className="flex items-center gap-2 flex-wrap">
+            {(currentUser.role === 'super_admin' || currentUser.role === 'admin' || currentUser.role === 'admin_verifikator') && (
+              <button
+                type="button"
+                onClick={() => {
+                  setBatchVerifyStatus('Terverifikasi');
+                  setBatchTargetWorksheet(googleSheetConfig.verifiedWorksheetName || 'Data_Terverifikasi');
+                  setBatchTargetProfileId(googleSheetConfig.verifiedSpreadsheetProfileId || googleSheetConfig.activeProfileId || 'profile_primary_2026');
+                  setBatchEnableSheetSync(true);
+                  setBatchUseCustomSheetUrl(false);
+                  setShowBatchVerifyModal(true);
+                }}
+                className="inline-flex items-center gap-1.5 px-3.5 py-1.5 bg-cyan-500 hover:bg-cyan-400 text-slate-950 rounded-xl text-xs font-bold shadow-xs transition-all cursor-pointer"
+              >
+                <ShieldCheck className="w-4 h-4" />
+                <span>Validasi & Simpan ke Sheet Baru ({selectedRowIds.length})</span>
+              </button>
+            )}
+            <button
+              type="button"
+              onClick={() => setSelectedRowIds([])}
+              className="px-3 py-1.5 bg-white/10 hover:bg-white/20 text-white rounded-xl text-xs font-medium border border-white/20 transition-colors cursor-pointer"
+            >
+              Batal Pilih
+            </button>
+          </div>
+        </div>
+      )}
+
       {/* Main Table */}
       <div className="bg-white rounded-2xl border border-slate-200 shadow-xs overflow-hidden">
         <div className="overflow-x-auto">
@@ -1482,10 +1611,23 @@ export const AssessmentTable: React.FC = () => {
                           <button
                             onClick={() => {
                               setItemToVerify(item);
-                              setVerifyStatusChoice(item.verificationStatus);
+                              setVerifyStatusChoice(item.verificationStatus === 'Menunggu Verifikasi' ? 'Terverifikasi' : item.verificationStatus);
                               setVerifyNotesInput(item.verificationNotes || '');
+                              setTargetWorksheetInput(
+                                googleSheetConfig.verifiedWorksheetName ||
+                                (item.targetSheetName && item.targetSheetName !== item.sourceSheet ? item.targetSheetName : 'Data_Terverifikasi')
+                              );
+                              setSelectedTargetProfileId(
+                                googleSheetConfig.verifiedSpreadsheetProfileId ||
+                                googleSheetConfig.activeProfileId ||
+                                'profile_primary_2026'
+                              );
+                              setEnableSheetSync(true);
+                              setUseCustomSheetUrl(false);
+                              setCustomSpreadsheetUrl('');
+                              setCustomWebhookUrl('');
                             }}
-                            title="Update Status Validasi Teknis"
+                            title="Update Status Validasi Teknis & Alur Lembar Kerja Baru"
                             className="p-1.5 rounded-lg bg-amber-50 hover:bg-amber-100 text-amber-700 border border-amber-200 transition-colors cursor-pointer"
                           >
                             <ShieldCheck className="w-3.5 h-3.5" />
@@ -1640,27 +1782,37 @@ export const AssessmentTable: React.FC = () => {
       {/* Modal: Verification / Update Validation */}
       {itemToVerify && (
         <div className="fixed inset-0 z-50 flex items-center justify-center bg-slate-900/60 backdrop-blur-xs p-4 animate-in fade-in duration-150">
-          <div className="bg-white rounded-2xl max-w-lg w-full p-6 shadow-2xl border border-slate-200">
+          <div className="bg-white rounded-2xl max-w-xl w-full p-6 shadow-2xl border border-slate-200 max-h-[90vh] overflow-y-auto">
             <div className="flex items-center justify-between pb-3 border-b border-slate-100">
               <h3 className="text-base font-bold text-slate-900 flex items-center gap-2">
                 <ShieldCheck className="w-5 h-5 text-indigo-600" />
-                <span>Validasi Teknis Penilaian PUPR</span>
+                <span>Validasi Teknis & Pemindahan ke Sheet Baru</span>
               </h3>
               <button
                 onClick={() => setItemToVerify(null)}
-                className="text-slate-400 hover:text-slate-600"
+                className="text-slate-400 hover:text-slate-600 cursor-pointer"
               >
                 <X className="w-5 h-5" />
               </button>
             </div>
 
             <div className="mt-4 space-y-4 text-xs">
-              <div className="bg-slate-50 p-3 rounded-xl border border-slate-200">
-                <div className="font-bold text-slate-900">{itemToVerify.buildingName}</div>
-                <div className="text-slate-500 mt-0.5">
-                  Kec. {itemToVerify.kecamatanName} &bull; {itemToVerify.desaName} &bull; Kerusakan:{' '}
-                  <strong className="text-slate-800">{itemToVerify.totalDamagePercent}% ({itemToVerify.damageClassification})</strong>
+              <div className="bg-slate-50 p-3.5 rounded-xl border border-slate-200">
+                <div className="font-bold text-slate-900 text-sm">{itemToVerify.buildingName}</div>
+                <div className="text-slate-500 mt-1 flex flex-wrap items-center gap-2">
+                  <span>Kec. {itemToVerify.kecamatanName} &bull; {itemToVerify.desaName}</span>
+                  <span>&bull;</span>
+                  <span>Kerusakan: <strong className="text-slate-800">{itemToVerify.totalDamagePercent}% ({itemToVerify.damageClassification})</strong></span>
                 </div>
+                {itemToVerify.sourceSheet && (
+                  <div className="mt-2 pt-2 border-t border-slate-200/80 flex items-center gap-1.5 text-[11px] text-amber-800">
+                    <span className="font-semibold">Sumber Dokumen:</span>
+                    <span className="font-mono bg-amber-100/80 px-1.5 py-0.5 rounded text-amber-950 font-bold">
+                      Tab "{itemToVerify.sourceSheet}"
+                    </span>
+                    <span className="text-amber-700">(Data Lama / Read-Only Google)</span>
+                  </div>
+                )}
               </div>
 
               <div>
@@ -1747,20 +1899,404 @@ export const AssessmentTable: React.FC = () => {
                   </p>
                 </div>
               )}
+
+              {/* SECTION: Worksheet Baru & Tujuan Pengalihan Google Sheet */}
+              <div className="p-3.5 rounded-xl border border-indigo-200 bg-indigo-50/50 space-y-3">
+                <div className="flex items-start gap-2.5">
+                  <div className="p-1.5 bg-indigo-600 text-white rounded-lg shrink-0 mt-0.5">
+                    <FileSpreadsheet className="w-4 h-4" />
+                  </div>
+                  <div>
+                    <span className="font-bold text-indigo-950 block text-xs">
+                      Penyimpanan ke Worksheet Baru (Otomatis Pindah Sheet)
+                    </span>
+                    <span className="text-[10px] text-indigo-800 leading-relaxed block mt-0.5">
+                      Sistem akan menyimpan data yang telah divalidasi ke <strong>Worksheet Baru</strong> yang Anda tentukan di bawah tanpa perlu repot mengonversi atau menyentuh sheet lama yang berstatus read-only.
+                    </span>
+                  </div>
+                </div>
+
+                <div className="pt-1 space-y-3">
+                  <label className="flex items-start gap-2 cursor-pointer">
+                    <input
+                      type="checkbox"
+                      checked={enableSheetSync}
+                      onChange={(e) => setEnableSheetSync(e.target.checked)}
+                      className="mt-0.5 rounded border-indigo-300 text-indigo-600 focus:ring-indigo-500 w-4 h-4 cursor-pointer"
+                    />
+                    <div>
+                      <span className="font-semibold text-slate-900 block text-xs">
+                        Aktifkan pengiriman data terverifikasi ke Worksheet Baru Google Sheet
+                      </span>
+                      <span className="text-[10px] text-slate-600 leading-tight block mt-0.5">
+                        {itemToVerify.sourceSheet
+                          ? `Tab sumber lama "${itemToVerify.sourceSheet}" (Read-Only) tetap aman tidak diubah. Hasil validasi lengkap dengan 21 rincian komponen ditulis ke worksheet baru.`
+                          : 'Data hasil verifikasi akan langsung dicatat rapi ke tab lembar kerja yang Anda tentukan.'}
+                      </span>
+                    </div>
+                  </label>
+
+                  {enableSheetSync && (
+                    <div className="space-y-3 pl-6 pt-1 border-l-2 border-indigo-200">
+                      {/* Nama Worksheet Baru */}
+                      <div>
+                        <div className="flex items-center justify-between mb-1">
+                          <label className="block font-semibold text-slate-800 text-xs">
+                            Nama Tab / Worksheet Baru Tujuan:
+                          </label>
+                          <span className="text-[10px] text-indigo-700 font-medium">
+                            Otomatis dibuat jika belum ada
+                          </span>
+                        </div>
+                        <input
+                          type="text"
+                          value={targetWorksheetInput}
+                          onChange={(e) => setTargetWorksheetInput(e.target.value)}
+                          placeholder="Data_Terverifikasi"
+                          className="w-full px-3 py-2 rounded-lg border border-slate-300 font-mono font-medium text-xs text-slate-900 bg-white focus:outline-none focus:ring-2 focus:ring-indigo-500"
+                        />
+                        {/* Quick Presets */}
+                        <div className="flex flex-wrap items-center gap-1.5 mt-1.5">
+                          <span className="text-[10px] text-slate-500 font-medium">Pilihan cepat:</span>
+                          <button
+                            type="button"
+                            onClick={() => setTargetWorksheetInput('Data_Terverifikasi')}
+                            className={`text-[10px] px-2 py-0.5 rounded-md border font-medium transition-colors cursor-pointer ${
+                              targetWorksheetInput === 'Data_Terverifikasi'
+                                ? 'bg-indigo-600 text-white border-indigo-600'
+                                : 'bg-white hover:bg-slate-100 text-slate-700 border-slate-200'
+                            }`}
+                          >
+                            Data_Terverifikasi
+                          </button>
+                          <button
+                            type="button"
+                            onClick={() => setTargetWorksheetInput(`Kec. ${itemToVerify.kecamatanName} (Valid)`)}
+                            className={`text-[10px] px-2 py-0.5 rounded-md border font-medium transition-colors cursor-pointer ${
+                              targetWorksheetInput === `Kec. ${itemToVerify.kecamatanName} (Valid)`
+                                ? 'bg-indigo-600 text-white border-indigo-600'
+                                : 'bg-white hover:bg-slate-100 text-slate-700 border-slate-200'
+                            }`}
+                          >
+                            Kec. {itemToVerify.kecamatanName} (Valid)
+                          </button>
+                          <button
+                            type="button"
+                            onClick={() => setTargetWorksheetInput('HASIL_VERIFIKASI_2026')}
+                            className={`text-[10px] px-2 py-0.5 rounded-md border font-medium transition-colors cursor-pointer ${
+                              targetWorksheetInput === 'HASIL_VERIFIKASI_2026'
+                                ? 'bg-indigo-600 text-white border-indigo-600'
+                                : 'bg-white hover:bg-slate-100 text-slate-700 border-slate-200'
+                            }`}
+                          >
+                            HASIL_VERIFIKASI_2026
+                          </button>
+                        </div>
+                      </div>
+
+                      {/* Spreadsheet Destination (Profile or Custom URL) */}
+                      <div>
+                        <label className="block font-semibold text-slate-800 text-xs mb-1">
+                          Pilihan Dokumen Spreadsheet Tujuan:
+                        </label>
+                        <select
+                          value={useCustomSheetUrl ? '__CUSTOM__' : selectedTargetProfileId}
+                          onChange={(e) => {
+                            if (e.target.value === '__CUSTOM__') {
+                              setUseCustomSheetUrl(true);
+                            } else {
+                              setUseCustomSheetUrl(false);
+                              setSelectedTargetProfileId(e.target.value);
+                            }
+                          }}
+                          className="w-full px-3 py-2 rounded-lg border border-slate-300 font-medium text-xs text-slate-900 bg-white focus:outline-none focus:ring-2 focus:ring-indigo-500"
+                        >
+                          {availableProfiles.map((p) => (
+                            <option key={p.id} value={p.id}>
+                              {p.name} {p.id === googleSheetConfig.activeProfileId ? '(Sedang Aktif)' : ''}
+                            </option>
+                          ))}
+                          <option value="__CUSTOM__">
+                            + Masukkan URL Dokumen Spreadsheet Baru Manual
+                          </option>
+                        </select>
+                      </div>
+
+                      {/* Custom Spreadsheet URL Fields (if user chooses manual) */}
+                      {useCustomSheetUrl && (
+                        <div className="p-2.5 rounded-lg bg-white border border-indigo-200 space-y-2 text-xs">
+                          <div>
+                            <label className="block font-semibold text-slate-700 text-[11px] mb-0.5">
+                              URL Google Spreadsheet Baru:
+                            </label>
+                            <input
+                              type="url"
+                              value={customSpreadsheetUrl}
+                              onChange={(e) => setCustomSpreadsheetUrl(e.target.value)}
+                              placeholder="https://docs.google.com/spreadsheets/d/.../edit"
+                              className="w-full px-2.5 py-1.5 rounded-lg border border-slate-300 font-mono text-[11px] text-slate-900 focus:outline-none focus:ring-2 focus:ring-indigo-500"
+                            />
+                          </div>
+                          <div>
+                            <label className="block font-semibold text-slate-700 text-[11px] mb-0.5">
+                              URL Webhook Apps Script (Opsional - default ke webhook aktif):
+                            </label>
+                            <input
+                              type="url"
+                              value={customWebhookUrl}
+                              onChange={(e) => setCustomWebhookUrl(e.target.value)}
+                              placeholder={googleSheetConfig.webhookUrl || 'https://script.google.com/macros/s/.../exec'}
+                              className="w-full px-2.5 py-1.5 rounded-lg border border-slate-300 font-mono text-[11px] text-slate-900 focus:outline-none focus:ring-2 focus:ring-indigo-500"
+                            />
+                          </div>
+                        </div>
+                      )}
+                    </div>
+                  )}
+                </div>
+              </div>
             </div>
 
             <div className="mt-6 flex items-center justify-end gap-2 pt-3 border-t border-slate-100">
               <button
+                type="button"
                 onClick={() => setItemToVerify(null)}
-                className="px-4 py-2 text-xs font-semibold text-slate-700 bg-slate-100 hover:bg-slate-200 rounded-xl transition-colors"
+                disabled={isSubmittingVerify}
+                className="px-4 py-2 text-xs font-semibold text-slate-700 bg-slate-100 hover:bg-slate-200 rounded-xl transition-colors cursor-pointer"
               >
                 Batal
               </button>
               <button
+                type="button"
                 onClick={handleConfirmVerify}
-                className="px-4 py-2 text-xs font-bold text-white bg-indigo-600 hover:bg-indigo-500 rounded-xl transition-colors"
+                disabled={isSubmittingVerify}
+                className="inline-flex items-center gap-1.5 px-4 py-2 text-xs font-bold text-white bg-indigo-600 hover:bg-indigo-500 rounded-xl transition-colors cursor-pointer shadow-xs disabled:opacity-50"
               >
-                Simpan Validasi
+                {isSubmittingVerify ? (
+                  <>
+                    <RefreshCw className="w-3.5 h-3.5 animate-spin" />
+                    <span>Sedang Menyimpan ke Sheet Baru...</span>
+                  </>
+                ) : (
+                  <>
+                    <ShieldCheck className="w-3.5 h-3.5" />
+                    <span>Simpan Validasi & Pindahkan ke Sheet Baru</span>
+                  </>
+                )}
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
+
+      {/* Modal: Batch Verification for Selected Rows */}
+      {showBatchVerifyModal && (
+        <div className="fixed inset-0 z-50 flex items-center justify-center bg-slate-900/60 backdrop-blur-xs p-4 animate-in fade-in duration-150">
+          <div className="bg-white rounded-2xl max-w-xl w-full p-6 shadow-2xl border border-slate-200 max-h-[90vh] overflow-y-auto">
+            <div className="flex items-center justify-between pb-3 border-b border-slate-100">
+              <h3 className="text-base font-bold text-slate-900 flex items-center gap-2">
+                <ShieldCheck className="w-5 h-5 text-indigo-600" />
+                <span>Validasi Massal & Pindah ke Worksheet Baru</span>
+              </h3>
+              <button
+                onClick={() => setShowBatchVerifyModal(false)}
+                className="text-slate-400 hover:text-slate-600 cursor-pointer"
+              >
+                <X className="w-5 h-5" />
+              </button>
+            </div>
+
+            <div className="mt-4 space-y-4 text-xs">
+              <div className="bg-blue-50 p-3.5 rounded-xl border border-blue-200">
+                <div className="font-bold text-blue-950 text-sm flex items-center gap-2">
+                  <Sparkles className="w-4 h-4 text-blue-600" />
+                  <span>{selectedRowIds.length} Bangunan Terpilih untuk Validasi</span>
+                </div>
+                <p className="text-[11px] text-blue-800 mt-1 leading-relaxed">
+                  Semua data bangunan yang dipilih akan diperbarui statusnya dan langsung dipindahkan ke worksheet tujuan yang ditentukan. Sangat aman untuk data lama yang bersumber dari Google Sheet berstatus Read-Only.
+                </p>
+              </div>
+
+              <div>
+                <label className="block font-semibold text-slate-700 mb-1">Status Verifikasi:</label>
+                <select
+                  value={batchVerifyStatus}
+                  onChange={(e) => setBatchVerifyStatus(e.target.value as VerificationStatus)}
+                  className="w-full px-3 py-2 rounded-xl border border-slate-200 text-xs font-semibold focus:outline-none focus:ring-2 focus:ring-amber-500"
+                >
+                  <option value="Terverifikasi">Terverifikasi (Disetujui Standar PUPR)</option>
+                  <option value="Menunggu Verifikasi">Menunggu Verifikasi Tambahan</option>
+                  <option value="Perlu Revisi">Perlu Revisi Lapangan</option>
+                  <option value="Ditolak">Ditolak (Tidak Memenuhi Kriteria)</option>
+                </select>
+              </div>
+
+              <div>
+                <label className="block font-semibold text-slate-700 mb-1">
+                  Catatan Verifikator Massal:
+                </label>
+                <textarea
+                  rows={2}
+                  maxLength={5000}
+                  value={batchVerifyNotes}
+                  onChange={(e) => setBatchVerifyNotes(e.target.value)}
+                  placeholder="Contoh: Telah divalidasi dan disetujui sesuai survei lapangan tahap tanggap darurat TA 2026."
+                  className="w-full p-2.5 rounded-xl border border-slate-200 text-xs focus:outline-none focus:ring-2 focus:ring-indigo-500"
+                ></textarea>
+              </div>
+
+              {/* Alur Worksheet Baru Section */}
+              <div className="p-3.5 rounded-xl border border-indigo-200 bg-indigo-50/50 space-y-3">
+                <div className="flex items-center gap-2">
+                  <FileSpreadsheet className="w-4 h-4 text-indigo-600 shrink-0" />
+                  <span className="font-bold text-indigo-950 text-xs">
+                    Pengaturan Worksheet Baru Tujuan (Sinkronisasi Otomatis)
+                  </span>
+                </div>
+
+                <label className="flex items-start gap-2 cursor-pointer">
+                  <input
+                    type="checkbox"
+                    checked={batchEnableSheetSync}
+                    onChange={(e) => setBatchEnableSheetSync(e.target.checked)}
+                    className="mt-0.5 rounded border-indigo-300 text-indigo-600 focus:ring-indigo-500 w-4 h-4 cursor-pointer"
+                  />
+                  <div>
+                    <span className="font-semibold text-slate-900 block text-xs">
+                      Tulis seluruh {selectedRowIds.length} data ke Worksheet Baru
+                    </span>
+                    <span className="text-[10px] text-slate-600 leading-tight block mt-0.5">
+                      Sheet lama yang read-only tidak akan diganggu; setiap rekaman akan dicatat rapi di sheet baru.
+                    </span>
+                  </div>
+                </label>
+
+                {batchEnableSheetSync && (
+                  <div className="space-y-3 pl-6 pt-1 border-l-2 border-indigo-200">
+                    <div>
+                      <label className="block font-semibold text-slate-800 text-xs mb-1">
+                        Nama Tab / Worksheet Baru Tujuan:
+                      </label>
+                      <input
+                        type="text"
+                        value={batchTargetWorksheet}
+                        onChange={(e) => setBatchTargetWorksheet(e.target.value)}
+                        placeholder="Data_Terverifikasi"
+                        className="w-full px-3 py-1.5 rounded-lg border border-slate-300 font-mono font-medium text-xs text-slate-900 bg-white focus:outline-none focus:ring-2 focus:ring-indigo-500"
+                      />
+                      <div className="flex flex-wrap items-center gap-1.5 mt-1.5">
+                        <span className="text-[10px] text-slate-500 font-medium">Pilihan cepat:</span>
+                        <button
+                          type="button"
+                          onClick={() => setBatchTargetWorksheet('Data_Terverifikasi')}
+                          className={`text-[10px] px-2 py-0.5 rounded-md border font-medium transition-colors cursor-pointer ${
+                            batchTargetWorksheet === 'Data_Terverifikasi'
+                              ? 'bg-indigo-600 text-white border-indigo-600'
+                              : 'bg-white hover:bg-slate-100 text-slate-700 border-slate-200'
+                          }`}
+                        >
+                          Data_Terverifikasi
+                        </button>
+                        <button
+                          type="button"
+                          onClick={() => setBatchTargetWorksheet('HASIL_VERIFIKASI_2026')}
+                          className={`text-[10px] px-2 py-0.5 rounded-md border font-medium transition-colors cursor-pointer ${
+                            batchTargetWorksheet === 'HASIL_VERIFIKASI_2026'
+                              ? 'bg-indigo-600 text-white border-indigo-600'
+                              : 'bg-white hover:bg-slate-100 text-slate-700 border-slate-200'
+                          }`}
+                        >
+                          HASIL_VERIFIKASI_2026
+                        </button>
+                      </div>
+                    </div>
+
+                    <div>
+                      <label className="block font-semibold text-slate-800 text-xs mb-1">
+                        Dokumen Google Spreadsheet Tujuan:
+                      </label>
+                      <select
+                        value={batchUseCustomSheetUrl ? '__CUSTOM__' : batchTargetProfileId}
+                        onChange={(e) => {
+                          if (e.target.value === '__CUSTOM__') {
+                            setBatchUseCustomSheetUrl(true);
+                          } else {
+                            setBatchUseCustomSheetUrl(false);
+                            setBatchTargetProfileId(e.target.value);
+                          }
+                        }}
+                        className="w-full px-3 py-1.5 rounded-lg border border-slate-300 font-medium text-xs text-slate-900 bg-white focus:outline-none focus:ring-2 focus:ring-indigo-500"
+                      >
+                        {availableProfiles.map((p) => (
+                          <option key={p.id} value={p.id}>
+                            {p.name} {p.id === googleSheetConfig.activeProfileId ? '(Sedang Aktif)' : ''}
+                          </option>
+                        ))}
+                        <option value="__CUSTOM__">
+                          + Masukkan URL Dokumen Spreadsheet Baru Manual
+                        </option>
+                      </select>
+                    </div>
+
+                    {batchUseCustomSheetUrl && (
+                      <div className="p-2.5 rounded-lg bg-white border border-indigo-200 space-y-2 text-xs">
+                        <div>
+                          <label className="block font-semibold text-slate-700 text-[11px] mb-0.5">
+                            URL Google Sheet Baru:
+                          </label>
+                          <input
+                            type="url"
+                            value={batchCustomSpreadsheetUrl}
+                            onChange={(e) => setBatchCustomSpreadsheetUrl(e.target.value)}
+                            placeholder="https://docs.google.com/spreadsheets/d/.../edit"
+                            className="w-full px-2.5 py-1.5 rounded-lg border border-slate-300 font-mono text-[11px] text-slate-900 focus:outline-none focus:ring-2 focus:ring-indigo-500"
+                          />
+                        </div>
+                        <div>
+                          <label className="block font-semibold text-slate-700 text-[11px] mb-0.5">
+                            URL Webhook Apps Script (Opsional):
+                          </label>
+                          <input
+                            type="url"
+                            value={batchCustomWebhookUrl}
+                            onChange={(e) => setBatchCustomWebhookUrl(e.target.value)}
+                            placeholder={googleSheetConfig.webhookUrl || 'https://script.google.com/macros/s/.../exec'}
+                            className="w-full px-2.5 py-1.5 rounded-lg border border-slate-300 font-mono text-[11px] text-slate-900 focus:outline-none focus:ring-2 focus:ring-indigo-500"
+                          />
+                        </div>
+                      </div>
+                    )}
+                  </div>
+                )}
+              </div>
+            </div>
+
+            <div className="mt-6 flex items-center justify-end gap-2 pt-3 border-t border-slate-100">
+              <button
+                type="button"
+                onClick={() => setShowBatchVerifyModal(false)}
+                disabled={isSubmittingBatchVerify}
+                className="px-4 py-2 text-xs font-semibold text-slate-700 bg-slate-100 hover:bg-slate-200 rounded-xl transition-colors cursor-pointer"
+              >
+                Batal
+              </button>
+              <button
+                type="button"
+                onClick={handleConfirmBatchVerify}
+                disabled={isSubmittingBatchVerify}
+                className="inline-flex items-center gap-1.5 px-4 py-2 text-xs font-bold text-white bg-indigo-600 hover:bg-indigo-500 rounded-xl transition-colors cursor-pointer shadow-xs disabled:opacity-50"
+              >
+                {isSubmittingBatchVerify ? (
+                  <>
+                    <RefreshCw className="w-3.5 h-3.5 animate-spin" />
+                    <span>Sedang Menyimpan ke Sheet Baru...</span>
+                  </>
+                ) : (
+                  <>
+                    <Check className="w-3.5 h-3.5" />
+                    <span>Validasi & Simpan {selectedRowIds.length} Data</span>
+                  </>
+                )}
               </button>
             </div>
           </div>

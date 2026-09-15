@@ -20,6 +20,7 @@ import {
   SheetSyncProgress,
   SessionQuotaStatus,
   ActiveSessionInfo,
+  VerifyAssessmentOptions,
 } from '../types';
 import { playNotificationChime } from '../utils/sound';
 import {
@@ -116,7 +117,22 @@ interface AppContextType {
       sourceSheet?: string;
     }>;
   };
-  verifyAssessment: (id: string, status: VerificationStatus, notes: string) => Promise<{ success: boolean; message: string }>;
+  verifyAssessment: (
+    id: string,
+    status: VerificationStatus,
+    notes: string,
+    syncOptions?: VerifyAssessmentOptions
+  ) => Promise<{
+    success: boolean;
+    message: string;
+    sheetSyncResult?: { success: boolean; message: string; folderUrl?: string };
+  }>;
+  batchVerifyAssessments: (
+    ids: string[],
+    status: VerificationStatus,
+    notes: string,
+    syncOptions?: VerifyAssessmentOptions
+  ) => Promise<{ success: boolean; message: string; processedCount: number }>;
   syncAssessmentToSheet: (id: string) => Promise<{ success: boolean; message: string }>;
   syncAllToSheet: () => Promise<{ success: boolean; message: string; count?: number }>;
   syncFromGoogleSheet: (showToastAlert?: boolean, forceRefresh?: boolean) => Promise<{ success: boolean; message: string; count?: number }>;
@@ -3097,7 +3113,12 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
     }
   }, [assessments.length]);
 
-  const verifyAssessment = async (id: string, status: VerificationStatus, notes: string) => {
+  const verifyAssessment = async (
+    id: string,
+    status: VerificationStatus,
+    notes: string,
+    syncOptions?: VerifyAssessmentOptions
+  ) => {
     if (
       currentUser.role !== 'super_admin' &&
       currentUser.role !== 'admin' &&
@@ -3110,7 +3131,27 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
     }
 
     const target = assessments.find((a) => a.id === id);
+    if (!target) {
+      return {
+        success: false,
+        message: 'Data penilaian tidak ditemukan.',
+      };
+    }
+
     const now = new Date().toISOString();
+    const targetWorksheet = syncOptions?.targetWorksheetName?.trim() || target.targetSheetName;
+    const targetProfileId = syncOptions?.targetProfileId || target.targetProfileId;
+
+    const updatedAssessment: BuildingAssessment = {
+      ...target,
+      verificationStatus: status,
+      verificationNotes: notes,
+      verifiedBy: currentUser.name,
+      verifiedAt: now,
+      updatedAt: now,
+      ...(targetWorksheet ? { targetSheetName: targetWorksheet } : {}),
+      ...(targetProfileId ? { targetProfileId } : {}),
+    };
 
     if (db && !isFirestoreQuotaExceeded) {
       setDoc(
@@ -3121,6 +3162,8 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
           verifiedBy: currentUser.name,
           verifiedAt: now,
           updatedAt: now,
+          ...(targetWorksheet ? { targetSheetName: targetWorksheet } : {}),
+          ...(targetProfileId ? { targetProfileId } : {}),
         },
         { merge: true }
       ).catch((err) => {
@@ -3130,32 +3173,127 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
     }
 
     setAssessments((prev) =>
-      prev.map((a) => {
-        if (a.id === id) {
-          return {
-            ...a,
-            verificationStatus: status,
-            verificationNotes: notes,
-            verifiedBy: currentUser.name,
-            verifiedAt: now,
-            updatedAt: now,
+      prev.map((a) => (a.id === id ? updatedAssessment : a))
+    );
+
+    // Auto-sync / Send to specified target worksheet & spreadsheet if requested or configured
+    let sheetSyncResult: { success: boolean; message: string; folderUrl?: string } | undefined;
+    const shouldSync = syncOptions?.syncToSheet ?? (googleSheetConfig.autoSync || Boolean(targetWorksheet));
+
+    if (shouldSync) {
+      let effectiveConfig: GoogleSheetConfig = { ...googleSheetConfig };
+
+      if (syncOptions?.targetProfileId) {
+        const foundProf = (googleSheetConfig.spreadsheetProfiles || []).find((p) => p.id === syncOptions.targetProfileId);
+        if (foundProf) {
+          effectiveConfig = {
+            ...effectiveConfig,
+            spreadsheetUrl: foundProf.spreadsheetUrl || effectiveConfig.spreadsheetUrl,
+            webhookUrl: foundProf.webhookUrl || effectiveConfig.webhookUrl,
+            driveFolderId: foundProf.driveFolderId || effectiveConfig.driveFolderId,
           };
         }
-        return a;
-      })
-    );
+      }
+
+      if (syncOptions?.targetSpreadsheetUrl && syncOptions.targetSpreadsheetUrl.trim()) {
+        effectiveConfig.spreadsheetUrl = syncOptions.targetSpreadsheetUrl.trim();
+      }
+      if (syncOptions?.targetWebhookUrl && syncOptions.targetWebhookUrl.trim()) {
+        effectiveConfig.webhookUrl = syncOptions.targetWebhookUrl.trim();
+      }
+
+      if (effectiveConfig.webhookUrl && effectiveConfig.webhookUrl.startsWith('http')) {
+        try {
+          const destSheetName = targetWorksheet || effectiveConfig.verifiedWorksheetName || 'Data_Terverifikasi';
+          const res = await directSaveToGoogleSheet(
+            updatedAssessment,
+            effectiveConfig,
+            'insert',
+            undefined,
+            destSheetName
+          );
+
+          sheetSyncResult = res;
+
+          if (res.success) {
+            setAssessments((prev) =>
+              prev.map((a) =>
+                a.id === id
+                  ? {
+                      ...a,
+                      googleSheetSynced: true,
+                      googleSheetSyncedAt: new Date().toISOString(),
+                      targetSheetName: destSheetName,
+                    }
+                  : a
+              )
+            );
+          }
+        } catch (syncErr: any) {
+          console.warn('Auto-sync on verification notice:', syncErr?.message || syncErr);
+          sheetSyncResult = {
+            success: false,
+            message: `Verifikasi tersimpan di sistem, namun pengiriman ke Google Sheet tertunda: ${syncErr?.message || 'Koneksi gagal'}`,
+          };
+        }
+      }
+    }
 
     logUserActivity(
       'VERIFY_ASSESSMENT',
       'Penilaian Kerusakan',
-      `Verifikasi Teknis [${status}]: ${target?.buildingName || id}`,
-      target?.code || id,
+      `Verifikasi Teknis [${status}]: ${target.buildingName} -> Sheet: ${targetWorksheet || 'Default'}`,
+      target.code || id,
       `Catatan Verifikasi: ${notes || 'Tanpa catatan khusus'}`
     );
 
+    const baseMessage = `Status penilaian "${target.buildingName}" berhasil divalidasi menjadi "${status}".`;
+    const finalMessage = sheetSyncResult
+      ? (sheetSyncResult.success
+          ? `${baseMessage} Data otomatis masuk ke worksheet "${targetWorksheet || 'Data_Terverifikasi'}"!`
+          : `${baseMessage} (${sheetSyncResult.message})`)
+      : baseMessage;
+
     return {
       success: true,
-      message: `Status penilaian gedung berhasil diubah menjadi "${status}".`,
+      message: finalMessage,
+      sheetSyncResult,
+    };
+  };
+
+  const batchVerifyAssessments = async (
+    ids: string[],
+    status: VerificationStatus,
+    notes: string,
+    syncOptions?: VerifyAssessmentOptions
+  ) => {
+    if (
+      currentUser.role !== 'super_admin' &&
+      currentUser.role !== 'admin' &&
+      currentUser.role !== 'admin_verifikator'
+    ) {
+      return {
+        success: false,
+        message: 'Akses ditolak: Hanya Super Admin, Admin, atau Verifikator yang dapat memvalidasi survei.',
+        processedCount: 0,
+      };
+    }
+
+    let successCount = 0;
+    for (const id of ids) {
+      try {
+        const res = await verifyAssessment(id, status, notes, syncOptions);
+        if (res.success) successCount++;
+      } catch (err) {
+        console.warn(`Error verifying item ${id}:`, err);
+      }
+    }
+
+    const targetSheet = syncOptions?.targetWorksheetName || 'Data_Terverifikasi';
+    return {
+      success: successCount > 0,
+      message: `Berhasil memvalidasi ${successCount} data dan memindahkannya ke worksheet "${targetSheet}".`,
+      processedCount: successCount,
     };
   };
 
@@ -3860,6 +3998,7 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
         purgeAllDuplicates,
         autoFixDuplicateCodes,
         verifyAssessment,
+        batchVerifyAssessments,
         syncAssessmentToSheet,
         syncAllToSheet,
         syncFromGoogleSheet,

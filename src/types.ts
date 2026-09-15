@@ -511,6 +511,19 @@ export interface GoogleSheetConfig {
   hasCapacityWarning?: boolean;
   capacityWarningMessage?: string;
   onlyReadPopulatedCells?: boolean; // Fitur hemat beban: Hanya baca sel yang terisi data
+  // Konfigurasi Khusus Data Terverifikasi / Pemindahan Data Lama
+  verifiedWorksheetName?: string; // Default nama tab untuk data terverifikasi (misal: "Data_Terverifikasi")
+  verifiedSpreadsheetProfileId?: string; // Profil spreadsheet tujuan khusus data terverifikasi
+  verifiedSpreadsheetUrl?: string; // Dokumen spreadsheet baru jika sheet lama read-only
+  verifiedWebhookUrl?: string; // Webhook baru jika sheet lama read-only
+}
+
+export interface VerifyAssessmentOptions {
+  syncToSheet?: boolean;
+  targetWorksheetName?: string; // Nama worksheet baru yang ditentukan pengguna (e.g. 'Data_Terverifikasi')
+  targetProfileId?: string; // ID profil spreadsheet tujuan
+  targetSpreadsheetUrl?: string; // URL spreadsheet baru (jika spreadsheet lama read-only)
+  targetWebhookUrl?: string; // URL webhook baru (jika spreadsheet lama read-only)
 }
 
 export interface FirebaseShieldConfig {

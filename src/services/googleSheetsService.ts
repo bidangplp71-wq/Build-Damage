@@ -365,8 +365,8 @@ export async function directSaveToGoogleSheet(
     desaName: assessment.desaName,
     kecamatanName: assessment.kecamatanName,
     sheetRowNumber,
-    splitByKecamatan: config.splitByKecamatan !== false,
-    includeMasterSummary: config.includeMasterSummarySheet !== false,
+    splitByKecamatan: explicitTargetSheetName ? false : (config.splitByKecamatan !== false),
+    includeMasterSummary: explicitTargetSheetName ? false : (config.includeMasterSummarySheet !== false),
     spreadsheetUrl: config.spreadsheetUrl,
     spreadsheetId: spreadsheetId || undefined,
     registrationCode: hydratedAssessment.code || hydratedAssessment.id,
@@ -384,7 +384,12 @@ export async function directSaveToGoogleSheet(
       const proxyResp = await fetch('/api/google-sheet/sync', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ assessment: hydratedAssessment, action }),
+        body: JSON.stringify({
+          assessment: hydratedAssessment,
+          action,
+          targetSheetName: kecSheetName,
+          config,
+        }),
       });
       if (proxyResp.ok) {
         const proxyData = await proxyResp.json();
