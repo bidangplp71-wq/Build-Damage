@@ -354,6 +354,7 @@ export const SheetBookSelector: React.FC<SheetBookSelectorProps> = ({
 
   return (
     <div className="w-full space-y-3">
+      <div className="print:hidden space-y-3">
       {/* Active Sheet Banner with Capacity Alert */}
       {activeProfile && (activeProfile.capacityStatus === 'full' || (profileItemCounts[activeProfile.id] || 0) >= (activeProfile.maxCapacityRows || 2000)) && (
         <div className="p-3.5 rounded-2xl bg-rose-50 border border-rose-300 text-rose-950 flex flex-col sm:flex-row items-start sm:items-center justify-between gap-3 shadow-xs">
@@ -944,6 +945,7 @@ export const SheetBookSelector: React.FC<SheetBookSelectorProps> = ({
           </div>
         </div>
       )}
+      </div>
 
       {showGlobalRecapModal && (
         <GlobalSheetRecapModal

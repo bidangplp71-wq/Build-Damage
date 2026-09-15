@@ -2913,8 +2913,6 @@ export async function fetchAssessmentsFromGoogleSheet(
   const isExcludedRekapSheet = (name: string): boolean => {
     if (!name) return true;
     const clean = name.trim().toUpperCase().replace(/[\s_-]+/g, '_');
-    // Reject any sheet that does not start with Kec / KEC
-    if (!name.trim().toLowerCase().startsWith('kec')) return true;
     // Reject summary/rekap sheets explicitly
     if (
       clean.includes('REKAP') ||

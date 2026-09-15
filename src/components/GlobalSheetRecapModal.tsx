@@ -161,6 +161,27 @@ export const GlobalSheetRecapModal: React.FC<Props> = ({
   };
 
   return (
+    <>
+      <style type="text/css">
+        {`
+          @media print {
+            @page {
+              size: landscape !important;
+              margin: 10mm !important;
+            }
+            body {
+              -webkit-print-color-adjust: exact !important;
+              print-color-adjust: exact !important;
+              background-color: white !important;
+            }
+            /* Hide the main app layout elements during print */
+            body > #root > div > .print\\:hidden,
+            header, nav, aside {
+              display: none !important;
+            }
+          }
+        `}
+      </style>
     <div className="fixed inset-0 z-[100] flex items-center justify-center p-4 bg-slate-900/60 backdrop-blur-sm animate-in fade-in duration-200 print:relative print:inset-auto print:z-auto print:p-0 print:bg-white print:block print:min-h-screen">
       <div className="bg-white rounded-2xl w-full max-w-7xl max-h-[90vh] flex flex-col shadow-2xl print:shadow-none print:max-w-none print:max-h-none print:rounded-none print:h-auto print:overflow-visible print:block">
         {/* Header - Hidden in Print */}
@@ -402,5 +423,6 @@ export const GlobalSheetRecapModal: React.FC<Props> = ({
         </div>
       </div>
     </div>
+    </>
   );
 };
