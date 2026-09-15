@@ -36,8 +36,17 @@ export const GlobalSheetRecapModal: React.FC<Props> = ({
 
   // Calculate matrix data
   const matrixData = useMemo(() => {
-    return profiles.map(profile => {
-      const profileAssessments = assessments.filter(a => a.targetProfileId === profile.id || (!a.targetProfileId && profile.isDefault));
+    const mappedIds = new Set<string>();
+    const defaultProfile = profiles.find(p => p.isDefault) || profiles[0];
+
+    const results = profiles.map(profile => {
+      const profileAssessments = assessments.filter(a => {
+        if (a.targetProfileId === profile.id || (!a.targetProfileId && defaultProfile && profile.id === defaultProfile.id)) {
+          if (a.id) mappedIds.add(a.id);
+          return true;
+        }
+        return false;
+      });
       
       let menunggu = 0;
       let terverifikasi = 0;
@@ -91,6 +100,43 @@ export const GlobalSheetRecapModal: React.FC<Props> = ({
         buildingDetails
       };
     });
+
+    // Handle Unmapped Data
+    const unmappedAssessments = assessments.filter(a => a.id && !mappedIds.has(a.id));
+    if (unmappedAssessments.length > 0) {
+      let menunggu = 0, terverifikasi = 0, rb = 0, rs = 0, rr = 0, tr = 0, totalAnggaran = 0;
+      const buildingDetails = unmappedAssessments.map(a => {
+        const costPerM2 = (a.treatmentCostPerM2 || 0) + (a.demolitionCostPerM2 || 0);
+        const totalCost = costPerM2 * (a.totalFloorAreaM2 || 0);
+        totalAnggaran += totalCost;
+        return { ...a, calculatedTotalCost: totalCost };
+      });
+      
+      buildingDetails.sort((a, b) => {
+        if (a.verificationStatus !== b.verificationStatus) return a.verificationStatus === 'Terverifikasi' ? -1 : 1;
+        return (b.totalDamagePercent || 0) - (a.totalDamagePercent || 0);
+      });
+
+      unmappedAssessments.forEach(a => {
+        if (a.verificationStatus === 'Terverifikasi') terverifikasi++;
+        else menunggu++;
+        switch (a.damageClassification) {
+          case 'Rusak Berat': rb++; break;
+          case 'Rusak Sedang': rs++; break;
+          case 'Rusak Ringan': rr++; break;
+          case 'Tidak Rusak': tr++; break;
+        }
+      });
+
+      results.push({
+        profile: { id: 'unmapped', name: 'Data Tidak Terpetakan (Lainnya)', spreadsheetUrl: '' } as any,
+        total: unmappedAssessments.length,
+        menunggu, terverifikasi, rb, rs, rr, tr, totalAnggaran,
+        buildingDetails
+      });
+    }
+
+    return results;
   }, [profiles, assessments]);
 
   const totals = useMemo(() => {
@@ -115,8 +161,8 @@ export const GlobalSheetRecapModal: React.FC<Props> = ({
   };
 
   return (
-    <div className="fixed inset-0 z-[100] flex items-center justify-center p-4 bg-slate-900/60 backdrop-blur-sm animate-in fade-in duration-200 print:p-0 print:bg-white print:block">
-      <div className="bg-white rounded-2xl w-full max-w-7xl max-h-[90vh] flex flex-col shadow-2xl print:shadow-none print:max-w-none print:max-h-none print:rounded-none">
+    <div className="fixed inset-0 z-[100] flex items-center justify-center p-4 bg-slate-900/60 backdrop-blur-sm animate-in fade-in duration-200 print:relative print:inset-auto print:z-auto print:p-0 print:bg-white print:block print:min-h-screen">
+      <div className="bg-white rounded-2xl w-full max-w-7xl max-h-[90vh] flex flex-col shadow-2xl print:shadow-none print:max-w-none print:max-h-none print:rounded-none print:h-auto print:overflow-visible print:block">
         {/* Header - Hidden in Print */}
         <div className="flex items-center justify-between p-4 sm:p-6 border-b border-slate-100 print:hidden">
           <div className="flex items-center gap-3">
@@ -162,7 +208,7 @@ export const GlobalSheetRecapModal: React.FC<Props> = ({
         </div>
 
         {/* Scrollable Content */}
-        <div className="p-6 overflow-y-auto print:p-0 print:overflow-visible">
+        <div className="p-6 overflow-y-auto print:p-0 print:overflow-visible print:h-auto">
           {/* Print Header */}
           <div className="hidden print:block mb-8 text-center border-b-2 border-slate-900 pb-6">
             <h1 className="text-2xl font-black uppercase text-slate-900 mb-2">
