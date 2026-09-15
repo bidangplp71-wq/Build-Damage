@@ -40,9 +40,11 @@ import {
   Radio,
   Zap,
   BookmarkCheck,
+  ArrowRightLeft,
 } from 'lucide-react';
 import { BufferQueueBanner } from './BufferQueueBanner';
 import { SheetBookSelector } from './SheetBookSelector';
+import { SheetMigrationTool } from './SheetMigrationTool';
 import { SpreadsheetProfile } from '../types';
 
 export const GoogleSheetIntegration: React.FC = () => {
@@ -62,7 +64,7 @@ export const GoogleSheetIntegration: React.FC = () => {
   } = useApp();
 
   const isAdmin = currentUser.role === 'super_admin' || currentUser.role === 'admin';
-  const [activeSubTab, setActiveSubTab] = useState<'view_sheet' | 'profiles' | 'settings'>('view_sheet');
+  const [activeSubTab, setActiveSubTab] = useState<'view_sheet' | 'profiles' | 'migration' | 'settings'>('view_sheet');
   const [isSyncingFromSheet, setIsSyncingFromSheet] = useState(false);
 
   const [spreadsheetUrlInput, setSpreadsheetUrlInput] = useState(googleSheetConfig.spreadsheetUrl || '');
@@ -605,6 +607,21 @@ export const GoogleSheetIntegration: React.FC = () => {
           >
             <BookmarkCheck className="w-4 h-4 text-blue-600" />
             <span>Daftar Spreadsheet ({rawProfiles.length})</span>
+          </button>
+          <button
+            type="button"
+            onClick={() => setActiveSubTab('migration')}
+            className={`flex items-center gap-2 px-3.5 py-2 text-xs font-bold rounded-xl transition-all cursor-pointer ${
+              activeSubTab === 'migration'
+                ? 'bg-white text-indigo-950 shadow-xs'
+                : 'text-slate-600 hover:text-slate-900'
+            }`}
+          >
+            <ArrowRightLeft className="w-4 h-4 text-indigo-600" />
+            <span>Konversi & Migrasi Sheet</span>
+            <span className="text-[10px] px-1.5 py-0.5 rounded-full bg-emerald-100 text-emerald-800 font-bold border border-emerald-300">
+              Model 21 Kolom
+            </span>
           </button>
           <button
             type="button"
@@ -1622,6 +1639,11 @@ export const GoogleSheetIntegration: React.FC = () => {
         </div>
       </div>
     </div>
+  )}
+
+  {/* MIGRATION & CONVERSION TAB: Convert Old Sheet to New 21 Columns Table Model */}
+  {isAdmin && activeSubTab === 'migration' && (
+    <SheetMigrationTool />
   )}
 </div>
 );
