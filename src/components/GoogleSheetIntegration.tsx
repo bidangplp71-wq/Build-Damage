@@ -61,9 +61,12 @@ export const GoogleSheetIntegration: React.FC = () => {
     showToast,
     currentUser,
     sheetSyncProgress,
+    syncAllProfiles,
   } = useApp();
 
   const isAdmin = currentUser.role === 'super_admin' || currentUser.role === 'admin';
+  const isVerifikator = currentUser.role === 'admin_verifikator';
+  const canManageSheets = isAdmin || isVerifikator;
   const [activeSubTab, setActiveSubTab] = useState<'view_sheet' | 'profiles' | 'migration' | 'settings'>('view_sheet');
   const [isSyncingFromSheet, setIsSyncingFromSheet] = useState(false);
 
@@ -139,8 +142,8 @@ export const GoogleSheetIntegration: React.FC = () => {
       ];
 
   const handleSelectProfile = (profile: SpreadsheetProfile) => {
-    if (!isAdmin) {
-      showToast('Hanya Super Admin atau Admin yang dapat mengganti Spreadsheet aktif.', 'error');
+    if (!canManageSheets) {
+      showToast('Hanya Super Admin, Admin, atau Admin Verifikator yang dapat mengganti Spreadsheet aktif.', 'error');
       return;
     }
 
@@ -168,8 +171,8 @@ export const GoogleSheetIntegration: React.FC = () => {
 
   const handleAddNewProfile = (e: React.FormEvent) => {
     e.preventDefault();
-    if (!isAdmin) {
-      showToast('Hanya Super Admin dan Admin yang dapat mendaftarkan Spreadsheet baru.', 'error');
+    if (!canManageSheets) {
+      showToast('Hanya Super Admin, Admin, atau Admin Verifikator yang dapat mendaftarkan Spreadsheet baru.', 'error');
       return;
     }
 
@@ -219,8 +222,8 @@ export const GoogleSheetIntegration: React.FC = () => {
   };
 
   const handleDeleteProfile = (profileId: string) => {
-    if (!isAdmin) {
-      showToast('Hanya Super Admin dan Admin yang dapat menghapus profil spreadsheet.', 'error');
+    if (!canManageSheets) {
+      showToast('Hanya Super Admin, Admin, atau Admin Verifikator yang dapat menghapus profil spreadsheet.', 'error');
       return;
     }
 
@@ -270,8 +273,8 @@ export const GoogleSheetIntegration: React.FC = () => {
 
   const handleSaveConfig = (e: React.FormEvent) => {
     e.preventDefault();
-    if (!isAdmin) {
-      showToast('Hanya Super Admin dan Admin yang memiliki hak akses untuk mengubah konfigurasi link Google Sheet', 'error');
+    if (!canManageSheets) {
+      showToast('Hanya Super Admin, Admin, atau Admin Verifikator yang memiliki hak akses untuk mengubah konfigurasi link Google Sheet', 'error');
       return;
     }
     let sheetUrl = spreadsheetUrlInput.trim();
@@ -549,12 +552,30 @@ export const GoogleSheetIntegration: React.FC = () => {
 
               <button
                 onClick={handleSyncFromSheet}
-                disabled={isSyncingFromSheet}
+                disabled={isSyncingFromSheet || sheetSyncProgress?.isLoading}
                 title="Tarik dan muat seluruh data survei dari Google Sheet mulai dari baris A2 ke bawah"
                 className="flex items-center gap-1.5 px-3.5 py-2 text-xs font-bold bg-indigo-50 hover:bg-indigo-100 text-indigo-900 rounded-xl border border-indigo-300 transition-colors cursor-pointer disabled:opacity-50"
               >
                 <RefreshCw className={`w-4 h-4 text-indigo-600 ${isSyncingFromSheet ? 'animate-spin' : ''}`} />
                 <span>{isSyncingFromSheet ? 'Memuat Sheet...' : 'Tarik dari Sheet (A2)'}</span>
+              </button>
+
+              <button
+                type="button"
+                onClick={async () => {
+                  setIsSyncingFromSheet(true);
+                  try {
+                    await syncAllProfiles({ forceRefresh: true, showToastAlert: true });
+                  } finally {
+                    setIsSyncingFromSheet(false);
+                  }
+                }}
+                disabled={isSyncingFromSheet || sheetSyncProgress?.isLoading}
+                title="Tarik dan baca data dari seluruh worksheet / buku Google Sheet dengan indikator loading lengkap"
+                className="flex items-center gap-1.5 px-3.5 py-2 text-xs font-bold bg-blue-600 hover:bg-blue-700 text-white rounded-xl shadow-xs transition-colors cursor-pointer disabled:opacity-50"
+              >
+                <RefreshCw className={`w-4 h-4 text-white ${isSyncingFromSheet || sheetSyncProgress?.isLoading ? 'animate-spin' : ''}`} />
+                <span>{sheetSyncProgress?.isLoading ? 'Membaca Sheet...' : `Baca Seluruh Sheet (${rawProfiles.length})`}</span>
               </button>
             </>
           )}
@@ -581,8 +602,8 @@ export const GoogleSheetIntegration: React.FC = () => {
       {/* MULTI-SPREADSHEET QUICK SWITCHER & CAPACITY MONITOR */}
       <SheetBookSelector variant="compact" />
 
-      {/* Admin Tab Switcher (Only Visible to Super Admin & Admin) */}
-      {isAdmin && (
+      {/* Admin / Verifikator Tab Switcher */}
+      {canManageSheets && (
         <div className="flex flex-wrap items-center gap-2 p-1.5 bg-slate-100 rounded-2xl w-fit border border-slate-200 shadow-2xs">
           <button
             type="button"
@@ -760,7 +781,7 @@ export const GoogleSheetIntegration: React.FC = () => {
       )}
 
       {/* VIEW SHEET TAB: Available to all roles (Surveyor, Verifikator, Publik, Camat, Admin) */}
-      {(!isAdmin || activeSubTab === 'view_sheet') && (
+      {(!canManageSheets || activeSubTab === 'view_sheet') && (
         <div className="space-y-6">
           {/* Info Status Cards */}
           <div className="grid grid-cols-1 sm:grid-cols-3 gap-4">
@@ -946,8 +967,8 @@ export const GoogleSheetIntegration: React.FC = () => {
         </div>
       )}
 
-      {/* PROFILES TAB: Spreadsheet Profiles & Quick Switcher for Super Admin */}
-      {isAdmin && activeSubTab === 'profiles' && (
+      {/* PROFILES TAB: Spreadsheet Profiles & Quick Switcher for Super Admin & Verifikator */}
+      {canManageSheets && activeSubTab === 'profiles' && (
         <div className="space-y-6 animate-in fade-in duration-200">
           {/* Header & Quick Action */}
           <div className="bg-white p-6 rounded-2xl border border-slate-200 shadow-xs space-y-4">
@@ -1169,8 +1190,8 @@ export const GoogleSheetIntegration: React.FC = () => {
         </div>
       )}
 
-      {/* SETTINGS TAB: Strictly for Super Admin & Admin Only */}
-      {isAdmin && activeSubTab === 'settings' && (
+      {/* SETTINGS TAB: For Super Admin, Admin & Verifikator */}
+      {canManageSheets && activeSubTab === 'settings' && (
         <div className="space-y-6">
           {/* Admin Authority Banner */}
           <div className="p-4 rounded-2xl bg-amber-50 border border-amber-200 text-amber-950 flex flex-col sm:flex-row items-start sm:items-center justify-between gap-3 shadow-2xs">
@@ -1180,10 +1201,10 @@ export const GoogleSheetIntegration: React.FC = () => {
               </div>
               <div>
                 <span className="text-xs font-bold uppercase tracking-wider block">
-                  Hak Khusus Super Admin & Admin
+                  Hak Akses Konfigurasi Spreadsheet & Webhook
                 </span>
                 <span className="text-xs text-amber-900 mt-0.5 block leading-relaxed">
-                  Hanya akun dengan hak akses Super Admin atau Admin yang berhak menentukan link Google Spreadsheet, URL Webhook Apps Script, dan Folder Google Drive. Peran pengguna lain (Surveyor, Verifikator, Camat, Publik) hanya memiliki akses untuk membuka dan melihat lembar kerja.
+                  Akun Super Admin, Admin, dan Admin Verifikator dapat memverifikasi dan mengelola link Google Spreadsheet, URL Webhook Apps Script, dan Folder Google Drive untuk pembacaan data seluruh sheet.
                 </span>
               </div>
             </div>
@@ -1642,7 +1663,7 @@ export const GoogleSheetIntegration: React.FC = () => {
   )}
 
   {/* MIGRATION & CONVERSION TAB: Convert Old Sheet to New 21 Columns Table Model */}
-  {isAdmin && activeSubTab === 'migration' && (
+  {canManageSheets && activeSubTab === 'migration' && (
     <SheetMigrationTool />
   )}
 </div>

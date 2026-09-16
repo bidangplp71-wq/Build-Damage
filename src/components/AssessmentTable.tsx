@@ -72,6 +72,7 @@ export const AssessmentTable: React.FC = () => {
     showToast,
     googleSheetConfig,
     syncFromGoogleSheet,
+    syncAllProfiles,
     consolidateAndSyncSheets,
     sheetSyncProgress,
   } = useApp();
@@ -869,31 +870,49 @@ export const AssessmentTable: React.FC = () => {
             <span>Cetak Portofolio Rekap</span>
           </button>
 
-          {/* Direct Google Sheet button */}
-          {googleSheetConfig.spreadsheetUrl && (
-            <div className="flex items-center gap-1.5 flex-wrap">
-              <button
-                onClick={() => syncFromGoogleSheet(true, true)}
-                disabled={isRefreshing || isConsolidating}
-                title="Tarik seluruh data survei langsung dari ke-7 Sheet Kecamatan"
-                className="flex items-center gap-1.5 px-3 py-2 text-xs font-bold text-indigo-900 bg-indigo-50 hover:bg-indigo-100 rounded-xl border border-indigo-200 transition-colors cursor-pointer shadow-2xs"
-              >
-                <RefreshCw className={`w-3.5 h-3.5 text-indigo-600 ${isRefreshing ? 'animate-spin' : ''}`} />
-                <span>Tarik dari 7 Sheet</span>
-              </button>
-              <a
-                href={googleSheetConfig.spreadsheetUrl}
-                target="_blank"
-                rel="noopener noreferrer"
-                title="Buka dokumen Google Spreadsheet langsung di tab baru"
-                className="flex items-center gap-1.5 px-3 py-2 text-xs font-semibold text-emerald-900 bg-emerald-100/70 hover:bg-emerald-200/80 rounded-xl border border-emerald-300 transition-colors"
-              >
-                <FileSpreadsheet className="w-3.5 h-3.5 text-emerald-700" />
-                <span>Buka Google Sheet</span>
-                <ExternalLink className="w-3 h-3 text-emerald-700" />
-              </a>
-            </div>
-          )}
+          {/* Direct Google Sheet reading buttons */}
+          <div className="flex items-center gap-1.5 flex-wrap">
+            <button
+              onClick={async () => {
+                if (syncAllProfiles) {
+                  await syncAllProfiles({ forceRefresh: true, showToastAlert: true });
+                } else {
+                  await syncFromGoogleSheet(true, true);
+                }
+              }}
+              disabled={isRefreshing || isConsolidating || sheetSyncProgress?.isLoading}
+              title="Tarik dan baca data dari seluruh lembar kerja / buku Google Sheet dengan indikator progres langsung"
+              className="flex items-center gap-1.5 px-3 py-2 text-xs font-bold text-white bg-blue-600 hover:bg-blue-700 rounded-xl shadow-2xs transition-colors cursor-pointer disabled:opacity-50"
+            >
+              <RefreshCw className={`w-3.5 h-3.5 text-white ${isRefreshing || sheetSyncProgress?.isLoading ? 'animate-spin' : ''}`} />
+              <span>{sheetSyncProgress?.isLoading ? 'Membaca Sheet...' : `Baca Seluruh Sheet (${availableProfiles.length})`}</span>
+            </button>
+
+            {googleSheetConfig.spreadsheetUrl && (
+              <>
+                <button
+                  onClick={() => syncFromGoogleSheet(true, true)}
+                  disabled={isRefreshing || isConsolidating || sheetSyncProgress?.isLoading}
+                  title="Tarik seluruh data survei langsung dari ke-7 Sheet Kecamatan"
+                  className="flex items-center gap-1.5 px-3 py-2 text-xs font-bold text-indigo-900 bg-indigo-50 hover:bg-indigo-100 rounded-xl border border-indigo-200 transition-colors cursor-pointer shadow-2xs disabled:opacity-50"
+                >
+                  <RefreshCw className={`w-3.5 h-3.5 text-indigo-600 ${isRefreshing ? 'animate-spin' : ''}`} />
+                  <span>Tarik 7 Sheet</span>
+                </button>
+                <a
+                  href={googleSheetConfig.spreadsheetUrl}
+                  target="_blank"
+                  rel="noopener noreferrer"
+                  title="Buka dokumen Google Spreadsheet langsung di tab baru"
+                  className="flex items-center gap-1.5 px-3 py-2 text-xs font-semibold text-emerald-900 bg-emerald-100/70 hover:bg-emerald-200/80 rounded-xl border border-emerald-300 transition-colors"
+                >
+                  <FileSpreadsheet className="w-3.5 h-3.5 text-emerald-700" />
+                  <span className="hidden sm:inline">Buka Google Sheet</span>
+                  <ExternalLink className="w-3 h-3 text-emerald-700" />
+                </a>
+              </>
+            )}
+          </div>
 
           {/* Add New Assessment (Hidden for Public) */}
           {currentUser.role !== 'admin_publik' && (

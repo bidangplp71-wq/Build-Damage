@@ -1016,30 +1016,73 @@ app.post('/api/photos/sync-batch', (req, res) => {
 
 // Load saved config or fall back to environment variables
 function getGoogleSheetConfig() {
+  const defaultProfiles = [
+    {
+      id: 'profile_primary_2026',
+      pageNumber: 1,
+      name: 'Buku 1: Spreadsheet Utama SIM-PKBG 2026 (Nagekeo)',
+      spreadsheetUrl: process.env.VITE_SPREADSHEET_URL || '',
+      capacityStatus: 'Normal',
+      estimatedRowCount: 0,
+      maxCapacityRows: 500,
+      isDefault: true,
+    },
+    {
+      id: 'profile_buku_2',
+      pageNumber: 2,
+      name: 'Buku 2: Spreadsheet Tahap Lanjutan / Pascabencana',
+      spreadsheetUrl: '',
+      capacityStatus: 'Normal',
+      estimatedRowCount: 0,
+      maxCapacityRows: 500,
+      isDefault: false,
+    },
+    {
+      id: 'profile_buku_3',
+      pageNumber: 3,
+      name: 'Buku 3: Spreadsheet Verifikasi Teknis Lapangan',
+      spreadsheetUrl: '',
+      capacityStatus: 'Normal',
+      estimatedRowCount: 0,
+      maxCapacityRows: 500,
+      isDefault: false,
+    },
+    {
+      id: 'profile_buku_4',
+      pageNumber: 4,
+      name: 'Buku 4: Spreadsheet Rekapitulasi Kerusakan Terpadu',
+      spreadsheetUrl: '',
+      capacityStatus: 'Normal',
+      estimatedRowCount: 0,
+      maxCapacityRows: 500,
+      isDefault: false,
+    },
+    {
+      id: 'profile_buku_5',
+      pageNumber: 5,
+      name: 'Buku 5: Spreadsheet Master Arsip & Portofolio Bencana',
+      spreadsheetUrl: '',
+      capacityStatus: 'Normal',
+      estimatedRowCount: 0,
+      maxCapacityRows: 500,
+      isDefault: false,
+    },
+  ];
+
   try {
     if (fs.existsSync(CONFIG_FILE_PATH)) {
-      const data = fs.readFileSync(CONFIG_FILE_PATH, 'utf8');
+      const data = fs.readFileSync(CONFIG_FILE_PATH, 'utf-8');
       const parsed = JSON.parse(data);
       return {
         spreadsheetUrl: parsed.spreadsheetUrl || process.env.VITE_SPREADSHEET_URL || '',
         webhookUrl: parsed.webhookUrl || process.env.VITE_WEBHOOK_URL || '',
         driveFolderId: parsed.driveFolderId || process.env.VITE_DRIVE_FOLDER_ID || 'https://drive.google.com/drive/folders/1xKF8SYvNY97A9-ga0B42z3jQTbcC_Tk5?usp=sharing',
         sheetName: parsed.sheetName || 'REKAP_SEMUA_KECAMATAN',
-        splitByKecamatan: parsed.splitByKecamatan !== false,
-        includeMasterSummarySheet: parsed.includeMasterSummarySheet !== false,
-        spreadsheetProfiles: parsed.spreadsheetProfiles || [
-          {
-            id: 'profile_default_1',
-            name: 'Buku 1: Utama / Kab. Nagekeo',
-            spreadsheetUrl: parsed.spreadsheetUrl || process.env.VITE_SPREADSHEET_URL || '',
-            pageNumber: 1,
-            capacityStatus: 'Normal',
-            estimatedRowCount: 0,
-            maxCapacityRows: 500,
-            isDefault: true,
-          }
-        ],
-        activeProfileId: parsed.activeProfileId || 'profile_default_1',
+        splitByKecamatan: parsed.splitByKecamatan !== undefined ? parsed.splitByKecamatan : true,
+        includeMasterSummarySheet: parsed.includeMasterSummarySheet !== undefined ? parsed.includeMasterSummarySheet : true,
+        savePhotosToDrive: parsed.savePhotosToDrive !== undefined ? parsed.savePhotosToDrive : true,
+        spreadsheetProfiles: (parsed.spreadsheetProfiles && parsed.spreadsheetProfiles.length > 0) ? parsed.spreadsheetProfiles : defaultProfiles,
+        activeProfileId: parsed.activeProfileId || 'profile_primary_2026',
       };
     }
   } catch (err) {
@@ -1052,19 +1095,9 @@ function getGoogleSheetConfig() {
     sheetName: 'REKAP_SEMUA_KECAMATAN',
     splitByKecamatan: true,
     includeMasterSummarySheet: true,
-    spreadsheetProfiles: [
-      {
-        id: 'profile_default_1',
-        name: 'Buku 1: Utama / Kab. Nagekeo',
-        spreadsheetUrl: process.env.VITE_SPREADSHEET_URL || '',
-        pageNumber: 1,
-        capacityStatus: 'Normal',
-        estimatedRowCount: 0,
-        maxCapacityRows: 500,
-        isDefault: true,
-      }
-    ],
-    activeProfileId: 'profile_default_1',
+    savePhotosToDrive: true,
+    spreadsheetProfiles: defaultProfiles,
+    activeProfileId: 'profile_primary_2026',
   };
 }
 

@@ -49,7 +49,7 @@ export const SheetSyncProgressBanner: React.FC = () => {
                 </span>
               </div>
               <h4 className="text-xs font-semibold text-slate-200 truncate mt-0.5">
-                Membaca: <span className="text-white font-bold">{currentKecamatan ? `Kec. ${currentKecamatan}` : 'Menghubungkan...'}</span>
+                Membaca: <span className="text-white font-bold">{currentKecamatan ? (currentKecamatan.startsWith('Kec.') || currentKecamatan.startsWith('Buku') || currentKecamatan.startsWith('Semua') || currentKecamatan.startsWith('Worksheet') ? currentKecamatan : `Kec. ${currentKecamatan}`) : 'Menghubungkan...'}</span>
               </h4>
             </div>
           </div>
@@ -63,8 +63,8 @@ export const SheetSyncProgressBanner: React.FC = () => {
           </div>
         </div>
 
-        {/* Dynamic List of 7 Kecamatan Tabs */}
-        <div className="grid grid-cols-4 gap-1.5 mt-3 pt-2.5 border-t border-slate-800 text-[10px]">
+        {/* Dynamic List of Kecamatan Tabs or Spreadsheet Worksheets */}
+        <div className="grid grid-cols-2 sm:grid-cols-4 gap-1.5 mt-3 pt-2.5 border-t border-slate-800 text-[10px]">
           {loadedKecamatans.map((kec) => (
             <div
               key={kec.name}
@@ -76,7 +76,7 @@ export const SheetSyncProgressBanner: React.FC = () => {
                   : 'bg-slate-800/50 border border-slate-700/40 text-slate-400'
               }`}
             >
-              <span className="truncate">{kec.name.replace('Kec. ', '')}</span>
+              <span className="truncate" title={kec.name}>{kec.name.replace('Kec. ', '')}</span>
               {kec.status === 'completed' ? (
                 <span className="text-[9px] font-mono text-emerald-400 shrink-0 ml-1">
                   +{kec.count}
