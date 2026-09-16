@@ -827,15 +827,44 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
     }
 
     // 2. Load assessments from server (/api/assessments) for zero-quota persistence & cross-device sharing
+    // AND upload any local assessments so all clients (Super Admin, Surveyor, Verifikator) stay 100% in sync
+    const initialLocalAssessments = (() => {
+      try {
+        const saved = localStorage.getItem(STORAGE_KEYS.ASSESSMENTS);
+        return saved ? JSON.parse(saved) : [];
+      } catch {
+        return [];
+      }
+    })();
+
+    // If this client already has local assessments (e.g., 245 data from Super Admin or field surveyors), seed the server
+    if (Array.isArray(initialLocalAssessments) && initialLocalAssessments.length > 0) {
+      fetch('/api/assessments/sync-batch', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ assessments: initialLocalAssessments }),
+      }).catch(() => {});
+    }
+
     fetch('/api/assessments')
       .then((res) => res.json())
       .then((data) => {
-        if (data.success && Array.isArray(data.assessments) && data.assessments.length > 0) {
+        if (data.success && Array.isArray(data.assessments)) {
           setAssessments((prev) => {
             const merged = reconcileAndMergeAssessments(prev, data.assessments);
             try {
               localStorage.setItem(STORAGE_KEYS.ASSESSMENTS, JSON.stringify(merged));
             } catch {}
+
+            // If local dataset had more/newer records than the server, push merged master back to server
+            if (merged.length > data.assessments.length) {
+              fetch('/api/assessments/sync-batch', {
+                method: 'POST',
+                headers: { 'Content-Type': 'application/json' },
+                body: JSON.stringify({ assessments: merged }),
+              }).catch(() => {});
+            }
+
             return merged;
           });
         }
@@ -858,11 +887,11 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
       // 1. Flush any pending offline queue submissions
       flushOfflineSyncQueue().catch(() => {});
 
-      // 2. Fetch latest surveys from server
+      // 2. Fetch latest surveys from server & synchronize live additions from field surveyors
       fetch('/api/assessments')
         .then((res) => res.json())
         .then((data) => {
-          if (data.success && Array.isArray(data.assessments) && data.assessments.length > 0) {
+          if (data.success && Array.isArray(data.assessments)) {
             setAssessments((prev) => {
               const merged = reconcileAndMergeAssessments(prev, data.assessments);
               if (merged.length === prev.length && JSON.stringify(merged) === JSON.stringify(prev)) {
@@ -871,6 +900,16 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
               try {
                 localStorage.setItem(STORAGE_KEYS.ASSESSMENTS, JSON.stringify(merged));
               } catch {}
+
+              // If client has new survey submissions from field surveyors, broadcast to server
+              if (merged.length > data.assessments.length) {
+                fetch('/api/assessments/sync-batch', {
+                  method: 'POST',
+                  headers: { 'Content-Type': 'application/json' },
+                  body: JSON.stringify({ assessments: merged }),
+                }).catch(() => {});
+              }
+
               return merged;
             });
           }
