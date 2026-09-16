@@ -50,6 +50,7 @@ export const DuplicateAuditModal: React.FC<DuplicateAuditModalProps> = ({
     deleteAssessment,
     purgeAllDuplicates,
     autoFixDuplicateCodes,
+    fixSingleAssessmentRegistrationCode,
     setSelectedAssessmentForDetail,
     setSelectedAssessmentForEdit,
     setActiveTab,
@@ -61,6 +62,7 @@ export const DuplicateAuditModal: React.FC<DuplicateAuditModalProps> = ({
   const [itemToDelete, setItemToDelete] = useState<BuildingAssessment | null>(null);
   const [showPurgeAllConfirm, setShowPurgeAllConfirm] = useState(false);
   const [isFixingCodes, setIsFixingCodes] = useState(false);
+  const [fixingItemId, setFixingItemId] = useState<string | null>(null);
   const [photoViewerAssessment, setPhotoViewerAssessment] = useState<BuildingAssessment | null>(null);
 
   if (!isOpen) return null;
@@ -79,8 +81,8 @@ export const DuplicateAuditModal: React.FC<DuplicateAuditModalProps> = ({
     setItemToDelete(null);
   };
 
-  const handlePurgeAll = () => {
-    const res = purgeAllDuplicates();
+  const handlePurgeAll = async () => {
+    const res = await purgeAllDuplicates();
     showToast(res.message, res.success ? 'success' : 'error');
     setShowPurgeAllConfirm(false);
     if (res.success) {
@@ -88,10 +90,10 @@ export const DuplicateAuditModal: React.FC<DuplicateAuditModalProps> = ({
     }
   };
 
-  const handleAutoFixCodes = () => {
+  const handleAutoFixCodes = async () => {
     setIsFixingCodes(true);
     try {
-      const res = autoFixDuplicateCodes();
+      const res = await autoFixDuplicateCodes();
       if (res.fixedCount > 0) {
         showToast(res.message, 'success');
         if (duplicateGroups.length <= 1) {
@@ -102,6 +104,20 @@ export const DuplicateAuditModal: React.FC<DuplicateAuditModalProps> = ({
       }
     } finally {
       setIsFixingCodes(false);
+    }
+  };
+
+  const handleFixSingleCode = async (item: BuildingAssessment) => {
+    setFixingItemId(item.id);
+    try {
+      const res = await fixSingleAssessmentRegistrationCode(item.id);
+      if (res.success) {
+        showToast(res.message, 'success');
+      } else {
+        showToast(res.message, 'error');
+      }
+    } finally {
+      setFixingItemId(null);
     }
   };
 
@@ -487,8 +503,18 @@ export const DuplicateAuditModal: React.FC<DuplicateAuditModalProps> = ({
                           {/* Action Buttons */}
                           <div className="pt-3 border-t border-slate-200 flex flex-wrap items-center gap-2">
                             <button
+                              onClick={() => handleFixSingleCode(item)}
+                              disabled={fixingItemId === item.id || isFixingCodes}
+                              className="py-2 px-2.5 bg-amber-50 hover:bg-amber-100 text-amber-800 text-xs font-semibold rounded-xl border border-amber-300 transition-colors flex items-center justify-center gap-1 shadow-2xs cursor-pointer disabled:opacity-50"
+                              title="Terbitkan nomor registrasi baru yang unik untuk gedung ini dan simpan permanen ke Google Sheet"
+                            >
+                              <Wand2 className={`w-3.5 h-3.5 text-amber-700 ${fixingItemId === item.id ? 'animate-spin' : ''}`} />
+                              <span>{fixingItemId === item.id ? 'Memperbaiki...' : 'Perbaiki No. Reg'}</span>
+                            </button>
+
+                            <button
                               onClick={() => handleViewDetail(item)}
-                              className="flex-1 min-w-[70px] py-2 px-2.5 bg-white hover:bg-slate-100 text-slate-700 text-xs font-semibold rounded-xl border border-slate-300 transition-colors flex items-center justify-center gap-1 shadow-2xs"
+                              className="flex-1 min-w-[65px] py-2 px-2.5 bg-white hover:bg-slate-100 text-slate-700 text-xs font-semibold rounded-xl border border-slate-300 transition-colors flex items-center justify-center gap-1 shadow-2xs cursor-pointer"
                             >
                               <Eye className="w-3.5 h-3.5" />
                               Detail
@@ -496,7 +522,7 @@ export const DuplicateAuditModal: React.FC<DuplicateAuditModalProps> = ({
 
                             <button
                               onClick={() => handleEdit(item)}
-                              className="flex-1 min-w-[65px] py-2 px-2.5 bg-indigo-50 hover:bg-indigo-100 text-indigo-700 text-xs font-semibold rounded-xl border border-indigo-200 transition-colors flex items-center justify-center gap-1 shadow-2xs"
+                              className="flex-1 min-w-[60px] py-2 px-2.5 bg-indigo-50 hover:bg-indigo-100 text-indigo-700 text-xs font-semibold rounded-xl border border-indigo-200 transition-colors flex items-center justify-center gap-1 shadow-2xs cursor-pointer"
                             >
                               <Edit className="w-3.5 h-3.5" />
                               Edit
@@ -504,7 +530,7 @@ export const DuplicateAuditModal: React.FC<DuplicateAuditModalProps> = ({
 
                             <button
                               onClick={() => handleIgnoreSingleItem(item)}
-                              className="py-2 px-2.5 bg-emerald-50 hover:bg-emerald-100 text-emerald-800 text-xs font-semibold rounded-xl border border-emerald-300 transition-colors flex items-center justify-center gap-1 shadow-2xs"
+                              className="py-2 px-2.5 bg-emerald-50 hover:bg-emerald-100 text-emerald-800 text-xs font-semibold rounded-xl border border-emerald-300 transition-colors flex items-center justify-center gap-1 shadow-2xs cursor-pointer"
                               title="Tandai data ini sebagai data sah (Bukan Duplikat)"
                             >
                               <Check className="w-3.5 h-3.5 text-emerald-600" />
@@ -514,7 +540,7 @@ export const DuplicateAuditModal: React.FC<DuplicateAuditModalProps> = ({
                             {(currentUser.role === 'super_admin' || currentUser.role === 'admin') && (
                               <button
                                 onClick={() => setItemToDelete(item)}
-                                className="py-2 px-2.5 bg-rose-50 hover:bg-rose-100 text-rose-700 text-xs font-semibold rounded-xl border border-rose-200 transition-colors flex items-center justify-center gap-1 shadow-2xs"
+                                className="py-2 px-2.5 bg-rose-50 hover:bg-rose-100 text-rose-700 text-xs font-semibold rounded-xl border border-rose-200 transition-colors flex items-center justify-center gap-1 shadow-2xs cursor-pointer"
                                 title="Hapus catatan duplikat ini"
                               >
                                 <Trash2 className="w-3.5 h-3.5" />
