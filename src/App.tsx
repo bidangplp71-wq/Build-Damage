@@ -53,14 +53,15 @@ const MainLayout: React.FC = () => {
   }, [latestIncomingData, clearLatestIncomingData]);
 
   // Tab guard: Ensure user cannot access tabs outside their role
-  const roleConfig = ROLE_NAV_CONFIGS[currentUser.role];
-  const isTabAllowed = roleConfig?.allowedTabs?.includes(activeTab);
+  const roleConfig = ROLE_NAV_CONFIGS[currentUser?.role];
 
   useEffect(() => {
-    if (isLoggedIn && !isTabAllowed && roleConfig) {
-      setActiveTab(roleConfig.defaultTab);
+    if (isLoggedIn && roleConfig && !roleConfig.allowedTabs.includes(activeTab)) {
+      if (activeTab !== roleConfig.defaultTab) {
+        setActiveTab(roleConfig.defaultTab);
+      }
     }
-  }, [isLoggedIn, currentUser.role, activeTab, isTabAllowed, roleConfig, setActiveTab]);
+  }, [isLoggedIn, currentUser?.role, activeTab, roleConfig, setActiveTab]);
 
   if (!isLoggedIn) {
     return <LoginScreen />;

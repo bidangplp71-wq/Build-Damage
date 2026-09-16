@@ -22,7 +22,6 @@ import {
   X,
   FileSpreadsheet,
   LayoutList,
-  RefreshCw,
 } from 'lucide-react';
 
 interface SheetBookSelectorProps {
@@ -57,13 +56,11 @@ export const SheetBookSelector: React.FC<SheetBookSelectorProps> = ({
     assessments,
     updateAssessment,
     logUserActivity,
-    syncAllProfiles,
-    sheetSyncProgress,
   } = useApp();
 
   const isAdmin = currentUser.role === 'super_admin' || currentUser.role === 'admin';
   const isVerifikator = currentUser.role === 'admin_verifikator';
-  const canManageSheets = isAdmin || isVerifikator;
+  const canManageSheets = isAdmin;
 
   // Profiles list with fallback
   const profiles: SpreadsheetProfile[] = (googleSheetConfig.spreadsheetProfiles && googleSheetConfig.spreadsheetProfiles.length > 0)
@@ -438,22 +435,6 @@ export const SheetBookSelector: React.FC<SheetBookSelectorProps> = ({
               <span>Matriks Rekap</span>
             </button>
 
-            {/* Sync All Sheets Button with Live Loading */}
-            <button
-              type="button"
-              onClick={async () => {
-                if (syncAllProfiles) {
-                  await syncAllProfiles({ forceRefresh: true, showToastAlert: true });
-                }
-              }}
-              disabled={sheetSyncProgress?.isLoading}
-              className="inline-flex items-center gap-1.5 px-3 py-1.5 bg-indigo-50 text-indigo-700 hover:bg-indigo-100 border border-indigo-200 hover:border-indigo-300 rounded-xl text-xs font-bold transition-all cursor-pointer shadow-xs disabled:opacity-50"
-              title="Baca dan muat data terbaru dari seluruh worksheet Google Sheet"
-            >
-              <RefreshCw className={`w-3.5 h-3.5 text-indigo-600 ${sheetSyncProgress?.isLoading ? 'animate-spin' : ''}`} />
-              <span>{sheetSyncProgress?.isLoading ? 'Membaca Sheet...' : `Baca Sheet (${profiles.length})`}</span>
-            </button>
-
             {/* Batch Move Data Action Button */}
             {selectedAssessmentIds.length > 0 && (isAdmin || isVerifikator) && (
               <button
@@ -466,8 +447,8 @@ export const SheetBookSelector: React.FC<SheetBookSelectorProps> = ({
               </button>
             )}
 
-            {/* Add New Sheet Button for Super Admin/Admin/Verifikator */}
-            {canManageSheets && !hideAddButton && (
+            {/* Add New Sheet Button for Super Admin/Admin */}
+            {isAdmin && !hideAddButton && (
               <button
                 type="button"
                 onClick={() => setShowAddModal(true)}
@@ -580,7 +561,7 @@ export const SheetBookSelector: React.FC<SheetBookSelectorProps> = ({
 
                     <div className="pt-0.5 flex items-center justify-between">
                       {renderStatusBadge(profile.capacityStatus, rowCount, maxRows)}
-                      {canManageSheets && (
+                      {isAdmin && (
                         <button
                           type="button"
                           onClick={() => setEditingProfile(profile)}
@@ -611,8 +592,8 @@ export const SheetBookSelector: React.FC<SheetBookSelectorProps> = ({
                     </button>
                   )}
 
-                  {/* Set Active Global Button for Super Admin / Admin / Verifikator */}
-                  {canManageSheets && (
+                  {/* Set Active Global Button for Super Admin / Admin */}
+                  {isAdmin && (
                     <>
                       {isGloballyActive ? (
                         <span className="inline-flex items-center gap-1 text-[11px] font-bold text-emerald-700">

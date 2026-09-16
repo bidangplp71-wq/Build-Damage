@@ -827,44 +827,15 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
     }
 
     // 2. Load assessments from server (/api/assessments) for zero-quota persistence & cross-device sharing
-    // AND upload any local assessments so all clients (Super Admin, Surveyor, Verifikator) stay 100% in sync
-    const initialLocalAssessments = (() => {
-      try {
-        const saved = localStorage.getItem(STORAGE_KEYS.ASSESSMENTS);
-        return saved ? JSON.parse(saved) : [];
-      } catch {
-        return [];
-      }
-    })();
-
-    // If this client already has local assessments (e.g., 245 data from Super Admin or field surveyors), seed the server
-    if (Array.isArray(initialLocalAssessments) && initialLocalAssessments.length > 0) {
-      fetch('/api/assessments/sync-batch', {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ assessments: initialLocalAssessments }),
-      }).catch(() => {});
-    }
-
     fetch('/api/assessments')
       .then((res) => res.json())
       .then((data) => {
-        if (data.success && Array.isArray(data.assessments)) {
+        if (data.success && Array.isArray(data.assessments) && data.assessments.length > 0) {
           setAssessments((prev) => {
             const merged = reconcileAndMergeAssessments(prev, data.assessments);
             try {
               localStorage.setItem(STORAGE_KEYS.ASSESSMENTS, JSON.stringify(merged));
             } catch {}
-
-            // If local dataset had more/newer records than the server, push merged master back to server
-            if (merged.length > data.assessments.length) {
-              fetch('/api/assessments/sync-batch', {
-                method: 'POST',
-                headers: { 'Content-Type': 'application/json' },
-                body: JSON.stringify({ assessments: merged }),
-              }).catch(() => {});
-            }
-
             return merged;
           });
         }
@@ -887,11 +858,11 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
       // 1. Flush any pending offline queue submissions
       flushOfflineSyncQueue().catch(() => {});
 
-      // 2. Fetch latest surveys from server & synchronize live additions from field surveyors
+      // 2. Fetch latest surveys from server
       fetch('/api/assessments')
         .then((res) => res.json())
         .then((data) => {
-          if (data.success && Array.isArray(data.assessments)) {
+          if (data.success && Array.isArray(data.assessments) && data.assessments.length > 0) {
             setAssessments((prev) => {
               const merged = reconcileAndMergeAssessments(prev, data.assessments);
               if (merged.length === prev.length && JSON.stringify(merged) === JSON.stringify(prev)) {
@@ -900,16 +871,6 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
               try {
                 localStorage.setItem(STORAGE_KEYS.ASSESSMENTS, JSON.stringify(merged));
               } catch {}
-
-              // If client has new survey submissions from field surveyors, broadcast to server
-              if (merged.length > data.assessments.length) {
-                fetch('/api/assessments/sync-batch', {
-                  method: 'POST',
-                  headers: { 'Content-Type': 'application/json' },
-                  body: JSON.stringify({ assessments: merged }),
-                }).catch(() => {});
-              }
-
               return merged;
             });
           }
@@ -1141,7 +1102,7 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
         isInitialLoad.current = false;
       }, 500);
     });
-  }, [isFirestoreQuotaExceeded]);
+  }, [db]);
 
   // Real-time listener for incoming building assessments and deletions from Firebase Firestore
   useEffect(() => {
@@ -2423,6 +2384,11 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
 
   // Session Inactivity Lock State & Methods (15 minutes standard timeout)
   const [isSessionLocked, setIsSessionLocked] = useState(false);
+  const isSessionLockedRef = useRef(false);
+
+  useEffect(() => {
+    isSessionLockedRef.current = isSessionLocked;
+  }, [isSessionLocked]);
 
   const lockSession = () => {
     setIsSessionLocked(true);
@@ -2447,7 +2413,7 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
     let inactivityTimer: NodeJS.Timeout;
 
     const resetTimer = () => {
-      if (isSessionLocked) return;
+      if (isSessionLockedRef.current) return;
       clearTimeout(inactivityTimer);
       inactivityTimer = setTimeout(() => {
         setIsSessionLocked(true);
@@ -2467,7 +2433,7 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
         window.removeEventListener(event, resetTimer);
       });
     };
-  }, [isSessionLocked, currentUser.id]);
+  }, [currentUser?.id]);
 
   const canCurrentUserManagePassword = (targetRole: UserRole) => {
     return canManageUserPassword(currentUser.role, targetRole);
@@ -3689,64 +3655,33 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
           },
         ];
 
-    const effectiveProfiles = profilesList.map((p) => ({
-      ...p,
-      spreadsheetUrl: p.spreadsheetUrl || googleSheetConfig.spreadsheetUrl || '',
-    }));
-
-    const validProfiles = effectiveProfiles.filter((p) => p.spreadsheetUrl && isConfiguredSheetUrl(p.spreadsheetUrl));
+    const validProfiles = profilesList.filter((p) => p.spreadsheetUrl && isConfiguredSheetUrl(p.spreadsheetUrl));
     if (validProfiles.length === 0) {
       if (googleSheetConfig.spreadsheetUrl && isConfiguredSheetUrl(googleSheetConfig.spreadsheetUrl)) {
         return syncFromGoogleSheet(showToastAlert, forceRefresh);
       }
-      
-      // Provide visual loading verification for user even if sheet URL is still pending
-      setSheetSyncProgress({
-        isLoading: true,
-        currentKecamatan: 'Semua Worksheet',
-        currentStep: 1,
-        totalSteps: effectiveProfiles.length,
-        percent: 25,
-        totalLoaded: assessments.length,
-        loadedKecamatans: effectiveProfiles.map((p) => ({
-          name: p.name.replace(/Buku \d+:\s*/i, '').replace(/Spreadsheet\s*/i, ''),
-          count: 0,
-          status: 'completed' as const,
-        })),
-        statusMessage: `Memverifikasi ${effectiveProfiles.length} worksheet... (${assessments.length} data tersimpan di sistem)`,
-      });
-
-      setTimeout(() => {
-        setSheetSyncProgress((prev) => ({
-          ...prev,
-          isLoading: false,
-          percent: 100,
-          statusMessage: `Verifikasi selesai: ${assessments.length} data aman. Silakan lengkapi URL Google Sheet jika ingin menarik data awan baru.`,
-        }));
-      }, 1500);
-
-      const msg = 'Memverifikasi lembar kerja: Link Google Sheet belum disetel. Data lokal (207 data) tetap utuh.';
+      const msg = 'Tidak ada profil worksheet dengan URL Google Sheet yang valid.';
       if (showToastAlert) showToast(msg, 'info');
-      return { success: true, message: msg, count: assessments.length };
+      return { success: false, message: msg, count: 0 };
     }
 
     if (showToastAlert) {
-      showToast(`Membaca data dari seluruh ${validProfiles.length} worksheet Google Sheet...`, 'info');
+      showToast(`Memulai sinkronisasi data dari seluruh ${validProfiles.length} worksheet/buku...`, 'info');
     }
 
     setSheetSyncProgress({
       isLoading: true,
-      currentKecamatan: validProfiles[0]?.name || 'Worksheet 1',
+      currentKecamatan: 'Semua Sheet',
       currentStep: 1,
       totalSteps: validProfiles.length,
       percent: 10,
       totalLoaded: assessments.length,
       loadedKecamatans: validProfiles.map((p, idx) => ({
-        name: p.name.replace(/Buku \d+:\s*/i, '').replace(/Spreadsheet\s*/i, ''),
+        name: p.name,
         count: 0,
         status: idx === 0 ? 'loading' : 'pending',
       })),
-      statusMessage: `Menghubungkan ke ${validProfiles.length} worksheet...`,
+      statusMessage: `Membaca data dari ${validProfiles.length} worksheet...`,
     });
 
     const countPerProfile: Record<string, number> = {};
@@ -3755,19 +3690,11 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
     for (let i = 0; i < validProfiles.length; i++) {
       const prof = validProfiles[i];
       try {
-        const stepPercent = Math.min(95, Math.round(((i + 0.3) / validProfiles.length) * 90));
         setSheetSyncProgress((prev) => ({
           ...prev,
-          isLoading: true,
           currentStep: i + 1,
-          percent: stepPercent,
-          currentKecamatan: prof.name,
+          percent: Math.round(((i + 1) / validProfiles.length) * 90),
           statusMessage: `Sedang membaca worksheet ${i + 1}/${validProfiles.length}: ${prof.name}...`,
-          loadedKecamatans: prev.loadedKecamatans.map((item, idx) => {
-            if (idx === i) return { ...item, status: 'loading' as const };
-            if (idx < i) return { ...item, status: 'completed' as const };
-            return { ...item, status: 'pending' as const };
-          }),
         }));
 
         const tempConfig: GoogleSheetConfig = {
@@ -3786,24 +3713,8 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
           }));
           allFetchedItems.push(...tagged);
           countPerProfile[prof.id] = tagged.length;
-
-          setSheetSyncProgress((prev) => ({
-            ...prev,
-            totalLoaded: prev.totalLoaded + tagged.length,
-            loadedKecamatans: prev.loadedKecamatans.map((item, idx) => {
-              if (idx === i) return { ...item, status: 'completed' as const, count: tagged.length };
-              return item;
-            }),
-          }));
         } else {
           countPerProfile[prof.id] = 0;
-          setSheetSyncProgress((prev) => ({
-            ...prev,
-            loadedKecamatans: prev.loadedKecamatans.map((item, idx) => {
-              if (idx === i) return { ...item, status: 'completed' as const, count: 0 };
-              return item;
-            }),
-          }));
         }
       } catch (err) {
         console.warn(`Sync notice for profile ${prof.name}:`, err);
@@ -3872,15 +3783,11 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
 
     setSheetSyncProgress((prev) => ({
       ...prev,
+      isLoading: false,
       percent: 100,
-      totalLoaded: allFetchedItems.length > 0 ? allFetchedItems.length : prev.totalLoaded,
-      statusMessage: `Selesai! Seluruh data dari ${validProfiles.length} worksheet berhasil disinkronkan (${allFetchedItems.length > 0 ? allFetchedItems.length : assessments.length} data siap ditampilkan).`,
-      loadedKecamatans: prev.loadedKecamatans.map((item) => ({ ...item, status: 'completed' as const })),
+      totalLoaded: allFetchedItems.length,
+      statusMessage: `Selesai! Seluruh ${allFetchedItems.length} data dari ${validProfiles.length} worksheet berhasil disinkronkan.`,
     }));
-
-    setTimeout(() => {
-      setSheetSyncProgress((prev) => ({ ...prev, isLoading: false }));
-    }, 2500);
 
     const totalCount = allFetchedItems.length;
     const msg = `Berhasil membaca & menyinkronkan data dari seluruh ${validProfiles.length} sheet (Total ${totalCount} data termuat)!`;

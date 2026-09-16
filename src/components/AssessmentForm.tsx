@@ -453,14 +453,19 @@ export const AssessmentForm: React.FC = () => {
 
   // Default select first desa and automatically update target sheet when kecamatan changes
   useEffect(() => {
-    if (!selectedAssessmentForEdit && availableDesas.length > 0 && (!desaId || !availableDesas.some((d) => d.id === desaId))) {
-      setDesaId(availableDesas[0].id);
+    if (!selectedAssessmentForEdit && availableDesas.length > 0) {
+      setDesaId((prev) => {
+        if (!prev || !availableDesas.some((d) => d.id === prev)) {
+          return availableDesas[0].id;
+        }
+        return prev;
+      });
     }
     const curKec = kecamatans.find((k) => k.id === kecamatanId);
     if (curKec) {
       setTargetSheetName(`Kec. ${curKec.name}`);
     }
-  }, [kecamatanId, availableDesas, desaId, selectedAssessmentForEdit, kecamatans]);
+  }, [kecamatanId, availableDesas, selectedAssessmentForEdit, kecamatans]);
 
   // Dukcapil search results
   const dukcapilSearchResults = React.useMemo(() => {
