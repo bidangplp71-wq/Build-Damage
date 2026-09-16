@@ -32,7 +32,7 @@ const safeNumber = (val: unknown, fallback = 0): number => {
 };
 
 export const AssessmentDetailModal: React.FC<Props> = ({ assessment, onClose }) => {
-  const { syncAssessmentToSheet, googleSheetConfig, logUserActivity, showToast } = useApp();
+  const { syncAssessmentToSheet, googleSheetConfig, logUserActivity, showToast, currentUser } = useApp();
   const [isSyncing, setIsSyncing] = useState(false);
   const [isUploadingToDrive, setIsUploadingToDrive] = useState(false);
   const [showSignatures, setShowSignatures] = useState(true);
@@ -288,16 +288,18 @@ export const AssessmentDetailModal: React.FC<Props> = ({ assessment, onClose }) 
                 </button>
               )}
 
-              {/* Sync to Google Sheet button */}
-              <button
-                type="button"
-                onClick={handleSyncToSheet}
-                disabled={isSyncing}
-                className="flex items-center gap-1.5 px-3 py-1.5 rounded-xl text-xs font-semibold bg-emerald-50 hover:bg-emerald-100 text-emerald-800 border border-emerald-300 transition-colors cursor-pointer"
-              >
-                <FileSpreadsheet className={`w-3.5 h-3.5 ${isSyncing ? 'animate-spin' : ''}`} />
-                <span>{isSyncing ? 'Sinkron...' : 'Kirim Google Sheet'}</span>
-              </button>
+              {/* Sync to Google Sheet button (Hidden for Surveyor) */}
+              {currentUser.role !== 'admin_user' && (
+                <button
+                  type="button"
+                  onClick={handleSyncToSheet}
+                  disabled={isSyncing}
+                  className="flex items-center gap-1.5 px-3 py-1.5 rounded-xl text-xs font-semibold bg-emerald-50 hover:bg-emerald-100 text-emerald-800 border border-emerald-300 transition-colors cursor-pointer"
+                >
+                  <FileSpreadsheet className={`w-3.5 h-3.5 ${isSyncing ? 'animate-spin' : ''}`} />
+                  <span>{isSyncing ? 'Sinkron...' : 'Kirim Google Sheet'}</span>
+                </button>
+              )}
 
               {/* Close button */}
               <button

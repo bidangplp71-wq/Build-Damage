@@ -1455,7 +1455,7 @@ export const AssessmentForm: React.FC = () => {
         </div>
 
         <div className="flex items-center gap-2 self-end sm:self-auto shrink-0">
-          {googleSheetConfig.spreadsheetUrl && (
+          {googleSheetConfig.spreadsheetUrl && currentUser.role !== 'admin_user' && (
             <a
               href={googleSheetConfig.spreadsheetUrl}
               target="_blank"
@@ -2442,8 +2442,8 @@ export const AssessmentForm: React.FC = () => {
           </div>
         </div>
 
-        {/* Pemilihan Target Halaman Sheet (Hanya tampil jika ada > 1 buku) */}
-        {googleSheetConfig.spreadsheetProfiles && googleSheetConfig.spreadsheetProfiles.length > 1 && (
+        {/* Pemilihan Target Halaman Sheet (Hanya tampil jika ada > 1 buku dan bukan Surveyor Lapangan) */}
+        {googleSheetConfig.spreadsheetProfiles && googleSheetConfig.spreadsheetProfiles.length > 1 && currentUser.role !== 'admin_user' && (
           <div className="mb-4 p-4 rounded-xl border border-indigo-100 bg-indigo-50/50">
             <label className="block text-[11px] font-bold text-indigo-900 mb-1.5 uppercase tracking-wide">
               Pilih Halaman / Buku Google Sheet Tujuan

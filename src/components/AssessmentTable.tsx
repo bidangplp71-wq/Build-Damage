@@ -24,6 +24,7 @@ import {
   Eye,
   FileSpreadsheet,
   CheckCircle,
+  CheckCircle2,
   AlertCircle,
   AlertTriangle,
   Printer,
@@ -674,19 +675,21 @@ export const AssessmentTable: React.FC = () => {
         </div>
       )}
 
-      {/* MULTI-SPREADSHEET "DAFTAR HALAMAN BUKU" QUICK SWITCHER & CAPACITY MONITOR */}
-      <SheetBookSelector
-        variant="compact"
-        selectedViewProfileId={selectedProfileFilter}
-        onSelectViewProfile={(pId) => {
-          setSelectedProfileFilter(pId);
-          setCurrentPage(1);
-        }}
-        selectedAssessmentIds={selectedRowIds}
-        onMovedSuccess={() => {
-          setSelectedRowIds([]);
-        }}
-      />
+      {/* MULTI-SPREADSHEET "DAFTAR HALAMAN BUKU" QUICK SWITCHER & CAPACITY MONITOR (Hidden for Surveyor) */}
+      {currentUser.role !== 'admin_user' && currentUser.role !== 'admin_publik' && (
+        <SheetBookSelector
+          variant="compact"
+          selectedViewProfileId={selectedProfileFilter}
+          onSelectViewProfile={(pId) => {
+            setSelectedProfileFilter(pId);
+            setCurrentPage(1);
+          }}
+          selectedAssessmentIds={selectedRowIds}
+          onMovedSuccess={() => {
+            setSelectedRowIds([]);
+          }}
+        />
+      )}
 
       {/* PEMENUHAN TARGET DATA QUOTA PROGRESS (COMPACT) */}
       <DataFulfillmentCard compact />
@@ -869,8 +872,8 @@ export const AssessmentTable: React.FC = () => {
             <span>Cetak Portofolio Rekap</span>
           </button>
 
-          {/* Direct Google Sheet button */}
-          {googleSheetConfig.spreadsheetUrl && (
+          {/* Direct Google Sheet button (Hidden for Surveyor to prevent tampering) */}
+          {googleSheetConfig.spreadsheetUrl && currentUser.role !== 'admin_user' && (
             <div className="flex items-center gap-1.5 flex-wrap">
               <button
                 onClick={() => syncFromGoogleSheet(true, true)}
@@ -1478,27 +1481,41 @@ export const AssessmentTable: React.FC = () => {
 
                     {/* Google Sheet Storage Status */}
                     <td className="py-3 px-3 text-center">
-                      <button
-                        onClick={() => handleSyncSingle(item)}
-                        disabled={syncingId === item.id}
-                        title={
-                          item.googleSheetSynced
-                            ? 'Tersimpan langsung di tautan Google Sheet. Klik untuk kirim pembaruan ulang.'
-                            : 'Kirim data ini ke Google Sheet sekarang'
-                        }
-                        className={`inline-flex items-center gap-1 px-2 py-1 rounded-lg border text-[10px] font-bold transition-all shadow-2xs ${
-                          item.googleSheetSynced
-                            ? 'bg-emerald-50 text-emerald-800 border-emerald-300 hover:bg-emerald-100'
-                            : 'bg-slate-100 text-slate-600 border-slate-300 hover:bg-slate-200'
-                        }`}
-                      >
-                        <FileSpreadsheet
-                          className={`w-3 h-3 shrink-0 ${
-                            syncingId === item.id ? 'animate-spin text-emerald-600' : 'text-emerald-600'
+                      {currentUser.role === 'admin_user' ? (
+                        <span
+                          title={item.googleSheetSynced ? 'Tersimpan otomatis di Google Sheet' : 'Tersimpan di Cloud Database'}
+                          className={`inline-flex items-center gap-1 px-2 py-0.5 rounded-lg border text-[10px] font-semibold ${
+                            item.googleSheetSynced
+                              ? 'bg-emerald-50 text-emerald-800 border-emerald-200'
+                              : 'bg-slate-50 text-slate-600 border-slate-200'
                           }`}
-                        />
-                        <span>{item.googleSheetSynced ? 'Tersimpan' : 'Kirim'}</span>
-                      </button>
+                        >
+                          <CheckCircle2 className={`w-3 h-3 ${item.googleSheetSynced ? 'text-emerald-600' : 'text-slate-400'}`} />
+                          <span>{item.googleSheetSynced ? 'Tersimpan' : 'Cloud'}</span>
+                        </span>
+                      ) : (
+                        <button
+                          onClick={() => handleSyncSingle(item)}
+                          disabled={syncingId === item.id}
+                          title={
+                            item.googleSheetSynced
+                              ? 'Tersimpan langsung di tautan Google Sheet. Klik untuk kirim pembaruan ulang.'
+                              : 'Kirim data ini ke Google Sheet sekarang'
+                          }
+                          className={`inline-flex items-center gap-1 px-2 py-1 rounded-lg border text-[10px] font-bold transition-all shadow-2xs ${
+                            item.googleSheetSynced
+                              ? 'bg-emerald-50 text-emerald-800 border-emerald-300 hover:bg-emerald-100'
+                              : 'bg-slate-100 text-slate-600 border-slate-300 hover:bg-slate-200'
+                          }`}
+                        >
+                          <FileSpreadsheet
+                            className={`w-3 h-3 shrink-0 ${
+                              syncingId === item.id ? 'animate-spin text-emerald-600' : 'text-emerald-600'
+                            }`}
+                          />
+                          <span>{item.googleSheetSynced ? 'Tersimpan' : 'Kirim'}</span>
+                        </button>
+                      )}
                     </td>
 
                     {/* Actions Column */}

@@ -352,12 +352,14 @@ export const DashboardAnalytics: React.FC = () => {
           </div>
           <div className="mt-3 flex items-center justify-between text-xs text-slate-500 border-t border-slate-100 pt-2.5">
             <span className="truncate max-w-[130px]">{googleSheetConfig.sheetName}</span>
-            <button
-              onClick={() => setActiveTab('google_sheet')}
-              className="text-emerald-700 font-semibold hover:underline"
-            >
-              Pengaturan &rarr;
-            </button>
+            {currentUser.role !== 'admin_user' && (
+              <button
+                onClick={() => setActiveTab('google_sheet')}
+                className="text-emerald-700 font-semibold hover:underline cursor-pointer"
+              >
+                Pengaturan &rarr;
+              </button>
+            )}
           </div>
         </div>
       </div>
@@ -790,12 +792,14 @@ export const DashboardAnalytics: React.FC = () => {
               >
                 + Pemekaran Desa
               </button>
-              <button
-                onClick={() => setActiveTab('google_sheet')}
-                className="p-3 rounded-xl bg-white border border-indigo-100 shadow-xs hover:border-indigo-300 font-semibold text-slate-800 text-left transition-all"
-              >
-                Sync Google Sheet
-              </button>
+              {currentUser.role !== 'admin_user' && (
+                <button
+                  onClick={() => setActiveTab('google_sheet')}
+                  className="p-3 rounded-xl bg-white border border-indigo-100 shadow-xs hover:border-indigo-300 font-semibold text-slate-800 text-left transition-all"
+                >
+                  Sync Google Sheet
+                </button>
+              )}
               <button
                 onClick={() => setActiveTab('manajemen_user')}
                 className="p-3 rounded-xl bg-white border border-indigo-100 shadow-xs hover:border-indigo-300 font-semibold text-slate-800 text-left transition-all"

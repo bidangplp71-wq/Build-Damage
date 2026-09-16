@@ -122,7 +122,7 @@ export const ROLE_NAV_CONFIGS: Record<UserRole, RoleNavConfig> = {
   },
   admin_user: {
     defaultTab: 'input_baru',
-    allowedTabs: ['input_baru', 'tambah', 'penilaian', 'google_sheet', 'googlesheets',
+    allowedTabs: ['input_baru', 'tambah', 'penilaian',
       'drive_links', 'hsbgn_settings', 'hsbgn'],
     roleTitle: 'Petugas Surveyor Lapangan PUPR',
     roleSubtitle: 'Fokus Khusus: Pengisian Formulir Penilaian Cepat Kerusakan',

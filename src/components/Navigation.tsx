@@ -65,7 +65,7 @@ export const Navigation: React.FC<NavigationProps> = ({ mobileOpen, onCloseMobil
   const getTabsForRole = () => {
     switch (currentUser.role) {
       case 'admin_user':
-        // Surveyor: Focused on Form Input, Own Survey Entries, and Google Sheet sync
+        // Surveyor: Focused on Form Input, Own Survey Entries, Drive Backup and HSBGN
         return [
           {
             id: 'input_baru',
@@ -83,13 +83,6 @@ export const Navigation: React.FC<NavigationProps> = ({ mobileOpen, onCloseMobil
             badge: myNeedsRevisionCount > 0 ? `${myNeedsRevisionCount} Perlu Revisi` : (myAssessmentsCount || assessments.length),
             badgeLabel: 'gedung',
             badgeAlert: myNeedsRevisionCount > 0,
-          },
-          {
-            id: 'google_sheet',
-            label: 'Buka & Cek Google Sheet',
-            desc: 'Lihat data spreadsheet online',
-            icon: FileSpreadsheet,
-            badge: null,
           },
           {
             id: 'drive_links',
