@@ -1,4 +1,5 @@
 import { BuildingAssessment } from '../types';
+import { terbilang } from './puprCalculations';
 
 export type DuplicateMatchReason = 
   | 'EXACT_NAME_AND_LOCATION'   // Nama gedung sama persis di Desa & Kecamatan yang sama
@@ -422,12 +423,23 @@ export function deduplicateAssessmentsList(list: BuildingAssessment[]): Building
       const base = keepIncomingAsBase ? item : existing;
       const other = keepIncomingAsBase ? existing : item;
 
+      const resolvedArea = base.totalFloorAreaM2 || other.totalFloorAreaM2 || 0;
+      const resolvedDamage = base.totalDamagePercent || other.totalDamagePercent || 0;
+      const resolvedHsbgn = base.hsbgnPerM2 || other.hsbgnPerM2 || 5920000;
+      const resolvedRehabCost = base.roundedRehabCost || other.roundedRehabCost || (resolvedArea > 0 && resolvedDamage > 0 ? Math.round(resolvedArea * resolvedHsbgn * (resolvedDamage / 100) * 1.08 / 100000) * 100000 : 0);
+
       const mergedItem: BuildingAssessment = {
         ...other,
         ...base,
         // Prefer existing stable ID if it's already an active uuid/ass_ ID
         id: existing.id && !existing.id.startsWith('sheet_') ? existing.id : (base.id || other.id),
         code: base.code && !base.code.startsWith('REG-TEMP') ? base.code : (other.code || base.code),
+        totalFloorAreaM2: resolvedArea,
+        totalDamagePercent: resolvedDamage,
+        hsbgnPerM2: resolvedHsbgn,
+        roundedRehabCost: resolvedRehabCost,
+        totalRehabCost: base.totalRehabCost || other.totalRehabCost || resolvedRehabCost,
+        costTerbilang: base.costTerbilang || other.costTerbilang || (resolvedRehabCost > 0 ? `${terbilang(resolvedRehabCost)} Rupiah` : '-'),
         photos: mergedPhotos,
         googleDriveFolderUrl: mergedDriveUrl,
         backupDriveUrl: base.backupDriveUrl || other.backupDriveUrl,

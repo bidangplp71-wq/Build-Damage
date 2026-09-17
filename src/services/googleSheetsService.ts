@@ -1,7 +1,7 @@
 import * as XLSX from 'xlsx';
 import { BuildingAssessment, GoogleSheetConfig, Kecamatan, UserActivityLog, UserAccount } from '../types';
 import { INITIAL_DESA } from '../data/initialData';
-import { formatRupiah, getInitialSubComponents } from '../utils/puprCalculations';
+import { formatRupiah, getInitialSubComponents, terbilang } from '../utils/puprCalculations';
 import { hydrateAssessmentPhotos } from '../utils/imageCompressor';
 import { getPhotoLocally } from '../utils/photoStorage';
 
@@ -2467,7 +2467,6 @@ export function parseExtractedRowsToAssessments(
 
     const totalFloorAreaM2 = parseNumber(getVal(rowObj, ['Luas Lantai (M2)', 'Luas Lantai', 'Luas (M2)', 'Luas', 'Luas Bangunan'])) || 0;
     const totalDamagePercent = parseNumber(getVal(rowObj, ['Tingkat Kerusakan (%)', 'Tingkat Kerusakan', '% Kerusakan', 'Persentase Kerusakan'])) || 0;
-    const roundedRehabCost = parseNumber(getVal(rowObj, ['Ajuan Biaya Rehab (Rp)', 'Ajuan Biaya', 'Total Biaya', 'Estimasi Biaya', 'RAB'])) || 0;
 
     const nikPemilik = String(getVal(rowObj, ['NIK Pemilik', 'NIK', 'NIK 16 Digit']) || '0');
     const noKkPemilik = String(getVal(rowObj, ['No KK Pemilik', 'No KK', 'Nomor KK', 'No. KK']) || '0');
@@ -2543,11 +2542,33 @@ export function parseExtractedRowsToAssessments(
       damageClassification = totalDamagePercent > 45 ? 'Rusak Berat' : totalDamagePercent > 20 ? 'Rusak Sedang' : 'Rusak Ringan';
     }
 
-    const hsbgnPerM2 = parseNumber(getVal(rowObj, ['HSBGN / M2 (Rp)', 'HSBGN / M2', 'HSBGN'])) || 0;
-    const treatmentCostPerM2 = parseNumber(getVal(rowObj, ['Biaya Perawatan / M2 (Rp)', 'Biaya Perawatan'])) || 0;
-    const demolitionCostPerM2 = parseNumber(getVal(rowObj, ['Biaya Bongkaran / M2 (Rp)', 'Biaya Bongkaran'])) || 0;
-    const totalCostPerM2 = parseNumber(getVal(rowObj, ['Total Biaya / M2 (Rp)', 'Total Biaya / M2'])) || 0;
-    const costTerbilang = String(getVal(rowObj, ['Terbilang']) || '');
+    const rawHsbgn = parseNumber(getVal(rowObj, ['HSBGN / M2 (Rp)', 'HSBGN / M2', 'HSBGN'])) || 0;
+    const hsbgnPerM2 = rawHsbgn > 0 ? rawHsbgn : 5920000;
+    let treatmentCostPerM2 = parseNumber(getVal(rowObj, ['Biaya Perawatan / M2 (Rp)', 'Biaya Perawatan'])) || 0;
+    let demolitionCostPerM2 = parseNumber(getVal(rowObj, ['Biaya Bongkaran / M2 (Rp)', 'Biaya Bongkaran'])) || 0;
+    let totalCostPerM2 = parseNumber(getVal(rowObj, ['Total Biaya / M2 (Rp)', 'Total Biaya / M2'])) || 0;
+    let roundedRehabCost = parseNumber(getVal(rowObj, ['Ajuan Biaya Rehab (Rp)', 'Ajuan Biaya', 'Total Biaya', 'Estimasi Biaya', 'RAB'])) || 0;
+
+    // Automatic calculation fallback using official PUPR formula
+    if (treatmentCostPerM2 === 0 && totalDamagePercent > 0) {
+      treatmentCostPerM2 = Math.round((totalDamagePercent / 100) * hsbgnPerM2);
+    }
+    if (demolitionCostPerM2 === 0 && treatmentCostPerM2 > 0) {
+      demolitionCostPerM2 = Math.round(0.08 * treatmentCostPerM2);
+    }
+    if (totalCostPerM2 === 0) {
+      totalCostPerM2 = treatmentCostPerM2 + demolitionCostPerM2;
+    }
+    if (roundedRehabCost === 0) {
+      const effectiveArea = totalFloorAreaM2 > 0 ? totalFloorAreaM2 : 36;
+      const unrounded = effectiveArea * (totalCostPerM2 || (hsbgnPerM2 * (totalDamagePercent / 100) * 1.08));
+      roundedRehabCost = Math.round(unrounded / 100000) * 100000;
+    }
+
+    const rawTerbilang = String(getVal(rowObj, ['Terbilang']) || '');
+    const costTerbilang = (rawTerbilang && rawTerbilang !== '-')
+      ? rawTerbilang
+      : (roundedRehabCost > 0 ? `${terbilang(roundedRehabCost)} Rupiah` : '-');
 
     const verificationStatus = (getVal(rowObj, ['Status Verifikasi', 'Status']) as any) || 'Menunggu Verifikasi';
     const verifiedByRaw = getVal(rowObj, ['Diverifikasi Oleh', 'Verifikator']);

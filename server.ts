@@ -1742,33 +1742,31 @@ const handleKecamatanRawFetch = async (req: express.Request, res: express.Respon
       await new Promise((r) => setTimeout(r, 80));
     }
 
-    // Also check if spreadsheetUrl has a specific gid
-    const gidMatch = spreadsheetUrl.match(/[#&?]gid=([0-9]+)/);
-    const gid = gidMatch ? gidMatch[1] : null;
-
+    // Fallback: If no rows found from kecamatan tabs, probe gid or operational tabs
     const extraTargetUrls: Array<{ url: string; label: string }> = [];
-    if (gid) {
-      extraTargetUrls.push({
-        url: `https://docs.google.com/spreadsheets/d/${spreadsheetId}/gviz/tq?gid=${encodeURIComponent(gid)}&_t=${cacheBuster}`,
-        label: `Sheet (gid=${gid})`,
-      });
-    }
-
-    // Common custom/operational tab names
-    const commonOperationalTabs = [
-      'Data_Terverifikasi',
-      'Data Terverifikasi',
-      'Data_Kerusakan',
-      'Data Kerusakan',
-      'Data_Penilaian',
-      'Data Penilaian',
-      'Survei',
-      'Survei Lapangan',
-      'Sheet1',
-    ];
-
-    // If no rows found from kecamatan tabs, probe operational tabs
     if (allRows.length === 0) {
+      const gidMatch = spreadsheetUrl.match(/[#&?]gid=([0-9]+)/);
+      const gid = gidMatch ? gidMatch[1] : null;
+      if (gid) {
+        extraTargetUrls.push({
+          url: `https://docs.google.com/spreadsheets/d/${spreadsheetId}/gviz/tq?gid=${encodeURIComponent(gid)}&_t=${cacheBuster}`,
+          label: `Sheet (gid=${gid})`,
+        });
+      }
+
+      // Common custom/operational tab names
+      const commonOperationalTabs = [
+        'Data_Terverifikasi',
+        'Data Terverifikasi',
+        'Data_Kerusakan',
+        'Data Kerusakan',
+        'Data_Penilaian',
+        'Data Penilaian',
+        'Survei',
+        'Survei Lapangan',
+        'Sheet1',
+      ];
+
       for (const tab of commonOperationalTabs) {
         extraTargetUrls.push({
           url: `https://docs.google.com/spreadsheets/d/${spreadsheetId}/gviz/tq?sheet=${encodeURIComponent(tab)}&_t=${cacheBuster}`,

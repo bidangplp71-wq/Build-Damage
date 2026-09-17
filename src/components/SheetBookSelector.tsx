@@ -108,11 +108,22 @@ export const SheetBookSelector: React.FC<SheetBookSelectorProps> = ({
     profiles.forEach((p) => {
       counts[p.id] = 0;
     });
-    // Default profile gets unassigned assessments
-    const defaultId = profiles[0]?.id || 'profile_primary_2026';
+    const defaultProfile = profiles.find((p) => p.isDefault) || profiles[0];
+    const defaultId = defaultProfile?.id || 'profile_primary_2026';
+
     assessments.forEach((a) => {
-      const pid = a.targetProfileId || defaultId;
-      counts[pid] = (counts[pid] || 0) + 1;
+      if (a.targetProfileId && counts[a.targetProfileId] !== undefined) {
+        counts[a.targetProfileId]++;
+        return;
+      }
+      if (a.targetProfileName) {
+        const found = profiles.find((p) => p.name.toLowerCase() === a.targetProfileName?.toLowerCase());
+        if (found) {
+          counts[found.id]++;
+          return;
+        }
+      }
+      counts[defaultId] = (counts[defaultId] || 0) + 1;
     });
     return counts;
   }, [assessments, profiles]);
