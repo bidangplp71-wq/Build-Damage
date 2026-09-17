@@ -19,10 +19,13 @@ import {
   Database,
   ArrowRight,
   Clock,
+  UploadCloud,
+  Send,
 } from 'lucide-react';
 import { useApp } from '../context/AppContext';
 import { BuildingAssessment } from '../types';
 import { isArchiveAssessment, isArchiveSource } from '../utils/duplicateDetector';
+import { directSaveToGoogleSheet } from '../services/googleSheetsService';
 
 interface DataRecoveryModalProps {
   isOpen: boolean;
@@ -41,13 +44,17 @@ export const DataRecoveryModal: React.FC<DataRecoveryModalProps> = ({
     restoreDeletedAssessment,
     getDeletedAssessmentIds,
     syncFromGoogleSheet,
+    syncAllToSheet,
+    showToast,
     googleSheetConfig,
   } = useApp();
 
   const [isRecovering, setIsRecovering] = useState(false);
   const [isSyncing, setIsSyncing] = useState(false);
+  const [isUploadingToSheet, setIsUploadingToSheet] = useState(false);
+  const [syncingItemId, setSyncingItemId] = useState<string | null>(null);
   const [recoveryResult, setRecoveryResult] = useState<string | null>(null);
-  const [activeTab, setActiveTab] = useState<'recent' | 'all' | 'trash'>('recent');
+  const [activeTab, setActiveTab] = useState<'recent' | 'unsynced' | 'all' | 'trash'>('recent');
   const [searchKeyword, setSearchKeyword] = useState('');
 
   if (!isOpen) return null;
@@ -57,6 +64,7 @@ export const DataRecoveryModal: React.FC<DataRecoveryModalProps> = ({
   // Categorize assessments
   const activeAssessments = assessments.filter((a) => !isArchiveAssessment(a) && !isArchiveSource(a.sourceSheet));
   const archiveAssessments = assessments.filter((a) => isArchiveAssessment(a) || isArchiveSource(a.sourceSheet));
+  const unsyncedAssessments = assessments.filter((a) => !a.googleSheetSynced);
 
   // Find records from yesterday or last 48 hours
   const now = Date.now();
@@ -85,10 +93,57 @@ export const DataRecoveryModal: React.FC<DataRecoveryModalProps> = ({
 
   const handleForceSync = async () => {
     setIsSyncing(true);
+    setRecoveryResult(null);
     try {
       await syncFromGoogleSheet(true, true);
+      setRecoveryResult('Penyelarasan dari Google Sheet selesai! Semua baris dari sheet telah ditarik.');
+    } catch (err: any) {
+      setRecoveryResult(`Gagal menarik dari sheet: ${err?.message || 'Terjadi kendala koneksi'}`);
     } finally {
       setIsSyncing(false);
+    }
+  };
+
+  const handleReuploadAllToSheet = async () => {
+    if (!googleSheetConfig.webhookUrl || !googleSheetConfig.webhookUrl.startsWith('http')) {
+      showToast('URL Webhook Google Sheet belum dikonfigurasi di Pengaturan.', 'error');
+      return;
+    }
+    setIsUploadingToSheet(true);
+    setRecoveryResult(null);
+    try {
+      const res = await syncAllToSheet();
+      if (res.success) {
+        setRecoveryResult(`Berhasil mengirimkan kembali ${res.count || assessments.length} data ke tab-tab Kecamatan di Google Sheet! Seluruh data kini tampil lengkap di Google Sheet.`);
+      } else {
+        setRecoveryResult(`Gagal mengirim ke sheet: ${res.message}`);
+      }
+    } catch (err: any) {
+      setRecoveryResult(`Gagal mengirim ke Google Sheet: ${err?.message || 'Koneksi terputus'}`);
+    } finally {
+      setIsUploadingToSheet(false);
+    }
+  };
+
+  const handleSyncSingleItem = async (item: BuildingAssessment) => {
+    setSyncingItemId(item.id);
+    try {
+      const res = await directSaveToGoogleSheet(
+        item,
+        googleSheetConfig,
+        'insert',
+        undefined,
+        item.targetSheetName || item.sourceSheet
+      );
+      if (res.success) {
+        showToast(`Data gedung "${item.buildingName}" berhasil dikirim langsung ke Google Sheet!`, 'success');
+      } else {
+        showToast(res.message, 'error');
+      }
+    } catch (err: any) {
+      showToast(`Gagal: ${err?.message || 'Koneksi terputus'}`, 'error');
+    } finally {
+      setSyncingItemId(null);
     }
   };
 
@@ -97,6 +152,8 @@ export const DataRecoveryModal: React.FC<DataRecoveryModalProps> = ({
     let list: BuildingAssessment[] = [];
     if (activeTab === 'recent') {
       list = recentAssessments.length > 0 ? recentAssessments : assessments.slice(0, 30);
+    } else if (activeTab === 'unsynced') {
+      list = unsyncedAssessments;
     } else if (activeTab === 'all') {
       list = assessments;
     }
@@ -126,9 +183,9 @@ export const DataRecoveryModal: React.FC<DataRecoveryModalProps> = ({
               <RotateCcw className="w-5 h-5 text-blue-300" />
             </div>
             <div>
-              <h2 className="text-lg font-bold">Pusat Pemulihan & Pemeriksaan Data</h2>
+              <h2 className="text-lg font-bold">Pusat Pemulihan & Penyelarasan Data</h2>
               <p className="text-xs text-blue-200">
-                Pulihkan data input kemarin, periksa sheet aktif, dan pastikan tidak ada data yang tersembunyi
+                Pulihkan data input kemarin, kembalikan data yang hilang dari Google Sheet, dan pastikan seluruh input aman
               </p>
             </div>
           </div>
@@ -162,11 +219,11 @@ export const DataRecoveryModal: React.FC<DataRecoveryModalProps> = ({
 
           <div className="bg-white p-3 rounded-xl border border-slate-200 shadow-2xs">
             <div className="text-[11px] font-semibold text-slate-500 flex items-center gap-1.5">
-              <Archive className="w-3 h-3 text-amber-500" />
-              Data Lama / Arsip
+              <AlertTriangle className="w-3 h-3 text-amber-500" />
+              Belum Masuk Sheet
             </div>
-            <div className="text-xl font-black text-amber-700 mt-1">{archiveAssessments.length}</div>
-            <div className="text-[10px] text-slate-400">Tersimpan aman</div>
+            <div className="text-xl font-black text-amber-700 mt-1">{unsyncedAssessments.length}</div>
+            <div className="text-[10px] text-amber-600 font-medium">Bisa dikirim ulang</div>
           </div>
 
           <div className="bg-white p-3 rounded-xl border border-slate-200 shadow-2xs">
@@ -175,32 +232,44 @@ export const DataRecoveryModal: React.FC<DataRecoveryModalProps> = ({
               Total Seluruh Data
             </div>
             <div className="text-xl font-black text-indigo-700 mt-1">{assessments.length}</div>
-            <div className="text-[10px] text-slate-400">Tersinkron di sistem</div>
+            <div className="text-[10px] text-slate-400">Tersimpan di aplikasi</div>
           </div>
         </div>
 
         {/* Action Banner */}
         <div className="px-6 py-3 bg-blue-50/70 border-b border-blue-100 flex flex-wrap items-center justify-between gap-3">
-          <div className="text-xs text-blue-950 font-medium max-w-xl">
-            <strong>Tidak ada data yang dihapus!</strong> Jika input kemarin belum muncul di Sheet Aktif, klik tombol di sebelah kanan untuk menyelaraskan kembali dari seluruh penyimpanan lokal, server, dan Google Sheet tanpa jeda cache.
+          <div className="text-xs text-blue-950 font-medium max-w-lg">
+            <strong>Data Anda tersimpan aman!</strong> Jika data kemarin hilang dari sheet, klik tombol <strong>Kirim Ulang ke Google Sheet</strong> untuk memunculkan kembali semua data di tab Google Sheet secara lengkap.
           </div>
-          <div className="flex items-center gap-2">
+          <div className="flex flex-wrap items-center gap-2">
             <button
               onClick={handleRunFullRecovery}
               disabled={isRecovering}
-              className="flex items-center gap-1.5 px-3.5 py-2 text-xs font-bold text-white bg-blue-600 hover:bg-blue-700 active:bg-blue-800 rounded-xl transition-all shadow-xs cursor-pointer disabled:opacity-50"
+              title="Pindai dan tarik semua data dari cadangan lokal dan server"
+              className="flex items-center gap-1.5 px-3 py-2 text-xs font-bold text-white bg-blue-600 hover:bg-blue-700 active:bg-blue-800 rounded-xl transition-all shadow-xs cursor-pointer disabled:opacity-50"
             >
               <RotateCcw className={`w-3.5 h-3.5 ${isRecovering ? 'animate-spin' : ''}`} />
-              <span>{isRecovering ? 'Memulihkan Data...' : '⚡ Pulihkan Seluruh Data'}</span>
+              <span>{isRecovering ? 'Memulihkan...' : '⚡ Pulihkan Data Kemarin'}</span>
+            </button>
+
+            <button
+              onClick={handleReuploadAllToSheet}
+              disabled={isUploadingToSheet || assessments.length === 0}
+              title="Kirim ulang seluruh data aplikasi ke Google Sheet agar yang hilang di sheet muncul kembali"
+              className="flex items-center gap-1.5 px-3 py-2 text-xs font-bold text-emerald-800 bg-emerald-100 hover:bg-emerald-200 active:bg-emerald-300 rounded-xl border border-emerald-300 transition-colors shadow-2xs cursor-pointer disabled:opacity-50"
+            >
+              <UploadCloud className={`w-3.5 h-3.5 text-emerald-700 ${isUploadingToSheet ? 'animate-bounce' : ''}`} />
+              <span>{isUploadingToSheet ? 'Mengirim ke Sheet...' : '📤 Kirim Ulang ke Google Sheet'}</span>
             </button>
 
             <button
               onClick={handleForceSync}
               disabled={isSyncing}
-              className="flex items-center gap-1.5 px-3.5 py-2 text-xs font-bold text-slate-700 bg-white hover:bg-slate-100 rounded-xl border border-slate-300 transition-colors shadow-2xs cursor-pointer disabled:opacity-50"
+              title="Tarik data dari Google Sheet"
+              className="flex items-center gap-1.5 px-3 py-2 text-xs font-bold text-slate-700 bg-white hover:bg-slate-100 rounded-xl border border-slate-300 transition-colors shadow-2xs cursor-pointer disabled:opacity-50"
             >
               <RefreshCw className={`w-3.5 h-3.5 ${isSyncing ? 'animate-spin text-blue-600' : ''}`} />
-              <span>{isSyncing ? 'Menyinkronkan...' : '🔄 Tarik Ulang Google Sheet'}</span>
+              <span>{isSyncing ? 'Menarik...' : '🔄 Tarik dari Sheet'}</span>
             </button>
           </div>
         </div>
@@ -214,10 +283,10 @@ export const DataRecoveryModal: React.FC<DataRecoveryModalProps> = ({
 
         {/* Navigation Tabs & Search */}
         <div className="px-6 pt-3 flex flex-wrap items-center justify-between gap-3 border-b border-slate-200">
-          <div className="flex items-center gap-2">
+          <div className="flex items-center gap-2 overflow-x-auto pb-1">
             <button
               onClick={() => setActiveTab('recent')}
-              className={`px-3.5 py-2 text-xs font-bold rounded-t-lg border-b-2 transition-colors cursor-pointer flex items-center gap-1.5 ${
+              className={`px-3 py-2 text-xs font-bold rounded-t-lg border-b-2 transition-colors cursor-pointer whitespace-nowrap flex items-center gap-1.5 ${
                 activeTab === 'recent'
                   ? 'border-blue-600 text-blue-600 bg-blue-50/50'
                   : 'border-transparent text-slate-600 hover:text-slate-900'
@@ -228,8 +297,20 @@ export const DataRecoveryModal: React.FC<DataRecoveryModalProps> = ({
             </button>
 
             <button
+              onClick={() => setActiveTab('unsynced')}
+              className={`px-3 py-2 text-xs font-bold rounded-t-lg border-b-2 transition-colors cursor-pointer whitespace-nowrap flex items-center gap-1.5 ${
+                activeTab === 'unsynced'
+                  ? 'border-amber-600 text-amber-600 bg-amber-50/50'
+                  : 'border-transparent text-slate-600 hover:text-slate-900'
+              }`}
+            >
+              <AlertTriangle className="w-3.5 h-3.5 text-amber-500" />
+              <span>Belum di Sheet / Raib ({unsyncedAssessments.length})</span>
+            </button>
+
+            <button
               onClick={() => setActiveTab('all')}
-              className={`px-3.5 py-2 text-xs font-bold rounded-t-lg border-b-2 transition-colors cursor-pointer flex items-center gap-1.5 ${
+              className={`px-3 py-2 text-xs font-bold rounded-t-lg border-b-2 transition-colors cursor-pointer whitespace-nowrap flex items-center gap-1.5 ${
                 activeTab === 'all'
                   ? 'border-blue-600 text-blue-600 bg-blue-50/50'
                   : 'border-transparent text-slate-600 hover:text-slate-900'
@@ -242,14 +323,14 @@ export const DataRecoveryModal: React.FC<DataRecoveryModalProps> = ({
             {deletedIds.length > 0 && (
               <button
                 onClick={() => setActiveTab('trash')}
-                className={`px-3.5 py-2 text-xs font-bold rounded-t-lg border-b-2 transition-colors cursor-pointer flex items-center gap-1.5 ${
+                className={`px-3 py-2 text-xs font-bold rounded-t-lg border-b-2 transition-colors cursor-pointer whitespace-nowrap flex items-center gap-1.5 ${
                   activeTab === 'trash'
                     ? 'border-rose-600 text-rose-600 bg-rose-50/50'
                     : 'border-transparent text-slate-600 hover:text-slate-900'
                 }`}
               >
                 <Trash2 className="w-3.5 h-3.5" />
-                <span>Tempat Sampah / Ditekan ({deletedIds.length})</span>
+                <span>Tempat Sampah ({deletedIds.length})</span>
               </button>
             )}
           </div>
@@ -296,9 +377,13 @@ export const DataRecoveryModal: React.FC<DataRecoveryModalProps> = ({
           ) : filteredItems.length === 0 ? (
             <div className="text-center py-12">
               <AlertTriangle className="w-8 h-8 text-slate-400 mx-auto mb-2" />
-              <div className="text-sm font-bold text-slate-700">Tidak ada data ditemukan</div>
+              <div className="text-sm font-bold text-slate-700">
+                {activeTab === 'unsynced' ? 'Semua data telah tersinkron ke Google Sheet!' : 'Tidak ada data ditemukan'}
+              </div>
               <div className="text-xs text-slate-500 mt-1 max-w-sm mx-auto">
-                Silakan klik tombol &quot;Pulihkan Seluruh Data&quot; di atas untuk menarik kembali data dari seluruh penyimpanan cadangan dan Google Sheet.
+                {activeTab === 'unsynced'
+                  ? 'Seluruh data di aplikasi sudah tercatat dengan status tersinkron di tab kecamatan Google Sheet.'
+                  : 'Silakan klik tombol "Pulihkan Data Kemarin" di atas untuk menarik kembali data dari seluruh penyimpanan cadangan.'}
               </div>
             </div>
           ) : (
@@ -310,7 +395,7 @@ export const DataRecoveryModal: React.FC<DataRecoveryModalProps> = ({
                     <th className="py-2.5 px-3">Nama Gedung / Bangunan</th>
                     <th className="py-2.5 px-3">No. Registrasi</th>
                     <th className="py-2.5 px-3">Wilayah</th>
-                    <th className="py-2.5 px-3">Status Sheet</th>
+                    <th className="py-2.5 px-3">Status di Sheet</th>
                     <th className="py-2.5 px-3">Waktu Masuk</th>
                     <th className="py-2.5 px-3 text-right">Aksi</th>
                   </tr>
@@ -318,6 +403,8 @@ export const DataRecoveryModal: React.FC<DataRecoveryModalProps> = ({
                 <tbody className="divide-y divide-slate-100">
                   {filteredItems.map((item, idx) => {
                     const isArch = isArchiveAssessment(item) || isArchiveSource(item.sourceSheet);
+                    const isSynced = item.googleSheetSynced;
+                    const isItemSyncing = syncingItemId === item.id;
                     return (
                       <tr key={item.id || idx} className="hover:bg-slate-50/80 transition-colors">
                         <td className="py-2 px-3 text-slate-400 font-mono">{idx + 1}</td>
@@ -347,10 +434,15 @@ export const DataRecoveryModal: React.FC<DataRecoveryModalProps> = ({
                               <Archive className="w-2.5 h-2.5" />
                               Arsip
                             </span>
-                          ) : (
+                          ) : isSynced ? (
                             <span className="inline-flex items-center gap-1 px-2 py-0.5 rounded-full text-[10px] font-bold bg-emerald-100 text-emerald-800">
-                              <span className="w-1.5 h-1.5 rounded-full bg-emerald-500"></span>
-                              Aktif ({item.sourceSheet || item.targetSheetName || 'Kecamatan'})
+                              <CheckCircle2 className="w-2.5 h-2.5 text-emerald-600" />
+                              Tersinkron
+                            </span>
+                          ) : (
+                            <span className="inline-flex items-center gap-1 px-2 py-0.5 rounded-full text-[10px] font-bold bg-amber-100 text-amber-900">
+                              <AlertTriangle className="w-2.5 h-2.5 text-amber-600" />
+                              Belum di Sheet
                             </span>
                           )}
                         </td>
@@ -365,15 +457,28 @@ export const DataRecoveryModal: React.FC<DataRecoveryModalProps> = ({
                             : '-'}
                         </td>
                         <td className="py-2 px-3 text-right">
-                          <button
-                            onClick={() => {
-                              onSelectAssessment?.(item);
-                              onClose();
-                            }}
-                            className="px-2 py-1 text-xs font-semibold text-blue-600 hover:text-blue-800 hover:bg-blue-50 rounded-lg transition-colors cursor-pointer"
-                          >
-                            Detail
-                          </button>
+                          <div className="flex items-center justify-end gap-1.5">
+                            {!isSynced && (
+                              <button
+                                onClick={() => handleSyncSingleItem(item)}
+                                disabled={isItemSyncing}
+                                title="Kirim gedung ini ke Google Sheet sekarang"
+                                className="px-2 py-1 text-xs font-bold text-emerald-700 bg-emerald-50 hover:bg-emerald-100 border border-emerald-300 rounded-lg transition-colors cursor-pointer flex items-center gap-1"
+                              >
+                                <UploadCloud className={`w-3 h-3 ${isItemSyncing ? 'animate-bounce' : ''}`} />
+                                <span>{isItemSyncing ? 'Mengirim...' : 'Kirim ke Sheet'}</span>
+                              </button>
+                            )}
+                            <button
+                              onClick={() => {
+                                onSelectAssessment?.(item);
+                                onClose();
+                              }}
+                              className="px-2 py-1 text-xs font-semibold text-blue-600 hover:text-blue-800 hover:bg-blue-50 rounded-lg transition-colors cursor-pointer"
+                            >
+                              Detail
+                            </button>
+                          </div>
                         </td>
                       </tr>
                     );
@@ -387,7 +492,7 @@ export const DataRecoveryModal: React.FC<DataRecoveryModalProps> = ({
         {/* Footer */}
         <div className="px-6 py-3.5 bg-slate-50 border-t border-slate-200 flex items-center justify-between">
           <div className="text-xs text-slate-500">
-            Sistem mencatat seluruh masukan data surveyor secara permanen dan otomatis menyelaraskannya ke seluruh sheet kecamatan.
+            Sistem menyimpan data secara multi-layer (Browser + LocalStorage + Server) sehingga data kemarin tetap aman dan dapat dikirim kembali ke Google Sheet kapan saja.
           </div>
           <button
             onClick={onClose}

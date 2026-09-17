@@ -901,11 +901,16 @@ export const AssessmentTable: React.FC = () => {
           {/* Pusat Pemulihan Data Kemarin & Sinkronisasi */}
           <button
             onClick={() => setShowRecoveryModal(true)}
-            title="Pulihkan data input kemarin, periksa sheet aktif, dan pastikan tidak ada data yang tersembunyi"
+            title="Pulihkan data input kemarin, kembalikan data yang raib dari Google Sheet, dan kirim ulang masal"
             className="flex items-center gap-1.5 px-3 py-2 text-xs font-bold text-blue-900 bg-blue-100 hover:bg-blue-200 rounded-xl border border-blue-300 transition-colors cursor-pointer shadow-2xs"
           >
             <RotateCcw className="w-3.5 h-3.5 text-blue-700" />
             <span>Pulihkan Data Kemarin</span>
+            {assessments.some((a) => !a.googleSheetSynced) && (
+              <span className="ml-0.5 px-1.5 py-0.2 bg-amber-500 text-white rounded-full text-[10px] font-black">
+                {assessments.filter((a) => !a.googleSheetSynced).length}
+              </span>
+            )}
           </button>
 
           {/* Refresh button */}

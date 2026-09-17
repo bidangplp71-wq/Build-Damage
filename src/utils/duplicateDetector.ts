@@ -368,40 +368,11 @@ export function reconcileAndMergeAssessments(
   if (!incomingList || incomingList.length === 0) return deduplicateAssessmentsList(baseList || []);
   if (!baseList || baseList.length === 0) return deduplicateAssessmentsList(incomingList);
 
-  const incomingDeduplicated = deduplicateAssessmentsList(incomingList);
-  const incomingIdMap = new Map<string, BuildingAssessment>();
-  const incomingSheetRowMap = new Map<string, BuildingAssessment>();
-
-  incomingDeduplicated.forEach((item) => {
-    if (item.id) incomingIdMap.set(item.id, item);
-    const cleanSheet = (item.sourceSheet || '').toLowerCase().trim();
-    if (cleanSheet && item.sheetRowNumber) {
-      incomingSheetRowMap.set(`${cleanSheet}::r${item.sheetRowNumber}`, item);
-    }
-  });
-
-  const merged: BuildingAssessment[] = [...incomingDeduplicated];
-
-  // Retain existing records from baseList that were not in incoming sheet fetch
-  // (CRITICAL: Preserves all 207 historical archive records, records from other profiles, and local drafts)
-  (baseList || []).forEach((baseItem) => {
-    if (!baseItem || !baseItem.id) return;
-
-    let matchedIncoming: BuildingAssessment | undefined = incomingIdMap.get(baseItem.id);
-    if (!matchedIncoming) {
-      const cleanSheet = (baseItem.sourceSheet || '').toLowerCase().trim();
-      if (cleanSheet && baseItem.sheetRowNumber) {
-        matchedIncoming = incomingSheetRowMap.get(`${cleanSheet}::r${baseItem.sheetRowNumber}`);
-      }
-    }
-
-    if (!matchedIncoming) {
-      // Keep this record (e.g. historical archive item, draft, or another sheet tab)
-      merged.push(baseItem);
-    }
-  });
-
-  return deduplicateAssessmentsList(merged);
+  // Combine both lists and deduplicate strictly by exact ID/row:
+  // - Preserves 100% of all existing records (no data loss if an incoming fetch returns fewer items)
+  // - Preserves all archive records without letting active sheets squash them
+  // - Merges photos, verification status, and timestamps non-destructively
+  return deduplicateAssessmentsList([...baseList, ...incomingList]);
 }
 
 /**

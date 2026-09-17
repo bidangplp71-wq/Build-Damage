@@ -928,16 +928,19 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
       // 1. Flush any pending offline queue submissions
       flushOfflineSyncQueue().catch(() => {});
 
-      // 2. Fetch latest surveys from server
+      // 2. Fetch latest surveys from server smoothly without re-rendering if unchanged
       fetch('/api/assessments')
         .then((res) => res.json())
         .then((data) => {
           if (data.success && Array.isArray(data.assessments) && data.assessments.length > 0) {
             setAssessments((prev) => {
-              const merged = reconcileAndMergeAssessments(prev, data.assessments);
-              if (merged.length === prev.length && JSON.stringify(merged) === JSON.stringify(prev)) {
-                return prev;
+              if (data.assessments.length === prev.length) {
+                const prevIdSet = new Set(prev.map((p) => p.id));
+                const hasNew = data.assessments.some((a: any) => a.id && !prevIdSet.has(a.id));
+                if (!hasNew) return prev;
               }
+              const merged = reconcileAndMergeAssessments(prev, data.assessments);
+              if (merged.length === prev.length) return prev;
               try {
                 localStorage.setItem(STORAGE_KEYS.ASSESSMENTS, JSON.stringify(merged));
               } catch {}
@@ -947,7 +950,7 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
         })
         .catch(() => {});
 
-      // 3. Poll latest google sheet config from server to ensure Super Admin updates propagate instantly to all surveyors
+      // 3. Poll latest google sheet config from server to ensure Super Admin updates propagate smoothly
       fetch('/api/config')
         .then((res) => res.json())
         .then((data) => {
@@ -955,7 +958,7 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
             const { spreadsheetUrl, webhookUrl, driveFolderId, spreadsheetProfiles, activeProfileId } = data.config;
             if (spreadsheetUrl) {
               setGoogleSheetConfig((prev) => {
-                if (prev.spreadsheetUrl !== spreadsheetUrl || prev.activeProfileId !== activeProfileId || JSON.stringify(prev.spreadsheetProfiles) !== JSON.stringify(spreadsheetProfiles)) {
+                if (prev.spreadsheetUrl !== spreadsheetUrl || prev.activeProfileId !== activeProfileId) {
                   const updated = {
                     ...prev,
                     spreadsheetUrl: spreadsheetUrl || prev.spreadsheetUrl,
@@ -975,7 +978,7 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
           }
         })
         .catch(() => {});
-    }, 8000);
+    }, 60 * 60 * 1000); // 1-Hour refresh cycle: keeps the system lightweight and calm without CPU/network saturation
     return () => {
       clearInterval(interval);
       window.removeEventListener('online', handleOnline);
@@ -3146,6 +3149,12 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
       try {
         localStorage.setItem(STORAGE_KEYS.ASSESSMENTS, JSON.stringify(merged));
         localStorage.setItem('sipandu_pupr_assessments_backup', JSON.stringify(merged));
+        // Persist to server as well so server data/assessments.json is kept complete
+        fetch('/api/assessments/sync-batch', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ assessments: merged }),
+        }).catch(() => {});
       } catch {}
       return merged;
     });
@@ -3828,7 +3837,7 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
       const onProgressStream = (prog: { currentKec: string; count: number; totalSoFar: number; step: number; totalSteps: number; partialData: BuildingAssessment[] }) => {
         if (!prog.partialData) return;
         
-        // Update live progress bar details
+        // Update live progress bar details strictly without altering table state mid-flight
         const calculatedPercent = Math.min(99, Math.round((prog.step / prog.totalSteps) * 100));
         setSheetSyncProgress((prev) => {
           const updatedKecs = prev.loadedKecamatans.map((k, idx) => {
@@ -3851,37 +3860,6 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
             loadedKecamatans: updatedKecs,
             statusMessage: `Sheet Kec. ${prog.currentKec} selesai dibaca (+${prog.count} baris). Melanjutkan ke sheet berikutnya...`,
           };
-        });
-
-        setAssessments((prev) => {
-          const prevPhotosMap = new Map<string, any[]>();
-          const prevDriveMap = new Map<string, string>();
-          prev.forEach((p) => {
-            if (p.id) {
-              if (p.photos && p.photos.length > 0) prevPhotosMap.set(p.id, p.photos);
-              if (p.googleDriveFolderUrl) prevDriveMap.set(p.id, p.googleDriveFolderUrl);
-            }
-          });
-
-          const streamedKeys = new Set<string>();
-          const updatedStream = prog.partialData.map((item) => {
-            if (item.id) streamedKeys.add(item.id);
-            if (item.code) streamedKeys.add(item.code);
-            return {
-              ...item,
-              photos: (item.photos && item.photos.length > 0) ? item.photos : (prevPhotosMap.get(item.id) || []),
-              googleDriveFolderUrl: item.googleDriveFolderUrl || prevDriveMap.get(item.id),
-            };
-          });
-
-          // Keep remaining un-fetched items so far so screen always shows maximum available data
-          prev.forEach((p) => {
-            if (p.id && !streamedKeys.has(p.id) && (!p.code || !streamedKeys.has(p.code))) {
-              updatedStream.push(p);
-            }
-          });
-
-          return updatedStream;
         });
       };
 
@@ -4180,7 +4158,7 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
     const hasWebhook = Boolean(googleSheetConfig.webhookUrl && googleSheetConfig.webhookUrl.startsWith('http'));
 
     if (hasSpreadsheet || hasWebhook) {
-      // 1. Initial Load: Run only once upon opening the application
+      // 1. Initial Load: Run only once upon opening the application smoothly
       if (!hasLoadedInitialGoogleSheetRef.current) {
         hasLoadedInitialGoogleSheetRef.current = true;
         lastSheetSyncTimestampRef.current = Date.now();
@@ -4188,17 +4166,17 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
         fetchUsersFromSheet();
       }
 
-      // 2. Periodic Background Sync (every 60 seconds) so new rows entered in Google Sheets appear automatically
-      const POLL_INTERVAL_MS = 60 * 1000;
+      // 2. 1-Hour Scheduled Auto-Refresh (60 menit) per user directive:
+      // Lightweight, prevents constant busy refreshing, preserves system stability
+      const ONE_HOUR_MS = 60 * 60 * 1000;
       const intervalId = setInterval(() => {
         const now = Date.now();
-        if (now - lastSheetSyncTimestampRef.current >= POLL_INTERVAL_MS) {
+        if (now - lastSheetSyncTimestampRef.current >= ONE_HOUR_MS) {
           lastSheetSyncTimestampRef.current = now;
-          clearGoogleSheetsMemoryCache();
-          syncFromGoogleSheet(false, true);
+          syncFromGoogleSheet(false, false);
           fetchUsersFromSheet();
         }
-      }, POLL_INTERVAL_MS);
+      }, ONE_HOUR_MS);
 
       return () => clearInterval(intervalId);
     }
