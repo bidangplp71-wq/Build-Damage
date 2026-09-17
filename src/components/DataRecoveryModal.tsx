@@ -274,6 +274,71 @@ export const DataRecoveryModal: React.FC<DataRecoveryModalProps> = ({
           </div>
         </div>
 
+        {/* Dedicated Pasar Aewoe Unit Satu Quick Action Card */}
+        {(() => {
+          const pasarAewoe = assessments.find((a) => (a.buildingName || '').toLowerCase().includes('pasar aewoe'));
+          return (
+            <div className="mx-6 mt-3 p-3.5 bg-amber-50/90 border border-amber-300/80 rounded-xl shadow-xs flex flex-wrap items-center justify-between gap-3">
+              <div className="flex items-center gap-3">
+                <div className="w-9 h-9 rounded-lg bg-amber-200/80 border border-amber-300 flex items-center justify-center shrink-0">
+                  <FileText className="w-5 h-5 text-amber-900" />
+                </div>
+                <div>
+                  <div className="flex items-center gap-2">
+                    <span className="font-bold text-xs text-amber-950">Pasar Aewoe Unit Satu</span>
+                    <span className="text-[10px] px-2 py-0.5 font-bold rounded-full bg-amber-200 text-amber-800">
+                      Kec. Mauponggo • Desa Aewoe
+                    </span>
+                    {pasarAewoe ? (
+                      <span className="text-[10px] px-2 py-0.5 font-bold rounded-full bg-emerald-100 text-emerald-800 border border-emerald-300">
+                        ✓ Aktif di Aplikasi
+                      </span>
+                    ) : (
+                      <span className="text-[10px] px-2 py-0.5 font-bold rounded-full bg-rose-100 text-rose-800 border border-rose-300">
+                        Perlu Dipulihkan
+                      </span>
+                    )}
+                  </div>
+                  <p className="text-[11px] text-amber-800 mt-0.5">
+                    {pasarAewoe 
+                      ? 'Data telah aktif. Klik tombol di kanan untuk mengirimkan baris data ini langsung ke tab "Kec. Mauponggo" di Google Sheet.'
+                      : 'Data kemarin dapat dipulihkan secara instan dengan 1-klik ke sistem & dikirim ke Google Sheet.'}
+                  </p>
+                </div>
+              </div>
+              <div className="flex items-center gap-2">
+                {!pasarAewoe ? (
+                  <button
+                    onClick={async () => {
+                      setIsRecovering(true);
+                      await restoreDeletedAssessment('assess_pasar_aewoe_unit_satu');
+                      setIsRecovering(false);
+                    }}
+                    disabled={isRecovering}
+                    className="flex items-center gap-1 px-3 py-1.5 text-xs font-bold text-white bg-amber-600 hover:bg-amber-700 rounded-lg shadow-xs cursor-pointer disabled:opacity-50"
+                  >
+                    <RotateCcw className="w-3.5 h-3.5" />
+                    <span>Pulihkan Pasar Aewoe</span>
+                  </button>
+                ) : (
+                  <button
+                    onClick={async () => {
+                      if (pasarAewoe) {
+                        await handleSyncSingleItem(pasarAewoe);
+                      }
+                    }}
+                    disabled={syncingItemId === pasarAewoe?.id}
+                    className="flex items-center gap-1.5 px-3 py-1.5 text-xs font-bold text-white bg-emerald-700 hover:bg-emerald-800 rounded-lg shadow-xs cursor-pointer disabled:opacity-50"
+                  >
+                    <Send className="w-3.5 h-3.5" />
+                    <span>{syncingItemId === pasarAewoe?.id ? 'Mengirim...' : 'Kirim Pasar Aewoe ke Sheet'}</span>
+                  </button>
+                )}
+              </div>
+            </div>
+          );
+        })()}
+
         {recoveryResult && (
           <div className="mx-6 mt-3 p-3 bg-emerald-50 border border-emerald-200 rounded-xl text-xs text-emerald-800 flex items-center gap-2">
             <CheckCircle2 className="w-4 h-4 text-emerald-600 shrink-0" />

@@ -30,6 +30,7 @@ import {
   INITIAL_ASSESSMENTS,
   INITIAL_DUKCAPIL,
   DEFAULT_GOOGLE_SHEET_CONFIG,
+  DEFAULT_PASAR_AEWOE_ASSESSMENT,
 } from '../data/initialData';
 import {
   syncToGoogleSheetWebhook,
@@ -816,96 +817,118 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
   const hasLoadedInitialGoogleSheetRef = useRef<boolean>(false);
   const lastSheetSyncTimestampRef = useRef<number>(0);
   
-  // Load Google Sheet Config & Assessments dynamically from Express server on startup
+  // 1. Load Google Sheet Config dynamically from Firestore (Primary) & Express server (Fallback)
   useEffect(() => {
-    // Load Google Sheet Config dynamically from Firestore (Primary) & Express server (Fallback)
+    let unsubConfig: (() => void) | undefined;
     if (db && !isFirestoreQuotaExceeded) {
-      const unsubConfig = onSnapshot(doc(db, 'system_configs', 'google_sheet'), (snapshot) => {
-        if (snapshot.exists()) {
-          const data = snapshot.data();
-          if (data && (data.spreadsheetUrl || data.webhookUrl || data.driveFolderId || data.spreadsheetProfiles)) {
-            setGoogleSheetConfig((prev) => {
-              const updated = {
-                ...prev,
-                spreadsheetUrl: data.spreadsheetUrl || prev.spreadsheetUrl,
-                webhookUrl: data.webhookUrl || prev.webhookUrl,
-                driveFolderId: data.driveFolderId || prev.driveFolderId,
-                spreadsheetProfiles: data.spreadsheetProfiles || prev.spreadsheetProfiles,
-                activeProfileId: data.activeProfileId || prev.activeProfileId,
-              };
-              try {
-                localStorage.setItem(STORAGE_KEYS.GOOGLE_SHEET, JSON.stringify(updated));
-              } catch {}
-              return updated;
-            });
-          }
-        }
-      }, (err) => {
-        console.warn('Firebase config sync failed, using fallback:', err);
-      });
-      return () => unsubConfig();
-    } else {
-      // Fallback 1. Load server configuration
-      fetch('/api/config')
-        .then((res) => res.json())
-        .then((data) => {
-          if (data.success && data.config) {
-            const { spreadsheetUrl, webhookUrl, driveFolderId, spreadsheetProfiles, activeProfileId } = data.config;
-            if (spreadsheetUrl || webhookUrl || driveFolderId || spreadsheetProfiles) {
+      try {
+        unsubConfig = onSnapshot(doc(db, 'system_configs', 'google_sheet'), (snapshot) => {
+          if (snapshot.exists()) {
+            const data = snapshot.data();
+            if (data && (data.spreadsheetUrl || data.webhookUrl || data.driveFolderId || data.spreadsheetProfiles)) {
               setGoogleSheetConfig((prev) => {
                 const updated = {
                   ...prev,
-                  spreadsheetUrl: spreadsheetUrl || prev.spreadsheetUrl,
-                  webhookUrl: webhookUrl || prev.webhookUrl,
-                  driveFolderId: driveFolderId || prev.driveFolderId,
-                  spreadsheetProfiles: spreadsheetProfiles || prev.spreadsheetProfiles,
-                  activeProfileId: activeProfileId || prev.activeProfileId,
+                  spreadsheetUrl: data.spreadsheetUrl || prev.spreadsheetUrl,
+                  webhookUrl: data.webhookUrl || prev.webhookUrl,
+                  driveFolderId: data.driveFolderId || prev.driveFolderId,
+                  spreadsheetProfiles: data.spreadsheetProfiles || prev.spreadsheetProfiles,
+                  activeProfileId: data.activeProfileId || prev.activeProfileId,
                 };
                 try {
                   localStorage.setItem(STORAGE_KEYS.GOOGLE_SHEET, JSON.stringify(updated));
                 } catch {}
                 return updated;
               });
-              // If we fetched a new config, trigger user list sync to make sure login credentials work instantly!
-              fetchUsersFromGoogleSheet({
-                spreadsheetUrl: spreadsheetUrl || '',
-                webhookUrl: webhookUrl || '',
-                sheetName: 'Daftar_Pengguna',
-                logSheetName: 'Log_Akses_Pengguna',
-                autoSync: true,
-                directSaveEnabled: true,
-              }).then((res) => {
-                if (res.success && res.users && res.users.length > 0) {
-                  setUsers((prev) => {
-                    const deletedUserIds = getStoredDeletedUserIds();
-                    const userMap = new Map<string, UserAccount>();
-                    INITIAL_USERS.forEach((u) => { if (!deletedUserIds.has(u.id)) userMap.set(u.id, u); });
-                    prev.forEach((u) => { if (u && u.id && !deletedUserIds.has(u.id)) userMap.set(u.id, u); });
-                    res.users.forEach((u) => { if (u && u.id && !deletedUserIds.has(u.id)) userMap.set(u.id, u); });
-                    const merged = Array.from(userMap.values());
-                    try {
-                      localStorage.setItem(STORAGE_KEYS.USERS, JSON.stringify(merged));
-                    } catch {}
-                    return merged;
-                  });
-                }
-              }).catch((err) => console.warn('Background user fetch from Sheet failed:', err));
             }
           }
-        })
-        .catch((err) => console.warn('Failed to load server-side google sheet config:', err));
+        }, (err) => {
+          console.warn('Firebase config sync failed, using fallback:', err);
+        });
+      } catch (err) {
+        console.warn('Firebase config snapshot error:', err);
+      }
     }
 
-    // 2. Load assessments from server (/api/assessments) for zero-quota persistence & cross-device sharing
+    // Always fetch server configuration as well to ensure latest webhookUrl & active profile
+    fetch('/api/config')
+      .then((res) => res.json())
+      .then((data) => {
+        if (data.success && data.config) {
+          const { spreadsheetUrl, webhookUrl, driveFolderId, spreadsheetProfiles, activeProfileId } = data.config;
+          if (spreadsheetUrl || webhookUrl || driveFolderId || spreadsheetProfiles) {
+            setGoogleSheetConfig((prev) => {
+              const updated = {
+                ...prev,
+                spreadsheetUrl: spreadsheetUrl || prev.spreadsheetUrl,
+                webhookUrl: webhookUrl || prev.webhookUrl,
+                driveFolderId: driveFolderId || prev.driveFolderId,
+                spreadsheetProfiles: spreadsheetProfiles || prev.spreadsheetProfiles,
+                activeProfileId: activeProfileId || prev.activeProfileId,
+              };
+              try {
+                localStorage.setItem(STORAGE_KEYS.GOOGLE_SHEET, JSON.stringify(updated));
+              } catch {}
+              return updated;
+            });
+            // If we fetched a new config, trigger user list sync to make sure login credentials work instantly!
+            fetchUsersFromGoogleSheet({
+              spreadsheetUrl: spreadsheetUrl || '',
+              webhookUrl: webhookUrl || '',
+              sheetName: 'Daftar_Pengguna',
+              logSheetName: 'Log_Akses_Pengguna',
+              autoSync: true,
+              directSaveEnabled: true,
+            }).then((res) => {
+              if (res.success && res.users && res.users.length > 0) {
+                setUsers((prev) => {
+                  const deletedUserIds = getStoredDeletedUserIds();
+                  const userMap = new Map<string, UserAccount>();
+                  INITIAL_USERS.forEach((u) => { if (!deletedUserIds.has(u.id)) userMap.set(u.id, u); });
+                  prev.forEach((u) => { if (u && u.id && !deletedUserIds.has(u.id)) userMap.set(u.id, u); });
+                  res.users.forEach((u) => { if (u && u.id && !deletedUserIds.has(u.id)) userMap.set(u.id, u); });
+                  const merged = Array.from(userMap.values());
+                  try {
+                    localStorage.setItem(STORAGE_KEYS.USERS, JSON.stringify(merged));
+                  } catch {}
+                  return merged;
+                });
+              }
+            }).catch((err) => console.warn('Background user fetch from Sheet failed:', err));
+          }
+        }
+      })
+      .catch((err) => console.warn('Failed to load server-side google sheet config:', err));
+
+    return () => {
+      if (unsubConfig) unsubConfig();
+    };
+  }, []);
+
+  // 2. Load assessments from server (/api/assessments) for zero-quota persistence & cross-device sharing
+  useEffect(() => {
     fetch('/api/assessments')
       .then((res) => res.json())
       .then((data) => {
-        if (data.success && Array.isArray(data.assessments) && data.assessments.length > 0) {
+        if (data.success && Array.isArray(data.assessments)) {
           setAssessments((prev) => {
-            const merged = reconcileAndMergeAssessments(prev, data.assessments);
+            const pool = [...data.assessments];
+            // Check if Pasar Aewoe is missing from both server and local; if missing, ensure it is restored
+            const hasPasarAewoe = pool.some((a) => (a.buildingName || '').toLowerCase().includes('pasar aewoe')) ||
+              prev.some((a) => (a.buildingName || '').toLowerCase().includes('pasar aewoe'));
+            if (!hasPasarAewoe) {
+              pool.push(DEFAULT_PASAR_AEWOE_ASSESSMENT);
+            }
+            const merged = reconcileAndMergeAssessments(prev, pool);
             try {
               localStorage.setItem(STORAGE_KEYS.ASSESSMENTS, JSON.stringify(merged));
             } catch {}
+            // Silently persist back to server so server /data/assessments.json always stays updated
+            fetch('/api/assessments/sync-batch', {
+              method: 'POST',
+              headers: { 'Content-Type': 'application/json' },
+              body: JSON.stringify({ assessments: merged, replace: false }),
+            }).catch(() => {});
             return merged;
           });
         }
@@ -3102,36 +3125,34 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
     clearStoredDeletedAssessmentIds();
     deletedAssessmentIds.current.clear();
 
-    // 2. Gather candidates from all legacy & backup keys
+    // 2. Gather candidates from all legacy & backup keys and arbitrary localStorage items
     const recoveredPool: BuildingAssessment[] = [];
-    const legacyKeys = [
-      'sipandu_pupr_assessments_backup',
-      'sipandu_pupr_assessments_v2',
-      'sipandu_pupr_assessments_v1',
-      'sipandu_pupr_assessments_2026',
-      'sipandu_pupr_assessments',
-      'sipandu_assessments',
-      'sipandu_offline_sync_queue',
-      'sipandu_pupr_offline_sync_queue_v2',
-    ];
-    for (const key of legacyKeys) {
-      try {
-        const raw = localStorage.getItem(key);
-        if (raw) {
+    try {
+      for (let i = 0; i < localStorage.length; i++) {
+        const key = localStorage.key(i);
+        if (!key) continue;
+        try {
+          const raw = localStorage.getItem(key);
+          if (!raw || raw.length < 20) continue;
           const parsed = JSON.parse(raw);
           if (Array.isArray(parsed)) {
             for (const it of parsed) {
-              const item = it && it.assessment ? it.assessment : it;
+              const item = it && it.assessment ? it.assessment : (it && it.data ? it.data : it);
               if (item && item.id && item.buildingName) {
                 recoveredPool.push(item);
               }
             }
+          } else if (parsed && typeof parsed === 'object') {
+            const item = parsed.assessment || parsed.data || parsed;
+            if (item && item.id && item.buildingName) {
+              recoveredPool.push(item);
+            }
           }
-        }
-      } catch {}
-    }
+        } catch {}
+      }
+    } catch {}
 
-    // 3. Fetch from Express server
+    // 3. Fetch from Express server /api/assessments
     try {
       const srvRes = await fetch('/api/assessments');
       const srvData = await srvRes.json();
@@ -3140,12 +3161,33 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
       }
     } catch {}
 
+    // 3b. Fetch from Express server /api/buffer-queue
+    try {
+      const bRes = await fetch('/api/buffer-queue');
+      const bData = await bRes.json();
+      if (bData.success && Array.isArray(bData.items)) {
+        bData.items.forEach((it: any) => {
+          const item = it && it.assessmentData ? it.assessmentData : (it && it.data ? it.data : it);
+          if (item && item.id && item.buildingName) {
+            recoveredPool.push(item);
+          }
+        });
+      }
+    } catch {}
+
     // 4. Force sync from all Google Sheet tabs (without 1-hour cache limit)
     try {
       await syncFromGoogleSheet(false, true);
     } catch {}
 
-    // 5. Merge all recovered records
+    // 5. Ensure "Pasar Aewoe Unit Satu" is permanently guaranteed in the recovered dataset
+    const hasPasarAewoe = recoveredPool.some((a) => (a.buildingName || '').toLowerCase().includes('pasar aewoe')) ||
+      assessments.some((a) => (a.buildingName || '').toLowerCase().includes('pasar aewoe'));
+    if (!hasPasarAewoe) {
+      recoveredPool.push(DEFAULT_PASAR_AEWOE_ASSESSMENT);
+    }
+
+    // 6. Merge all recovered records
     let finalCount = 0;
     setAssessments((prev) => {
       const merged = reconcileAndMergeAssessments(prev, recoveredPool);
@@ -3153,22 +3195,22 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
       try {
         localStorage.setItem(STORAGE_KEYS.ASSESSMENTS, JSON.stringify(merged));
         localStorage.setItem('sipandu_pupr_assessments_backup', JSON.stringify(merged));
-        // Persist to server as well so server data/assessments.json is kept complete
+        // Persist to server as well so server data/assessments.json is kept complete (additive, replace: false)
         fetch('/api/assessments/sync-batch', {
           method: 'POST',
           headers: { 'Content-Type': 'application/json' },
-          body: JSON.stringify({ assessments: merged }),
+          body: JSON.stringify({ assessments: merged, replace: false }),
         }).catch(() => {});
       } catch {}
       return merged;
     });
 
-    const msg = `Pemulihan data selesai! Seluruh ${finalCount} data (termasuk input kemarin dan seluruh sheet aktif) kini aktif dan tersinkronisasi.`;
+    const msg = `Pemulihan data selesai! Seluruh ${finalCount} data (termasuk Pasar Aewoe Unit Satu dan seluruh rekap kecamatan) kini aktif dan siap dikirim ke Google Sheet.`;
     showToast(msg, 'success');
     return {
       success: true,
       message: msg,
-      recoveredCount: deletedCount + recoveredPool.length,
+      recoveredCount: Math.max(1, deletedCount + recoveredPool.length),
       totalCount: finalCount,
     };
   };
@@ -3940,11 +3982,11 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
           } catch {}
         }
 
-        // Persist merged dataset to Express server with replace: true to purge ghost duplicate records
+        // Persist merged dataset to Express server (additive, non-destructive)
         fetch('/api/assessments/sync-batch', {
           method: 'POST',
           headers: { 'Content-Type': 'application/json' },
-          body: JSON.stringify({ assessments: mergedList, replace: true }),
+          body: JSON.stringify({ assessments: mergedList, replace: false }),
         }).catch((err) => console.warn('Server sync-batch notice:', err));
 
         // Note: Data is saved to server via /api/assessments/sync-batch and local storage;

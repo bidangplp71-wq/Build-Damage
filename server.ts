@@ -257,6 +257,15 @@ app.get('/api/assessments', (req, res) => {
   }
 });
 
+// Default Google Apps Script Webhook URL
+const DEFAULT_WEBHOOK_URL = 'https://script.google.com/macros/s/AKfycbyAbubspPnACJi6KTODHJbVeAIppC6e72c8nAo__g8uc67GmY-wc1lOZWZkbLtieds/exec';
+
+function extractSpreadsheetId(url?: string): string | null {
+  if (!url) return null;
+  const match = url.match(/\/spreadsheets\/d\/([a-zA-Z0-9-_]+)/);
+  return match ? match[1] : null;
+}
+
 // Helper to forward assessment to Google Apps Script Webhook automatically from server
 async function forwardAssessmentToGoogleSheet(
   assessment: any,
@@ -266,7 +275,7 @@ async function forwardAssessmentToGoogleSheet(
 ) {
   try {
     const config = customConfig || getGoogleSheetConfig();
-    const webhookUrl = config.webhookUrl;
+    const webhookUrl = (config.webhookUrl && config.webhookUrl.startsWith('http')) ? config.webhookUrl : DEFAULT_WEBHOOK_URL;
     if (!webhookUrl || !webhookUrl.startsWith('http')) return { success: false, message: 'URL Webhook belum diatur' };
 
     const ownerName = assessment.namaPemilikRumah || assessment.namaPemilikGedung || assessment.ownerAgency || '-';
@@ -348,6 +357,7 @@ async function forwardAssessmentToGoogleSheet(
     };
 
     const isExplicit = Boolean(explicitTargetSheetName && explicitTargetSheetName.trim());
+    const spreadsheetId = extractSpreadsheetId(config.spreadsheetUrl) || undefined;
     const payload = {
       action,
       sheetName: explicitTargetSheetName || config.sheetName || 'REKAP_SEMUA_KECAMATAN',
@@ -358,7 +368,8 @@ async function forwardAssessmentToGoogleSheet(
       kecamatanName: assessment.kecamatanName,
       splitByKecamatan: isExplicit ? false : (config.splitByKecamatan !== false),
       includeMasterSummary: isExplicit ? false : (config.includeMasterSummarySheet !== false),
-      spreadsheetUrl: config.spreadsheetUrl,
+      spreadsheetUrl: config.spreadsheetUrl || '',
+      spreadsheetId,
       registrationCode: assessment.code || assessment.id,
       previousRegistrationCode: assessment.code || assessment.id,
       data: rowData,
@@ -415,6 +426,155 @@ app.post('/api/google-sheet/sync', async (req, res) => {
     return res.json(result);
   } catch (err: any) {
     return res.status(500).json({ success: false, message: err?.message || 'Internal server error' });
+  }
+});
+
+// POST /api/google-sheet/sync-all - Proxy endpoint to execute bulk Google Sheet sync to all Kecamatan tabs
+app.post('/api/google-sheet/sync-all', async (req, res) => {
+  try {
+    const { assessments, config: clientConfig } = req.body;
+    if (!Array.isArray(assessments)) {
+      return res.status(400).json({ success: false, message: 'Array assessments diperlukan' });
+    }
+
+    const config = clientConfig || getGoogleSheetConfig();
+    const webhookUrl = (config.webhookUrl && config.webhookUrl.startsWith('http')) ? config.webhookUrl : DEFAULT_WEBHOOK_URL;
+
+    if (!webhookUrl) {
+      return res.status(400).json({ success: false, message: 'URL Webhook Google Apps Script belum diatur.' });
+    }
+
+    const spreadsheetId = extractSpreadsheetId(config.spreadsheetUrl) || undefined;
+
+    // Group by kecamatan and format
+    const dataByKecamatan: Record<string, any[]> = {};
+    const rows: any[] = [];
+
+    for (const item of assessments) {
+      if (!item || !item.buildingName) continue;
+      const kecName = item.kecamatanName || 'Lainnya';
+      const tabName = `Kec. ${kecName}`.replace(/[:\\/?*\[\]]/g, '').trim().substring(0, 30);
+
+      const compMap: Record<string, number> = {};
+      if (item.components && Array.isArray(item.components)) {
+        item.components.forEach((c: any) => {
+          if (c && c.id) compMap[c.id] = c.damagePercentInput || 0;
+        });
+      }
+
+      const ownerName = item.namaPemilikRumah || item.namaPemilikGedung || item.ownerAgency || '-';
+      const rowData = {
+        'No Registrasi': item.code || item.id,
+        'Nama Bangunan': item.buildingName,
+        'Kategori / Fungsi Bangunan': item.buildingCategory || 'Gedung Pemerintah',
+        'Jenis Bencana': item.disasterType || 'Gempa Bumi',
+        'Tanggal Bencana': item.disasterDate || '',
+        'Tanggal Penilaian': item.assessmentDate || '',
+        'Pengguna / Pemilik': ownerName,
+        'Nama Pemilik Rumah': item.namaPemilikRumah || '-',
+        'Nama Pemilik Gedung': item.namaPemilikGedung || '-',
+        'NIK Pemilik': item.nikPemilik || '0',
+        'No KK Pemilik': item.noKkPemilik || '0',
+        'Dinas Teknis': item.responsibleDepartment || '',
+        'Kelas Bangunan': item.buildingClass || '',
+        'Kecamatan': item.kecamatanName || '',
+        'Desa / Kelurahan': item.desaName || '',
+        'Alamat Lengkap': item.detailedAddress || '',
+        'Luas Lantai (M2)': item.totalFloorAreaM2 || 0,
+        'Jumlah Tingkat': item.numberOfFloors || 1,
+        'Tahun Dibangun': item.yearBuilt || 2020,
+        'Tingkat Kerusakan (%)': item.totalDamagePercent || 0,
+        'Klasifikasi Kerusakan': item.damageClassification || 'Rusak Ringan',
+        'Pondasi (%)': compMap['pondasi_1'] ?? 0,
+        'Kolom & Balok (%)': compMap['struktur_kolom_balok'] ?? 0,
+        'Struktur Plesteran (%)': compMap['struktur_plesteran'] ?? 0,
+        'Atap Kuda-kuda (%)': compMap['atap_kuda_kuda'] ?? 0,
+        'Atap Gording (%)': compMap['atap_gording'] ?? 0,
+        'Atap Penutup (%)': compMap['atap_penutup'] ?? 0,
+        'Rangka Langit (%)': compMap['langit_rangka'] ?? 0,
+        'Penutup Langit (%)': compMap['langit_penutup'] ?? 0,
+        'Dinding Bata (%)': compMap['dinding_bata'] ?? 0,
+        'Dinding Plesteran (%)': compMap['dinding_plesteran'] ?? 0,
+        'Dinding Kaca (%)': compMap['dinding_kaca'] ?? 0,
+        'Dinding Pintu (%)': compMap['dinding_pintu'] ?? 0,
+        'Dinding Kosen (%)': compMap['dinding_kosen'] ?? 0,
+        'Penutup Lantai (%)': compMap['lantai_penutup'] ?? 0,
+        'Instalasi Listrik (%)': compMap['utilitas_listrik'] ?? 0,
+        'Instalasi Air (%)': compMap['utilitas_air'] ?? 0,
+        'Drainase Limbah (%)': compMap['utilitas_drainase'] ?? 0,
+        'Cat Struktur (%)': compMap['finishing_struktur'] ?? 0,
+        'Cat Langit (%)': compMap['finishing_langit'] ?? 0,
+        'Cat Dinding (%)': compMap['finishing_dinding'] ?? 0,
+        'Cat Kosen Pintu (%)': compMap['finishing_kosen_pintu'] ?? 0,
+        'HSBGN / M2 (Rp)': item.hsbgnPerM2 || 0,
+        'Biaya Perawatan / M2 (Rp)': item.treatmentCostPerM2 || 0,
+        'Biaya Bongkaran / M2 (Rp)': item.demolitionCostPerM2 || 0,
+        'Total Biaya / M2 (Rp)': item.totalCostPerM2 || 0,
+        'Ajuan Biaya Rehab (Rp)': item.roundedRehabCost || 0,
+        'Format Rupiah': 'Rp ' + Number(item.roundedRehabCost || 0).toLocaleString('id-ID'),
+        'Terbilang': item.costTerbilang || '',
+        'Link Folder G-Drive (Backup Foto)': item.backupDriveUrl || '-',
+        'Status Verifikasi': item.verificationStatus || 'Menunggu Verifikasi',
+        'Diverifikasi Oleh': item.verifiedBy || '-',
+        'Tanggal Verifikasi': item.verifiedAt ? new Date(item.verifiedAt).toLocaleDateString('id-ID') : '-',
+        'Catatan Verifikator': item.verificationNotes || '-',
+        'Jumlah Foto Kerusakan': Array.isArray(item.photos) ? item.photos.length : 0,
+        'Link Folder Foto Google Drive': item.googleDriveFolderUrl || '-',
+        'Surveyor / Petugas': item.createdByName || '-',
+        'Kota Laporan': item.cityLocation || '',
+        'Nama Kepala Dinas': item.headOfDepartment?.name || '-',
+        'NIP Kepala Dinas': item.headOfDepartment?.nip || '-',
+        'Tim Analisis': Array.isArray(item.analysisTeam) ? item.analysisTeam.join(', ') : '-',
+        'Terakhir Diperbarui': new Date(item.updatedAt || Date.now()).toLocaleString('id-ID'),
+      };
+
+      rows.push(rowData);
+      if (!dataByKecamatan[tabName]) {
+        dataByKecamatan[tabName] = [];
+      }
+      dataByKecamatan[tabName].push(rowData);
+    }
+
+    const payload = {
+      action: 'sync_all',
+      sheetName: config.sheetName || 'REKAP_SEMUA_KECAMATAN',
+      splitByKecamatan: config.splitByKecamatan !== false,
+      includeMasterSummary: config.includeMasterSummarySheet !== false,
+      spreadsheetUrl: config.spreadsheetUrl || '',
+      spreadsheetId,
+      data: rows,
+      dataByKecamatan,
+      timestamp: new Date().toISOString(),
+    };
+
+    const resp = await fetch(webhookUrl, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify(payload),
+    });
+
+    const responseText = await resp.text();
+    let responseJson: any = null;
+    try {
+      responseJson = JSON.parse(responseText);
+    } catch {
+      responseJson = { status: resp.ok ? 'success' : 'error', message: responseText };
+    }
+
+    if (responseJson.status === 'error') {
+      return res.status(502).json({ success: false, message: responseJson.message || 'Google Apps Script mengembalikan status galat.' });
+    }
+
+    return res.json({
+      success: true,
+      count: rows.length,
+      kecamatanCount: Object.keys(dataByKecamatan).length,
+      message: responseJson.message || `Berhasil menyinkronkan ${rows.length} data ke Google Sheet!`,
+      details: responseJson,
+    });
+  } catch (err: any) {
+    console.error('[Server -> GoogleSheet SyncAll] Error:', err);
+    return res.status(500).json({ success: false, message: err?.message || 'Gagal terhubung ke Google Apps Script Webhook' });
   }
 });
 
@@ -1022,7 +1182,7 @@ function getGoogleSheetConfig() {
       const parsed = JSON.parse(data);
       return {
         spreadsheetUrl: parsed.spreadsheetUrl || process.env.VITE_SPREADSHEET_URL || '',
-        webhookUrl: parsed.webhookUrl || process.env.VITE_WEBHOOK_URL || '',
+        webhookUrl: parsed.webhookUrl || process.env.VITE_WEBHOOK_URL || DEFAULT_WEBHOOK_URL,
         driveFolderId: parsed.driveFolderId || process.env.VITE_DRIVE_FOLDER_ID || 'https://drive.google.com/drive/folders/1xKF8SYvNY97A9-ga0B42z3jQTbcC_Tk5?usp=sharing',
         sheetName: parsed.sheetName || 'REKAP_SEMUA_KECAMATAN',
         splitByKecamatan: parsed.splitByKecamatan !== false,
@@ -1047,7 +1207,7 @@ function getGoogleSheetConfig() {
   }
   return {
     spreadsheetUrl: process.env.VITE_SPREADSHEET_URL || '',
-    webhookUrl: process.env.VITE_WEBHOOK_URL || '',
+    webhookUrl: process.env.VITE_WEBHOOK_URL || DEFAULT_WEBHOOK_URL,
     driveFolderId: process.env.VITE_DRIVE_FOLDER_ID || 'https://drive.google.com/drive/folders/1xKF8SYvNY97A9-ga0B42z3jQTbcC_Tk5?usp=sharing',
     sheetName: 'REKAP_SEMUA_KECAMATAN',
     splitByKecamatan: true,

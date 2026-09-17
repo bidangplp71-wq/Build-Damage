@@ -575,11 +575,43 @@ export async function syncAllToGoogleSheet(
     dataByKecamatan[tabName] = items.map(formatAssessmentForGoogleSheet);
   }
 
+  const spreadsheetId = extractSpreadsheetId(config.spreadsheetUrl) || undefined;
+
+  // 1. Try sending via backend proxy first to avoid CORS and get exact delivery status
+  try {
+    const proxyResp = await fetch('/api/google-sheet/sync-all', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({
+        assessments,
+        config,
+      }),
+    });
+    if (proxyResp.ok) {
+      const proxyData = await proxyResp.json();
+      if (proxyData && proxyData.success) {
+        const kecCount = Object.keys(dataByKecamatan).length;
+        return {
+          success: true,
+          message: proxyData.message || `Berhasil sinkronisasi ${assessments.length} data penilaian ke Google Sheet (Terbagi dalam ${kecCount} Sheet Kecamatan)!`,
+          syncedCount: assessments.length,
+        };
+      } else if (proxyData && proxyData.success === false) {
+        console.warn('Backend sync-all reported error:', proxyData.message);
+      }
+    }
+  } catch (backendErr) {
+    console.warn('Backend /api/google-sheet/sync-all unreachable, trying direct webhook:', backendErr);
+  }
+
+  // 2. Direct browser fetch as fallback
   const payload: GoogleSheetRowPayload = {
     action: 'sync_all',
     sheetName: config.sheetName || 'Rekap_Semua_Kecamatan',
     splitByKecamatan: config.splitByKecamatan !== false,
     includeMasterSummary: config.includeMasterSummarySheet !== false,
+    spreadsheetUrl: config.spreadsheetUrl || '',
+    spreadsheetId,
     data: rows,
     dataByKecamatan,
     timestamp: new Date().toISOString(),
@@ -598,7 +630,7 @@ export async function syncAllToGoogleSheet(
     const kecCount = Object.keys(dataByKecamatan).length;
     return {
       success: true,
-      message: `Berhasil sinkronisasi ${assessments.length} data penilaian ke Google Sheet (Terbagi dalam ${kecCount} Sheet Kecamatan + Sheet Rekap Master)!`,
+      message: `Berhasil mengirim ${assessments.length} data penilaian ke Google Sheet (Terbagi dalam ${kecCount} Sheet Kecamatan + Sheet Rekap Master)!`,
       syncedCount: assessments.length,
     };
   } catch (err: any) {
@@ -652,9 +684,14 @@ function doPost(e) {
     var masterSheetName = json.sheetName || "Data_Penilaian_Kerusakan_PUPR";
     
     var ss;
-    if (json.spreadsheetId) {
+    var targetId = json.spreadsheetId;
+    if (!targetId && json.spreadsheetUrl) {
+      var m = json.spreadsheetUrl.match(/\/spreadsheets\/d\/([a-zA-Z0-9-_]+)/);
+      if (m && m[1]) targetId = m[1];
+    }
+    if (targetId) {
       try {
-        ss = SpreadsheetApp.openById(json.spreadsheetId);
+        ss = SpreadsheetApp.openById(targetId);
       } catch (err) {
         ss = SpreadsheetApp.getActiveSpreadsheet();
       }
