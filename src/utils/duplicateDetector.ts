@@ -218,8 +218,9 @@ export function detectAllDuplicateGroups(
  */
 export function isArchiveSource(sourceName?: string | null): boolean {
   if (!sourceName) return false;
-  const lower = sourceName.toLowerCase();
-  return (
+  const trimmed = sourceName.trim();
+  const lower = trimmed.toLowerCase();
+  if (
     lower.includes('arsip') ||
     lower.includes('archive') ||
     lower.includes('lama') ||
@@ -230,8 +231,18 @@ export function isArchiveSource(sourceName?: string | null): boolean {
     lower.includes('2023') ||
     lower.includes('2024') ||
     lower.includes('2025') ||
-    lower.includes('buku_arsip')
-  );
+    lower.includes('buku_arsip') ||
+    lower.includes('riwayat')
+  ) {
+    return true;
+  }
+
+  // Format tab lama tanpa titik (e.g. "Kec Aesesa", "Kec Boawae", dsb.) sedangkan standar aktif SIM-PKBG menggunakan titik: "Kec. <Nama>"
+  if (/^kec\s+[a-z]/i.test(trimmed) && !/^kec\.\s*/i.test(trimmed)) {
+    return true;
+  }
+
+  return false;
 }
 
 /**

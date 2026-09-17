@@ -263,17 +263,37 @@ export const AssessmentTable: React.FC = () => {
     setCurrentPage(1);
   };
 
-  // Distinct source sheets across all assessments
-  const distinctSourceSheets = useMemo(() => {
+  // Distinct source sheets and categorization into active vs archive with item counts
+  const { distinctSourceSheets, activeSheets, archiveSheets, sheetCounts } = useMemo(() => {
     const set = new Set<string>();
+    const counts: Record<string, number> = {};
+
     assessments.forEach((a) => {
-      if (a.sourceSheet && a.sourceSheet.trim()) {
-        set.add(a.sourceSheet.trim());
-      } else if (a.targetSheetName && a.targetSheetName.trim()) {
-        set.add(a.targetSheetName.trim());
+      const sheetName = (a.sourceSheet || a.targetSheetName || (a.kecamatanName ? `Kec. ${a.kecamatanName}` : '')).trim();
+      if (sheetName) {
+        set.add(sheetName);
+        counts[sheetName] = (counts[sheetName] || 0) + 1;
       }
     });
-    return Array.from(set).sort();
+
+    const sortedAll = Array.from(set).sort((a, b) => a.localeCompare('id'));
+    const active: string[] = [];
+    const archive: string[] = [];
+
+    sortedAll.forEach((sheet) => {
+      if (isArchiveSource(sheet)) {
+        archive.push(sheet);
+      } else {
+        active.push(sheet);
+      }
+    });
+
+    return {
+      distinctSourceSheets: sortedAll,
+      activeSheets: active,
+      archiveSheets: archive,
+      sheetCounts: counts,
+    };
   }, [assessments]);
 
   // Filtered Assessments with flexible matching and newest-first sort
@@ -342,13 +362,13 @@ export const AssessmentTable: React.FC = () => {
 
         // Asal Sheet / Arsip Filter
         if (selectedSourceFilter && selectedSourceFilter !== 'ALL') {
+          const itemSheet = (item.sourceSheet || item.targetSheetName || (item.kecamatanName ? `Kec. ${item.kecamatanName}` : '')).trim();
           if (selectedSourceFilter === 'ACTIVE_ONLY') {
-            if (isArchiveSource(item.sourceSheet)) return false;
+            if (isArchiveSource(itemSheet)) return false;
           } else if (selectedSourceFilter === 'ARCHIVE_ONLY') {
-            if (!isArchiveSource(item.sourceSheet)) return false;
+            if (!isArchiveSource(itemSheet)) return false;
           } else {
-            const sheet = item.sourceSheet || item.targetSheetName || `Kec. ${item.kecamatanName}`;
-            if (sheet !== selectedSourceFilter) return false;
+            if (itemSheet !== selectedSourceFilter) return false;
           }
         }
 
@@ -1127,25 +1147,47 @@ export const AssessmentTable: React.FC = () => {
               <option value="Ditolak">Ditolak</option>
             </select>
 
-            {/* Filter Asal Sheet / Arsip */}
+            {/* Filter Asal Sheet / Arsip (Dropdown Bertingkat: Sheet Aktif vs Sheet Data Lama) */}
             <select
+              id="filter-source-sheet"
               value={selectedSourceFilter}
               onChange={(e) => {
                 setSelectedSourceFilter(e.target.value);
                 setCurrentPage(1);
               }}
-              className="px-2.5 py-1.5 text-xs rounded-lg border border-slate-200 bg-white font-medium text-slate-700"
+              className="px-2.5 py-1.5 text-xs rounded-lg border border-slate-200 bg-white font-medium text-slate-700 max-w-[260px] truncate cursor-pointer shadow-2xs"
+              title="Pilih Asal Tab Sheet atau Arsip"
             >
-              <option value="ALL">Semua Asal Sheet / Arsip</option>
-              <option value="ACTIVE_ONLY">🟢 Hanya Data Aktif (Bukan Arsip)</option>
-              <option value="ARCHIVE_ONLY">📁 Hanya Data Arsip Lama (Read-Only)</option>
-              {distinctSourceSheets.length > 0 && (
-                <optgroup label="Spesifik Nama Sheet/Tab">
-                  {distinctSourceSheets.map((sheet) => (
-                    <option key={sheet} value={sheet}>
-                      {isArchiveSource(sheet) ? `📁 [Arsip] ${sheet}` : `📊 ${sheet}`}
-                    </option>
-                  ))}
+              <option value="ALL">Semua Asal Sheet / Arsip ({assessments.length} Data)</option>
+
+              <optgroup label="── 📌 KELOMPOK FILTER UTAMA ──">
+                <option value="ACTIVE_ONLY">🟢 Hanya Semua Data Aktif (Bukan Arsip)</option>
+                <option value="ARCHIVE_ONLY">📁 Hanya Semua Data Arsip Lama (Read-Only)</option>
+              </optgroup>
+
+              {activeSheets.length > 0 && (
+                <optgroup label="── 🟢 TAB SHEET AKTIF (OPERASIONAL) ──">
+                  {activeSheets.map((sheet) => {
+                    const count = sheetCounts[sheet] || 0;
+                    return (
+                      <option key={sheet} value={sheet}>
+                        🟢 {sheet} [Sheet Aktif] ({count} data)
+                      </option>
+                    );
+                  })}
+                </optgroup>
+              )}
+
+              {archiveSheets.length > 0 && (
+                <optgroup label="── 📁 TAB SHEET DATA LAMA / ARSIP (READ-ONLY) ──">
+                  {archiveSheets.map((sheet) => {
+                    const count = sheetCounts[sheet] || 0;
+                    return (
+                      <option key={sheet} value={sheet}>
+                        📁 {sheet} [Data Lama / Arsip] ({count} data)
+                      </option>
+                    );
+                  })}
                 </optgroup>
               )}
             </select>

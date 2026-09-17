@@ -20,6 +20,7 @@ import {
 } from 'lucide-react';
 import { BuildingPhotoGallery } from './BuildingPhotoGallery';
 import { syncAssessmentPhotosToDrive } from '../services/googleSheetsService';
+import { isArchiveSource } from '../utils/duplicateDetector';
 
 interface Props {
   assessment: BuildingAssessment;
@@ -392,11 +393,20 @@ export const AssessmentDetailModal: React.FC<Props> = ({ assessment, onClose }) 
                 </div>
                 <div className="grid grid-cols-3">
                   <span className="font-semibold text-slate-600">Asal Tab Sheet</span>
-                  <span className="col-span-2 font-medium text-blue-900 flex flex-wrap items-center gap-1.5">
-                    : <span className="bg-blue-50 text-blue-900 border border-blue-200 px-1.5 py-0.5 rounded text-[11px] font-bold inline-flex items-center gap-1">
-                      <FileSpreadsheet className="w-3 h-3 text-blue-600" />
-                      <span>{assessment.sourceSheet || `Kec. ${assessment.kecamatanName}`}</span>
-                    </span>
+                  <span className="col-span-2 font-medium text-slate-900 flex flex-wrap items-center gap-1.5">
+                    : {isArchiveSource(assessment.sourceSheet || assessment.targetSheetName) ? (
+                      <span className="bg-amber-100 text-amber-950 border border-amber-300 px-1.5 py-0.5 rounded text-[11px] font-bold inline-flex items-center gap-1 shadow-2xs">
+                        <Folder className="w-3 h-3 text-amber-700" />
+                        <span>{assessment.sourceSheet || assessment.targetSheetName}</span>
+                        <span className="bg-amber-200 text-amber-900 px-1 rounded text-[9px] font-semibold">Data Lama / Arsip (Read-Only)</span>
+                      </span>
+                    ) : (
+                      <span className="bg-emerald-50 text-emerald-950 border border-emerald-300 px-1.5 py-0.5 rounded text-[11px] font-bold inline-flex items-center gap-1">
+                        <FileSpreadsheet className="w-3 h-3 text-emerald-600" />
+                        <span>{assessment.sourceSheet || assessment.targetSheetName || `Kec. ${assessment.kecamatanName}`}</span>
+                        <span className="bg-emerald-100 text-emerald-800 px-1 rounded text-[9px] font-semibold">Sheet Aktif</span>
+                      </span>
+                    )}
                     {assessment.sheetRowNumber && (
                       <span className="text-[11px] font-mono text-slate-600 bg-slate-100 px-1 rounded">
                         Baris #{assessment.sheetRowNumber}
