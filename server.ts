@@ -398,8 +398,49 @@ async function forwardAssessmentToGoogleSheet(
     }
 
     if (responseJson.status === 'error') {
-      console.warn(`[Server -> GoogleSheet] Google Apps Script error for "${assessment.buildingName}":`, responseJson.message);
-      return { success: false, message: responseJson.message };
+      const errMsg = String(responseJson.message || '');
+      console.warn(`[Server -> GoogleSheet] Google Apps Script notice for "${assessment.buildingName}":`, errMsg);
+
+      // If document is too large / out of cells, try ultra-light single-tab fallback
+      if (errMsg.includes('grown too large') || errMsg.includes('cannot be modified')) {
+        try {
+          const lightweightPayload = {
+            action,
+            targetSheetName,
+            splitByKecamatan: false,
+            includeMasterSummary: false,
+            spreadsheetUrl: config.spreadsheetUrl || '',
+            spreadsheetId,
+            registrationCode: assessment.code || assessment.id,
+            buildingName: assessment.buildingName,
+            data: rowData,
+            savePhotosToDrive: false,
+            timestamp: new Date().toISOString(),
+          };
+
+          const fallbackResp = await fetch(webhookUrl, {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify(lightweightPayload),
+          });
+          const fbText = await fallbackResp.text();
+          let fbJson: any = null;
+          try { fbJson = JSON.parse(fbText); } catch { fbJson = { status: fallbackResp.ok ? 'success' : 'error', message: fbText }; }
+          
+          if (fbJson.status === 'success') {
+            console.info(`[Server -> GoogleSheet] Lightweight fallback sync succeeded for "${assessment.buildingName}"`);
+            return { success: true, message: fbJson.message || 'Berhasil disimpan melalui mode hemat kapasitas' };
+          }
+        } catch {}
+
+        return {
+          success: false,
+          isDocumentTooLarge: true,
+          message: 'Google Spreadsheet tujuan penuh / melebihi batas kapasitas Google Sheets ("The document cannot be modified. Perhaps it has grown too large?"). Silakan buka Google Sheet dan hapus baris-baris kosong berlebih di bawah tabel, atau gunakan Buku 2 (Spreadsheet Baru) di menu Pengaturan.',
+        };
+      }
+
+      return { success: false, message: errMsg };
     }
 
     console.info(`[Server -> GoogleSheet] Synced "${assessment.buildingName}" (action: ${action}, target: ${targetSheetName}, status: ${resp.status})`);

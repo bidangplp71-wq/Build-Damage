@@ -984,7 +984,18 @@ function getOrCreateSheet(ss, name) {
   var found = findSheetByNameFuzzy(ss, name);
   if (found) return found;
   var cleanName = (name || 'Sheet').replace(/[^a-zA-Z0-9 _-]/g, '').trim().substring(0, 30) || 'Sheet1';
-  return ss.insertSheet(cleanName);
+  var newSheet = ss.insertSheet(cleanName);
+  
+  // Pangkas baris dan kolom kosong bawaan (1000 baris default dipangkas ke 25 baris)
+  // agar kapasitas spreadsheet hemat dan tidak pernah menyentuh batas Google Sheets
+  try {
+    var maxR = newSheet.getMaxRows();
+    if (maxR > 25) {
+      newSheet.deleteRows(26, maxR - 25);
+    }
+  } catch(e) {}
+  
+  return newSheet;
 }
 
 /**
