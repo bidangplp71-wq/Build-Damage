@@ -30,6 +30,7 @@ import {
   INITIAL_ASSESSMENTS,
   INITIAL_DUKCAPIL,
   DEFAULT_GOOGLE_SHEET_CONFIG,
+  DEFAULT_PASAR_AEWOE_ASSESSMENT,
 } from '../data/initialData';
 import {
   syncToGoogleSheetWebhook,

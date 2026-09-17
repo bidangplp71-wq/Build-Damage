@@ -333,7 +333,7 @@ export async function directSaveToGoogleSheet(
   const chosenTab = explicitTargetSheetName?.trim() || assessment.targetSheetName?.trim() || assessment.sourceSheet?.trim();
   const kecSheetName = chosenTab
     ? sanitizeSheetName(chosenTab)
-    : sanitizeSheetName(`Kec. ${hydratedAssessment.kecamatanName || 'Lainnya'}`);
+    : sanitizeSheetName(`Kec. ${hydratedAssessment.kecamatanName || 'Aesesa'}`);
   const cleanFolderId = extractDriveFolderId(config.driveFolderId);
 
   // Extract sheet row number if ID contains _r(\d+)
@@ -3016,14 +3016,17 @@ export async function fetchAssessmentsFromGoogleSheet(
   const isExcludedRekapSheet = (name: string): boolean => {
     if (!name) return false;
     const clean = name.trim().toUpperCase().replace(/[\s_-]+/g, '_');
-    // Only exclude purely administrative non-assessment metadata tabs
+    // Exclude administrative non-assessment metadata tabs and unwanted 'Kec Lainnya' tabs
     if (
       clean === 'PENGGUNA' ||
       clean === 'DAFTAR_PENGGUNA' ||
       clean === 'LOG_PENGGUNA' ||
       clean === 'LOG_AKTIVITAS' ||
       clean === 'REFERENSI_WILAYAH' ||
-      clean === 'RINGKASAN_EKSEKUTIF'
+      clean === 'RINGKASAN_EKSEKUTIF' ||
+      clean === 'KEC_LAINNYA' ||
+      clean === 'LAINNYA' ||
+      clean === 'KEC_LAIN'
     ) {
       return true;
     }
