@@ -1677,11 +1677,14 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
       }
     } catch {}
 
-    if (db) {
+    if (db && !isFirestoreQuotaExceeded) {
       const cleanU = JSON.parse(JSON.stringify(newUser));
       setDoc(doc(db, 'users', cleanU.id), cleanU).catch((err) => {
-        if (isQuotaError(err)) setIsFirestoreQuotaExceeded(true);
-        console.warn('Firebase setDoc user failed:', err);
+        if (isQuotaError(err)) {
+          setIsFirestoreQuotaExceeded(true);
+          pauseFirestoreNetwork().catch(() => {});
+        }
+        console.warn('Firebase setDoc user failed:', err?.message || err);
       });
     }
 
@@ -1732,10 +1735,13 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
     const { plainPassword, ...restData } = userData;
 
     const updatedUserObj = { ...target, ...restData };
-    if (db) {
+    if (db && !isFirestoreQuotaExceeded) {
       const cleanU = JSON.parse(JSON.stringify(updatedUserObj));
       setDoc(doc(db, 'users', id), cleanU, { merge: true }).catch((err) => {
-        if (isQuotaError(err)) setIsFirestoreQuotaExceeded(true);
+        if (isQuotaError(err)) {
+          setIsFirestoreQuotaExceeded(true);
+          pauseFirestoreNetwork().catch(() => {});
+        }
       });
     }
 
@@ -2166,7 +2172,7 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
 
   // Real-time Firestore Active Sessions Listener (works seamlessly on Cloudflare Pages & Static hosting)
   useEffect(() => {
-    if (!db) return;
+    if (!db || isFirestoreQuotaExceeded) return;
 
     const unsubscribe = onSnapshot(
       collection(db, 'active_sessions'),
@@ -2179,7 +2185,7 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
           // Active if heartbeat was within last 3 minutes (180,000 ms)
           if (data && data.lastHeartbeat && now - data.lastHeartbeat < 180000) {
             activeList.push(data);
-          } else if (data && data.sessionId) {
+          } else if (data && data.sessionId && !isFirestoreQuotaExceeded) {
             // Prune stale session silently
             deleteDoc(doc(db, 'active_sessions', data.sessionId)).catch(() => {});
           }
@@ -2239,12 +2245,16 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
         setIsSurveyorQuotaBlocked(isBlocked);
       },
       (err) => {
+        if (isQuotaError(err)) {
+          setIsFirestoreQuotaExceeded(true);
+          pauseFirestoreNetwork().catch(() => {});
+        }
         console.warn('Firestore active_sessions listener notice:', err?.message || err);
       }
     );
 
     return () => unsubscribe();
-  }, [db, isLoggedIn, currentUser?.role, currentUser?.id]);
+  }, [db, isLoggedIn, currentUser?.role, currentUser?.id, isFirestoreQuotaExceeded]);
 
   const refreshActiveSessions = async () => {
     // 1. Try server API
@@ -2370,19 +2380,7 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
         lastHeartbeat: Date.now(),
       };
 
-      // 1. Sync Heartbeat to Firestore only if quota is available
-      if (db && !isFirestoreQuotaExceeded) {
-        try {
-          await setDoc(doc(db, 'active_sessions', sessionId), heartbeatPayload, { merge: true });
-        } catch (err) {
-          if (isQuotaError(err)) {
-            setIsFirestoreQuotaExceeded(true);
-            pauseFirestoreNetwork().catch(() => {});
-          }
-        }
-      }
-
-      // 2. Sync Heartbeat to Server API
+      // 1. Sync Heartbeat to Server API (Heartbeats run via server to completely prevent Firestore write quota exhaustion)
       try {
         const res = await fetch('/api/sessions/heartbeat', {
           method: 'POST',
@@ -2406,7 +2404,7 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
     const handleBeforeUnload = () => {
       try {
         const sessionId = getOrCreateTabSessionId();
-        if (db) {
+        if (db && !isFirestoreQuotaExceeded) {
           deleteDoc(doc(db, 'active_sessions', sessionId)).catch(() => {});
         }
         if (navigator.sendBeacon) {
@@ -2428,12 +2426,12 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
       clearInterval(interval);
       window.removeEventListener('beforeunload', handleBeforeUnload);
     };
-  }, [db, isLoggedIn, currentUser?.id, currentUser?.role]);
+  }, [db, isLoggedIn, currentUser?.id, currentUser?.role, isFirestoreQuotaExceeded]);
 
   const logout = () => {
     try {
       const sessionId = getOrCreateTabSessionId();
-      if (db) {
+      if (db && !isFirestoreQuotaExceeded) {
         deleteDoc(doc(db, 'active_sessions', sessionId)).catch(() => {});
       }
       fetch('/api/sessions/release', {
@@ -2677,11 +2675,14 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
       console.warn('Server assessment save notice (queued in outbox):', e);
     }
 
-    // 6. Save to Firebase Firestore if connected
-    if (db) {
+    // 6. Save to Firebase Firestore if connected and quota is healthy
+    if (db && !isFirestoreQuotaExceeded) {
       const cleanA = prepareAssessmentForFirestore(assessmentToSave);
       setDoc(doc(db, 'assessments', cleanA.id), cleanA, { merge: true }).catch((err) => {
-        if (isQuotaError(err)) setIsFirestoreQuotaExceeded(true);
+        if (isQuotaError(err)) {
+          setIsFirestoreQuotaExceeded(true);
+          pauseFirestoreNetwork().catch(() => {});
+        }
         console.warn('Firebase assessment save notice:', err?.message || err);
       });
     }
@@ -2814,11 +2815,14 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
       })
       .catch((e) => console.warn('Server assessment update notice (queued):', e));
 
-    // 6. Update on Firestore
-    if (db) {
+    // 6. Update on Firestore if connected and quota is healthy
+    if (db && !isFirestoreQuotaExceeded) {
       const cleanA = prepareAssessmentForFirestore(mergedData);
       setDoc(doc(db, 'assessments', id), cleanA, { merge: true }).catch((err) => {
-        if (isQuotaError(err)) setIsFirestoreQuotaExceeded(true);
+        if (isQuotaError(err)) {
+          setIsFirestoreQuotaExceeded(true);
+          pauseFirestoreNetwork().catch(() => {});
+        }
         console.warn('Firebase assessment update notice:', err?.message || err);
       });
     }
@@ -3463,9 +3467,14 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
           if (assChanged) {
             hasAnyUpdate = true;
             const updatedAss = { ...ass, photos: updatedPhotos, updatedAt: new Date().toISOString() };
-            if (db) {
+            if (db && !isFirestoreQuotaExceeded) {
               const clean = prepareAssessmentForFirestore(updatedAss);
-              setDoc(doc(db, 'assessments', clean.id), clean, { merge: true }).catch(() => {});
+              setDoc(doc(db, 'assessments', clean.id), clean, { merge: true }).catch((err) => {
+                if (isQuotaError(err)) {
+                  setIsFirestoreQuotaExceeded(true);
+                  pauseFirestoreNetwork().catch(() => {});
+                }
+              });
             }
             return updatedAss;
           }
@@ -3507,9 +3516,14 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
           if (a.id !== assessmentId) return a;
           const newPhotos = (a.photos || []).map((p) => (p.id === photoId ? { ...p, url: publicUrl } : p));
           const updated = { ...a, photos: newPhotos, updatedAt: new Date().toISOString() };
-          if (db) {
+          if (db && !isFirestoreQuotaExceeded) {
             const clean = prepareAssessmentForFirestore(updated);
-            setDoc(doc(db, 'assessments', clean.id), clean, { merge: true }).catch(() => {});
+            setDoc(doc(db, 'assessments', clean.id), clean, { merge: true }).catch((err) => {
+              if (isQuotaError(err)) {
+                setIsFirestoreQuotaExceeded(true);
+                pauseFirestoreNetwork().catch(() => {});
+              }
+            });
           }
           return updated;
         });
@@ -3933,15 +3947,8 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
           body: JSON.stringify({ assessments: mergedList, replace: true }),
         }).catch((err) => console.warn('Server sync-batch notice:', err));
 
-        // Persist synced items directly into Firestore database
-        if (db && !isFirestoreQuotaExceeded && mergedList.length > 0) {
-          mergedList.forEach((item) => {
-            const clean = prepareAssessmentForFirestore(item);
-            setDoc(doc(db, 'assessments', item.id), clean, { merge: true }).catch((err) => {
-              if (isQuotaError(err)) setIsFirestoreQuotaExceeded(true);
-            });
-          });
-        }
+        // Note: Data is saved to server via /api/assessments/sync-batch and local storage;
+        // avoid bulk setDoc loop to Firestore to protect Spark free-tier daily write limit.
 
         return mergedList;
       });

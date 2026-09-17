@@ -1,5 +1,5 @@
 import { BuildingAssessment } from '../types';
-import { db, isQuotaError, pauseFirestoreNetwork } from '../services/firebase';
+import { db, isQuotaError, isQuotaExceeded, pauseFirestoreNetwork } from '../services/firebase';
 import { doc, setDoc } from 'firebase/firestore';
 
 const OFFLINE_QUEUE_KEY = 'sipandu_offline_sync_outbox';
@@ -90,7 +90,7 @@ export async function flushOfflineSyncQueue(
     let synced = false;
 
     // 1. Sync to Cloud Firestore directly (for Cloudflare Pages / Static Hosting)
-    if (db) {
+    if (db && !isQuotaExceeded) {
       try {
         const clean: any = JSON.parse(JSON.stringify(item.assessment));
         if (Array.isArray(clean.photos)) {
