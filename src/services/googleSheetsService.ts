@@ -267,6 +267,7 @@ export function formatAssessmentForGoogleSheet(item: BuildingAssessment) {
     'Link Folder Foto Google Drive': item.googleDriveFolderUrl || '-',
     'Surveyor / Petugas': item.createdByName,
     'Kota Laporan': item.cityLocation,
+    'Jabatan Penandatangan': item.headOfDepartment?.title || 'Kepala Dinas Pekerjaan Umum dan Penataan Ruang',
     'Nama Kepala Dinas': item.headOfDepartment?.name || '-',
     'NIP Kepala Dinas': item.headOfDepartment?.nip || '-',
     'Tim Analisis': item.analysisTeam?.join(', ') || '-',
@@ -2539,9 +2540,11 @@ export function parseExtractedRowsToAssessments(
     }
     const desaId = matchedDesaId || `desa_${desaName.toLowerCase().replace(/\s+/g, '_') || 'umum'}`;
 
-    const headName = String(getVal(rowObj, ['Nama Kepala Dinas', 'Kepala Dinas', 'Kadis']) || '');
-    const headNip = String(getVal(rowObj, ['NIP Kepala Dinas', 'NIP Kadis', 'NIP']) || '');
-    const headRank = String(getVal(rowObj, ['Pangkat Kepala Dinas', 'Pangkat / Golongan', 'Pangkat']) || '');
+    const headTitle = String(getVal(rowObj, ['Jabatan Penandatangan', 'Jabatan Pejabat', 'Jabatan Kepala Dinas', 'Jabatan']) || 'Kepala Dinas Pekerjaan Umum dan Penataan Ruang');
+    const headSubTitle = String(getVal(rowObj, ['Instansi Penandatangan', 'Sub-Judul Penandatangan', 'Instansi']) || 'Kabupaten Nagekeo');
+    const headName = String(getVal(rowObj, ['Nama Kepala Dinas', 'Nama Pejabat', 'Kepala Dinas', 'Kadis']) || '');
+    const headNip = String(getVal(rowObj, ['NIP Kepala Dinas', 'NIP Pejabat', 'NIP Kadis', 'NIP']) || '');
+    const headRank = String(getVal(rowObj, ['Pangkat Kepala Dinas', 'Pangkat Pejabat', 'Pangkat / Golongan', 'Pangkat']) || '');
     
     const rawTeam = String(getVal(rowObj, ['Tim Analisis', 'Tim Evaluasi', 'Tim Surveyor']) || '');
     const analysisTeam = rawTeam ? rawTeam.split(',').map(s => s.trim()).filter(Boolean) : [];
@@ -2707,8 +2710,8 @@ export function parseExtractedRowsToAssessments(
       cityLocation: String(getVal(rowObj, ['Kota Laporan', 'Kota']) || 'Mbay'),
       reportDateStr: 'September 2026',
       headOfDepartment: {
-        title: 'Kepala Dinas Pekerjaan Umum dan Penataan Ruang',
-        subTitle: 'Kabupaten Nagekeo',
+        title: headTitle,
+        subTitle: headSubTitle,
         rank: headRank,
         name: headName,
         nip: headNip,

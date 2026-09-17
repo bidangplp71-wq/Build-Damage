@@ -37,6 +37,12 @@ export const AssessmentDetailModal: React.FC<Props> = ({ assessment, onClose }) 
   const [isUploadingToDrive, setIsUploadingToDrive] = useState(false);
   const [showSignatures, setShowSignatures] = useState(true);
   const [isEditingSignature, setIsEditingSignature] = useState(false);
+  const [customHeadTitle, setCustomHeadTitle] = useState(() => {
+    return assessment.headOfDepartment?.title || 'Kepala Dinas Pekerjaan Umum dan Penataan Ruang';
+  });
+  const [customHeadSubTitle, setCustomHeadSubTitle] = useState(() => {
+    return assessment.headOfDepartment?.subTitle || '';
+  });
   const [customHeadName, setCustomHeadName] = useState(() => {
     const raw = assessment.headOfDepartment?.name || '';
     if (raw === '-' || raw.toLowerCase().includes('bernard')) return '';
@@ -624,12 +630,12 @@ export const AssessmentDetailModal: React.FC<Props> = ({ assessment, onClose }) 
                 {/* Left: Mengetahui / Menyetujui Kepala Dinas PUPR */}
                 <div className="space-y-1">
                   <p className="font-semibold text-slate-700">Mengetahui / Menyetujui,</p>
-                  <p className="font-bold text-slate-950">{assessment.headOfDepartment?.title || 'Kepala Dinas Pekerjaan Umum dan Penataan Ruang'}</p>
-                  {assessment.headOfDepartment?.subTitle && (
-                    <p className="font-bold text-slate-950">{assessment.headOfDepartment.subTitle}</p>
+                  <p className="font-bold text-slate-950">{customHeadTitle || assessment.headOfDepartment?.title || 'Kepala Dinas Pekerjaan Umum dan Penataan Ruang'}</p>
+                  {(customHeadSubTitle || assessment.headOfDepartment?.subTitle) && (
+                    <p className="font-bold text-slate-950">{customHeadSubTitle || assessment.headOfDepartment?.subTitle}</p>
                   )}
                   <div className="h-24 flex items-end">
-                    <div className="w-full max-w-[260px]">
+                    <div className="w-full max-w-[280px]">
                       {customHeadName ? (
                         <>
                           <p className="font-bold underline text-slate-950 uppercase">{customHeadName}</p>
@@ -660,7 +666,7 @@ export const AssessmentDetailModal: React.FC<Props> = ({ assessment, onClose }) 
                           className="text-[10px] flex items-center gap-1 font-bold text-amber-700 hover:text-amber-900 bg-amber-50 hover:bg-amber-100 px-2 py-0.5 rounded border border-amber-200 cursor-pointer"
                         >
                           <PenLine className="w-2.5 h-2.5" />
-                          <span>{customHeadName ? 'Ubah Nama Pejabat' : 'Ketik Nama Pejabat'}</span>
+                          <span>{customHeadName ? 'Ubah Jabatan & Pejabat' : 'Ketik Jabatan & Pejabat'}</span>
                         </button>
                         {customHeadName && (
                           <button
@@ -680,34 +686,81 @@ export const AssessmentDetailModal: React.FC<Props> = ({ assessment, onClose }) 
 
                       {/* Mini editor popup if editing */}
                       {isEditingSignature && (
-                        <div className="no-print mt-2 p-2.5 bg-white rounded-lg border border-amber-300 shadow-lg space-y-1.5 text-left text-[11px]">
-                          <p className="font-bold text-slate-800">Atur Nama Pejabat Pengesah:</p>
-                          <input
-                            type="text"
-                            value={customHeadName}
-                            onChange={(e) => setCustomHeadName(e.target.value)}
-                            placeholder="Nama Lengkap & Gelar"
-                            className="w-full px-2 py-1 border border-slate-300 rounded text-xs"
-                          />
-                          <input
-                            type="text"
-                            value={customHeadNip}
-                            onChange={(e) => setCustomHeadNip(e.target.value)}
-                            placeholder="NIP (Contoh: 19780101...)"
-                            className="w-full px-2 py-1 border border-slate-300 rounded text-xs font-mono"
-                          />
-                          <input
-                            type="text"
-                            value={customHeadRank}
-                            onChange={(e) => setCustomHeadRank(e.target.value)}
-                            placeholder="Pangkat / Golongan (Contoh: Pembina Tk. I)"
-                            className="w-full px-2 py-1 border border-slate-300 rounded text-xs"
-                          />
-                          <div className="flex justify-end gap-1.5 pt-1">
+                        <div className="no-print mt-2 p-3 bg-white rounded-xl border border-amber-300 shadow-xl space-y-2 text-left text-[11px] z-50">
+                          <p className="font-bold text-slate-800 text-xs">Atur Jabatan & Nama Pejabat Pengesah:</p>
+                          
+                          <div>
+                            <label className="block font-semibold text-slate-600 text-[10px] mb-0.5">Jabatan Penandatangan:</label>
+                            <input
+                              type="text"
+                              value={customHeadTitle}
+                              onChange={(e) => setCustomHeadTitle(e.target.value)}
+                              placeholder="Kepala Dinas / Plt. / Kabid / PPK / Camat"
+                              className="w-full px-2 py-1 border border-slate-300 rounded text-xs font-semibold text-slate-900"
+                            />
+                            <div className="flex flex-wrap gap-1 mt-1">
+                              {['Kepala Dinas Pekerjaan Umum dan Penataan Ruang', 'Plt. Kepala Dinas PUPR', 'Sekretaris Dinas PUPR', 'Kepala Bidang Cipta Karya', 'PPK', 'Camat'].map((titlePreset) => (
+                                <button
+                                  key={titlePreset}
+                                  type="button"
+                                  onClick={() => setCustomHeadTitle(titlePreset)}
+                                  className="text-[9px] px-1.5 py-0.5 bg-slate-100 hover:bg-amber-100 text-slate-700 hover:text-amber-900 rounded border border-slate-200"
+                                >
+                                  {titlePreset}
+                                </button>
+                              ))}
+                            </div>
+                          </div>
+
+                          <div>
+                            <label className="block font-semibold text-slate-600 text-[10px] mb-0.5">Instansi / Sub-Judul (Opsional):</label>
+                            <input
+                              type="text"
+                              value={customHeadSubTitle}
+                              onChange={(e) => setCustomHeadSubTitle(e.target.value)}
+                              placeholder="Pemerintah Daerah / Kab. Nagekeo"
+                              className="w-full px-2 py-1 border border-slate-300 rounded text-xs text-slate-800"
+                            />
+                          </div>
+
+                          <div>
+                            <label className="block font-semibold text-slate-600 text-[10px] mb-0.5">Nama Lengkap & Gelar:</label>
+                            <input
+                              type="text"
+                              value={customHeadName}
+                              onChange={(e) => setCustomHeadName(e.target.value)}
+                              placeholder="Nama Lengkap & Gelar"
+                              className="w-full px-2 py-1 border border-slate-300 rounded text-xs"
+                            />
+                          </div>
+
+                          <div>
+                            <label className="block font-semibold text-slate-600 text-[10px] mb-0.5">NIP:</label>
+                            <input
+                              type="text"
+                              value={customHeadNip}
+                              onChange={(e) => setCustomHeadNip(e.target.value)}
+                              placeholder="NIP (Contoh: 19780101...)"
+                              className="w-full px-2 py-1 border border-slate-300 rounded text-xs font-mono"
+                            />
+                          </div>
+
+                          <div>
+                            <label className="block font-semibold text-slate-600 text-[10px] mb-0.5">Pangkat / Golongan:</label>
+                            <input
+                              type="text"
+                              value={customHeadRank}
+                              onChange={(e) => setCustomHeadRank(e.target.value)}
+                              placeholder="Pangkat / Golongan (Contoh: Pembina Tk. I (IV/b))"
+                              className="w-full px-2 py-1 border border-slate-300 rounded text-xs"
+                            />
+                          </div>
+
+                          <div className="flex justify-end gap-1.5 pt-1 border-t border-slate-100">
                             <button
                               type="button"
                               onClick={() => setIsEditingSignature(false)}
-                              className="px-2 py-0.5 bg-amber-500 text-slate-950 font-bold rounded text-[10px]"
+                              className="px-3 py-1 bg-amber-500 hover:bg-amber-600 text-slate-950 font-bold rounded-lg text-xs"
                             >
                               Selesai
                             </button>

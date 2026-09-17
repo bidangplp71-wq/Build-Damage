@@ -303,8 +303,8 @@ export const AssessmentForm: React.FC = () => {
       cityLocation,
       reportDateStr,
       headOfDepartment: {
-        title: 'Kepala Dinas Pekerjaan Umum dan Penataan Ruang',
-        subTitle: 'Pemerintah Daerah',
+        title: headTitle.trim() || 'Kepala Dinas Pekerjaan Umum dan Penataan Ruang',
+        subTitle: headSubTitle.trim() || 'Pemerintah Daerah',
         rank: headRank,
         name: headName,
         nip: headNip,
@@ -325,6 +325,8 @@ export const AssessmentForm: React.FC = () => {
   // City & Officials
   const [cityLocation, setCityLocation] = useState('Mbay');
   const [reportDateStr, setReportDateStr] = useState('September 2026');
+  const [headTitle, setHeadTitle] = useState('Kepala Dinas Pekerjaan Umum dan Penataan Ruang');
+  const [headSubTitle, setHeadSubTitle] = useState('Pemerintah Daerah');
   const [headName, setHeadName] = useState('');
   const [headNip, setHeadNip] = useState('');
   const [headRank, setHeadRank] = useState('');
@@ -424,6 +426,8 @@ export const AssessmentForm: React.FC = () => {
       setNoKkPemilik(a.noKkPemilik || '0');
       setCityLocation(a.cityLocation || 'Mbay');
       setReportDateStr(a.reportDateStr || 'September 2026');
+      setHeadTitle(a.headOfDepartment?.title || 'Kepala Dinas Pekerjaan Umum dan Penataan Ruang');
+      setHeadSubTitle(a.headOfDepartment?.subTitle || 'Pemerintah Daerah');
       setHeadName(a.headOfDepartment?.name || '');
       setHeadNip(a.headOfDepartment?.nip || '');
       setHeadRank(a.headOfDepartment?.rank || '');
@@ -432,6 +436,8 @@ export const AssessmentForm: React.FC = () => {
       if (loadedAssessmentIdRef.current !== null) {
         loadedAssessmentIdRef.current = null;
         setCode(generateNextRegistrationCode(assessments));
+        setHeadTitle('Kepala Dinas Pekerjaan Umum dan Penataan Ruang');
+        setHeadSubTitle('Pemerintah Daerah');
         setHeadName('');
         setHeadNip('');
         setHeadRank('');
@@ -1156,8 +1162,8 @@ export const AssessmentForm: React.FC = () => {
       cityLocation,
       reportDateStr,
       headOfDepartment: {
-        title: 'Kepala Dinas Pekerjaan Umum dan Penataan Ruang',
-        subTitle: `Pemerintah Daerah`,
+        title: headTitle.trim() || 'Kepala Dinas Pekerjaan Umum dan Penataan Ruang',
+        subTitle: headSubTitle.trim() || 'Pemerintah Daerah',
         rank: headRank,
         name: headName,
         nip: headNip,
@@ -3542,19 +3548,96 @@ export const AssessmentForm: React.FC = () => {
         </div>
 
         {/* 2. Informasi Pejabat Pengesah Laporan */}
-        <div className="pt-4 border-t border-slate-100">
-          <h4 className="text-xs font-bold text-slate-800 uppercase tracking-wider mb-3">
-            Pengesahan Dokumen / Pejabat Penandatangan
-          </h4>
-          <div className="grid grid-cols-1 sm:grid-cols-3 gap-3 text-xs">
+        <div className="pt-4 border-t border-slate-100 space-y-3">
+          <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-1">
+            <h4 className="text-xs font-bold text-slate-800 uppercase tracking-wider">
+              Pengesahan Dokumen / Pejabat Penandatangan
+            </h4>
+            <span className="text-[11px] text-slate-500">
+              Jabatan & nama dapat disesuaikan (Kadis, Plt. Kadis, Kabid, PPK, Camat, dll.)
+            </span>
+          </div>
+
+          {/* Jabatan & Instansi Row */}
+          <div className="grid grid-cols-1 sm:grid-cols-12 gap-3 text-xs">
+            <div className="sm:col-span-8">
+              <label className="block font-semibold text-slate-700 mb-1">
+                Jabatan Penandatangan / Pengesah <span className="text-red-500">*</span>
+              </label>
+              <input
+                type="text"
+                value={headTitle || ''}
+                onChange={(e) => setHeadTitle(e.target.value)}
+                placeholder="Contoh: Kepala Dinas Pekerjaan Umum dan Penataan Ruang"
+                className="w-full px-3 py-2 rounded-xl border border-slate-200 font-semibold text-slate-900 focus:outline-none focus:ring-2 focus:ring-amber-500 bg-white"
+              />
+              <div className="flex flex-wrap items-center gap-1.5 mt-2">
+                <span className="text-[10px] text-slate-400 font-medium">Pilihan cepat:</span>
+                {[
+                  'Kepala Dinas Pekerjaan Umum dan Penataan Ruang',
+                  'Plt. Kepala Dinas PUPR',
+                  'Sekretaris Dinas PUPR',
+                  'Kepala Bidang Cipta Karya',
+                  'Kepala Bidang Bina Marga',
+                  'Pejabat Pembuat Komitmen (PPK)',
+                  'Kepala Pelaksana BPBD',
+                  'Camat',
+                ].map((preset) => (
+                  <button
+                    key={preset}
+                    type="button"
+                    onClick={() => setHeadTitle(preset)}
+                    className={`text-[10px] px-2 py-0.5 rounded-md border font-medium transition-colors cursor-pointer ${
+                      headTitle === preset
+                        ? 'bg-amber-600 text-white border-amber-600'
+                        : 'bg-slate-50 hover:bg-slate-100 text-slate-700 border-slate-200'
+                    }`}
+                  >
+                    {preset}
+                  </button>
+                ))}
+              </div>
+            </div>
+
+            <div className="sm:col-span-4">
+              <label className="block font-semibold text-slate-700 mb-1">
+                Instansi / Sub-Judul (Opsional)
+              </label>
+              <input
+                type="text"
+                value={headSubTitle || ''}
+                onChange={(e) => setHeadSubTitle(e.target.value)}
+                placeholder="Contoh: Pemerintah Daerah / Kab. Nagekeo"
+                className="w-full px-3 py-2 rounded-xl border border-slate-200 text-slate-900 focus:outline-none focus:ring-2 focus:ring-amber-500 bg-white"
+              />
+              <div className="flex flex-wrap items-center gap-1.5 mt-2">
+                {['Pemerintah Daerah', 'Kabupaten Nagekeo', 'Pemerintah Kabupaten'].map((opt) => (
+                  <button
+                    key={opt}
+                    type="button"
+                    onClick={() => setHeadSubTitle(opt)}
+                    className={`text-[10px] px-2 py-0.5 rounded-md border font-medium transition-colors cursor-pointer ${
+                      headSubTitle === opt
+                        ? 'bg-slate-800 text-white border-slate-800'
+                        : 'bg-slate-50 hover:bg-slate-100 text-slate-700 border-slate-200'
+                    }`}
+                  >
+                    {opt}
+                  </button>
+                ))}
+              </div>
+            </div>
+          </div>
+
+          <div className="grid grid-cols-1 sm:grid-cols-3 gap-3 text-xs pt-1">
             <div>
-              <label className="block font-semibold text-slate-700 mb-1">Nama Kepala Dinas / Pejabat</label>
+              <label className="block font-semibold text-slate-700 mb-1">Nama Lengkap & Gelar Pejabat</label>
               <input
                 type="text"
                 value={headName || ''}
                 onChange={(e) => setHeadName(e.target.value)}
                 placeholder="Contoh: Dionisius T. Ndolu, S.T., M.Si."
-                className="w-full px-3 py-2 rounded-xl border border-slate-200 font-medium text-slate-900"
+                className="w-full px-3 py-2 rounded-xl border border-slate-200 font-medium text-slate-900 focus:outline-none focus:ring-2 focus:ring-amber-500"
               />
             </div>
             <div>
@@ -3564,7 +3647,7 @@ export const AssessmentForm: React.FC = () => {
                 value={headNip || ''}
                 onChange={(e) => setHeadNip(e.target.value)}
                 placeholder="Contoh: 19740512 200212 1 004"
-                className="w-full px-3 py-2 rounded-xl border border-slate-200 font-mono text-slate-900"
+                className="w-full px-3 py-2 rounded-xl border border-slate-200 font-mono text-slate-900 focus:outline-none focus:ring-2 focus:ring-amber-500"
               />
             </div>
             <div>
@@ -3573,8 +3656,8 @@ export const AssessmentForm: React.FC = () => {
                 type="text"
                 value={headRank || ''}
                 onChange={(e) => setHeadRank(e.target.value)}
-                placeholder="Contoh: Pembina TK I"
-                className="w-full px-3 py-2 rounded-xl border border-slate-200 text-slate-900"
+                placeholder="Contoh: Pembina TK I (IV/b)"
+                className="w-full px-3 py-2 rounded-xl border border-slate-200 text-slate-900 focus:outline-none focus:ring-2 focus:ring-amber-500"
               />
             </div>
             <div>
@@ -3584,7 +3667,7 @@ export const AssessmentForm: React.FC = () => {
                 value={cityLocation || ''}
                 onChange={(e) => setCityLocation(e.target.value)}
                 placeholder="Contoh: Mbay"
-                className="w-full px-3 py-2 rounded-xl border border-slate-200 text-slate-900"
+                className="w-full px-3 py-2 rounded-xl border border-slate-200 text-slate-900 focus:outline-none focus:ring-2 focus:ring-amber-500"
               />
             </div>
             <div className="sm:col-span-2">
@@ -3594,7 +3677,7 @@ export const AssessmentForm: React.FC = () => {
                 value={reportDateStr || ''}
                 onChange={(e) => setReportDateStr(e.target.value)}
                 placeholder="Contoh: September 2026"
-                className="w-full px-3 py-2 rounded-xl border border-slate-200 text-slate-900"
+                className="w-full px-3 py-2 rounded-xl border border-slate-200 text-slate-900 focus:outline-none focus:ring-2 focus:ring-amber-500"
               />
             </div>
           </div>
