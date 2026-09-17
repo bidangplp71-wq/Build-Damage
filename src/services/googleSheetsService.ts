@@ -867,85 +867,141 @@ function doPost(e) {
     var targetTabName = json.targetSheetName || json.kecamatanSheetName || ("Kec. " + kecamatanName);
     var bldgName = json.buildingName || (rowData && rowData['Nama Bangunan']) || "";
     var sheetRowNumber = json.sheetRowNumber;
-
-    if (action === 'delete') {
-      var deletedFrom = [];
-      // 1. Coba hapus di Sheet Tujuan Kecamatan Terkait
-      var targetKecSheet = findSheetByNameFuzzy(ss, targetTabName);
-      if (targetKecSheet) {
-        var didDel = deleteMatchingRow(targetKecSheet, regCode, prevRegCode, bldgName, sheetRowNumber);
-        if (didDel) deletedFrom.push(targetKecSheet.getName());
-      }
+    
+    var lock = LockService.getScriptLock();
+    try {
+      lock.waitLock(30000); // 30 sec wait for concurrent users
       
-      // 2. Jika belum terhapus, cari di seluruh sheet kecamatan lainnya
-      if (deletedFrom.length === 0) {
-        var allSheets = ss.getSheets();
-        for (var s = 0; s < allSheets.length; s++) {
-          var sName = allSheets[s].getName();
-          if (sName !== 'Log_Akses_Pengguna' && sName !== 'Daftar_Pengguna') {
-            if (deleteMatchingRow(allSheets[s], regCode, prevRegCode, bldgName, sheetRowNumber)) {
-              deletedFrom.push(sName);
-              break;
+      if (action === 'delete') {
+        var deletedFrom = [];
+        // 1. Coba hapus di Sheet Tujuan Kecamatan Terkait
+        var targetKecSheet = findSheetByNameFuzzy(ss, targetTabName);
+        if (targetKecSheet) {
+          var didDel = deleteMatchingRow(targetKecSheet, regCode, prevRegCode, bldgName, sheetRowNumber);
+          if (didDel) deletedFrom.push(targetKecSheet.getName());
+        }
+        
+        // 2. Jika belum terhapus, cari di seluruh sheet kecamatan lainnya
+        if (deletedFrom.length === 0) {
+          var allSheets = ss.getSheets();
+          for (var s = 0; s < allSheets.length; s++) {
+            var sName = allSheets[s].getName();
+            if (sName !== 'Log_Akses_Pengguna' && sName !== 'Daftar_Pengguna') {
+              if (deleteMatchingRow(allSheets[s], regCode, prevRegCode, bldgName, sheetRowNumber)) {
+                deletedFrom.push(sName);
+                break;
+              }
             }
           }
         }
+
+        // 3. Hapus juga dari Master Rekap (jika ada)
+        var master1 = findSheetByNameFuzzy(ss, "Data_Penilaian_Kerusakan_PUPR");
+        if (master1) deleteMatchingRow(master1, regCode, prevRegCode, bldgName, 0);
+        var master2 = findSheetByNameFuzzy(ss, "REKAP_SEMUA_KECAMATAN");
+        if (master2) deleteMatchingRow(master2, regCode, prevRegCode, bldgName, 0);
+
+        return ContentService.createTextOutput(JSON.stringify({
+          status: "success",
+          message: "Data penilaian berhasil dihapus dari sheet: " + (deletedFrom.join(', ') || targetTabName),
+          deletedFrom: deletedFrom
+        })).setMimeType(ContentService.MimeType.JSON);
       }
 
-      // 3. Hapus juga dari Master Rekap (jika ada)
-      var master1 = findSheetByNameFuzzy(ss, "Data_Penilaian_Kerusakan_PUPR");
-      if (master1) deleteMatchingRow(master1, regCode, prevRegCode, bldgName, 0);
-      var master2 = findSheetByNameFuzzy(ss, "REKAP_SEMUA_KECAMATAN");
-      if (master2) deleteMatchingRow(master2, regCode, prevRegCode, bldgName, 0);
-
-      return ContentService.createTextOutput(JSON.stringify({
-        status: "success",
-        message: "Data penilaian berhasil dihapus dari sheet: " + (deletedFrom.join(', ') || targetTabName),
-        deletedFrom: deletedFrom
-      })).setMimeType(ContentService.MimeType.JSON);
-    }
-
-    if (!rowData || Object.keys(rowData).length === 0) {
-      return ContentService.createTextOutput(JSON.stringify({ status: "error", message: "Data baris kosong" }))
-        .setMimeType(ContentService.MimeType.JSON);
-    }
-
-    // SIMPAN DOKUMENTASI FOTO KE GOOGLE DRIVE (Folder per Bangunan)
-    if (json.photos && json.photos.length > 0 && json.savePhotosToDrive !== false) {
-      var driveFolderUrl = savePhotosToGoogleDrive(json.photos, regCode, rowData['Nama Bangunan'], json.driveFolderId);
-      if (driveFolderUrl) {
-        rowData['Link Folder Foto Google Drive'] = driveFolderUrl;
+      if (!rowData || Object.keys(rowData).length === 0) {
+        return ContentService.createTextOutput(JSON.stringify({ status: "error", message: "Data baris kosong" }))
+          .setMimeType(ContentService.MimeType.JSON);
       }
-    }
-    
-    // A. Tulis langsung ke Sheet Tujuan sesuai pilihan letak data
-    var targetSheet = getOrCreateSheet(ss, targetTabName);
-    saveOrUpdateRow(targetSheet, rowData, regCode, prevRegCode, action, "#1e3a8a", {
-      buildingName: bldgName,
-      sheetRowNumber: sheetRowNumber
-    });
-    
-    // B. Perbarui Master Sheet Rekap Semua jika aktif
-    if (includeMasterSummary) {
-      var primaryMasterSheet = getOrCreateSheet(ss, "Data_Penilaian_Kerusakan_PUPR");
-      saveOrUpdateRow(primaryMasterSheet, rowData, regCode, prevRegCode, action, "#0f172a", {
-        buildingName: bldgName
+
+      // Generate Registration Code Server-Side to Prevent Duplicates
+      if (action === 'insert' || regCode === '' || regCode.indexOf('REG-TEMP') === 0 || regCode.indexOf('REG-PREVIEW') === 0) {
+        var targetSheetCode = getOrCreateSheet(ss, targetTabName);
+        var lastRowCode = targetSheetCode.getLastRow();
+        var maxSeq = 0;
+        
+        // Scan for highest sequence number in the target sheet
+        if (lastRowCode > 1) {
+          var dataCode = targetSheetCode.getDataRange().getValues();
+          var currentHeaders = dataCode[0];
+          var colRegIdx = -1;
+          for (var c = 0; c < currentHeaders.length; c++) {
+            var h = String(currentHeaders[c]).toLowerCase().trim();
+            if (h.indexOf('registrasi') !== -1 || h.indexOf('kode') !== -1) {
+              colRegIdx = c;
+              break;
+            }
+          }
+          if (colRegIdx >= 0) {
+            for (var r = 1; r < dataCode.length; r++) {
+              var val = String(dataCode[r][colRegIdx]).trim();
+              var match = val.match(/REG-[A-Z0-9]+-\d{4}-(\d+)/i);
+              if (match) {
+                var seq = parseInt(match[1], 10);
+                if (seq > maxSeq) maxSeq = seq;
+              }
+            }
+          }
+        }
+        
+        var nextSeq = maxSeq + 1;
+        var kecPrefix = kecamatanName.toUpperCase().replace(/[^A-Z]/g, '').slice(0, 3) || 'PUP';
+        if (kecamatanName.toUpperCase().indexOf('AESESA SELATAN') !== -1) kecPrefix = 'ASS';
+        else if (kecamatanName.toUpperCase().indexOf('AESESA') !== -1) kecPrefix = 'AES';
+        else if (kecamatanName.toUpperCase().indexOf('BOAWAE') !== -1) kecPrefix = 'BOA';
+        else if (kecamatanName.toUpperCase().indexOf('MAUPONGGO') !== -1) kecPrefix = 'MPO';
+        else if (kecamatanName.toUpperCase().indexOf('NANGARORO') !== -1) kecPrefix = 'NGA';
+        else if (kecamatanName.toUpperCase().indexOf('KEO TENGAH') !== -1) kecPrefix = 'KEO';
+        else if (kecamatanName.toUpperCase().indexOf('WOLOWAE') !== -1) kecPrefix = 'WLW';
+        
+        var padStr = "0000" + nextSeq;
+        regCode = "REG-" + kecPrefix + "-2026-" + padStr.substring(padStr.length - 4);
+        rowData['No Registrasi'] = regCode;
+      }
+
+      // SIMPAN DOKUMENTASI FOTO KE GOOGLE DRIVE (Folder per Bangunan)
+      if (json.photos && json.photos.length > 0 && json.savePhotosToDrive !== false) {
+        var driveFolderUrl = savePhotosToGoogleDrive(json.photos, regCode, rowData['Nama Bangunan'], json.driveFolderId);
+        if (driveFolderUrl) {
+          rowData['Link Folder Foto Google Drive'] = driveFolderUrl;
+        }
+      }
+      
+      // A. Tulis langsung ke Sheet Tujuan sesuai pilihan letak data
+      var targetSheet = getOrCreateSheet(ss, targetTabName);
+      saveOrUpdateRow(targetSheet, rowData, regCode, prevRegCode, action, "#1e3a8a", {
+        buildingName: bldgName,
+        sheetRowNumber: sheetRowNumber
       });
-
-      if (masterSheetName && masterSheetName !== "Data_Penilaian_Kerusakan_PUPR") {
-        var secondaryMasterSheet = getOrCreateSheet(ss, masterSheetName);
-        saveOrUpdateRow(secondaryMasterSheet, rowData, regCode, prevRegCode, action, "#0f172a", {
+      
+      // B. Perbarui Master Sheet Rekap Semua jika aktif
+      if (includeMasterSummary) {
+        var primaryMasterSheet = getOrCreateSheet(ss, "Data_Penilaian_Kerusakan_PUPR");
+        saveOrUpdateRow(primaryMasterSheet, rowData, regCode, prevRegCode, action, "#0f172a", {
           buildingName: bldgName
         });
+
+        if (masterSheetName && masterSheetName !== "Data_Penilaian_Kerusakan_PUPR") {
+          var secondaryMasterSheet = getOrCreateSheet(ss, masterSheetName);
+          saveOrUpdateRow(secondaryMasterSheet, rowData, regCode, prevRegCode, action, "#0f172a", {
+            buildingName: bldgName
+          });
+        }
       }
+      
+      return ContentService.createTextOutput(JSON.stringify({
+        status: "success",
+        message: "Data langsung masuk ke Sheet '" + targetSheet.getName() + "' & Arsip Foto Google Drive!",
+        registrationCode: regCode,
+        targetTab: targetSheet.getName(),
+        driveFolderUrl: rowData['Link Folder Foto Google Drive'] || ""
+      })).setMimeType(ContentService.MimeType.JSON);
+      
+    } catch (e) {
+      return ContentService.createTextOutput(JSON.stringify({ status: "error", message: "Error Lock / Process: " + e.message }))
+        .setMimeType(ContentService.MimeType.JSON);
+    } finally {
+      lock.releaseLock();
     }
-    
-    return ContentService.createTextOutput(JSON.stringify({
-      status: "success",
-      message: "Data langsung masuk ke Sheet '" + targetSheet.getName() + "' & Arsip Foto Google Drive!",
-      registrationCode: regCode,
-      targetTab: targetSheet.getName(),
-      driveFolderUrl: rowData['Link Folder Foto Google Drive'] || ""
-    })).setMimeType(ContentService.MimeType.JSON);
     
   } catch (error) {
     return ContentService.createTextOutput(JSON.stringify({

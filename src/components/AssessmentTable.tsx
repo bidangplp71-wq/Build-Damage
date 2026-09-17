@@ -95,6 +95,8 @@ export const AssessmentTable: React.FC = () => {
   const [selectedSourceFilter, setSelectedSourceFilter] = useState<string>('ALL');
   const [selectedRowIds, setSelectedRowIds] = useState<string[]>([]);
   const [isRefreshing, setIsRefreshing] = useState(false);
+  const [sortField, setSortField] = useState<'timestamp' | 'registrationCode'>('timestamp');
+  const [sortDirection, setSortDirection] = useState<'desc' | 'asc'>('desc');
 
   // Portfolio Recap Modal State
   const [showPortfolioModal, setShowPortfolioModal] = useState(false);
@@ -399,10 +401,18 @@ export const AssessmentTable: React.FC = () => {
         return true;
       })
       .sort((a, b) => {
-        // Sort newest first so all incoming data is instantly visible at the top
-        const tA = new Date(a.updatedAt || a.createdAt || a.assessmentDate || 0).getTime();
-        const tB = new Date(b.updatedAt || b.createdAt || b.assessmentDate || 0).getTime();
-        return tB - tA;
+        let cmp = 0;
+        if (sortField === 'registrationCode') {
+          const codeA = (a.code || '').toLowerCase();
+          const codeB = (b.code || '').toLowerCase();
+          cmp = codeA.localeCompare(codeB);
+        } else {
+          // timestamp
+          const tA = new Date(a.updatedAt || a.createdAt || a.assessmentDate || 0).getTime();
+          const tB = new Date(b.updatedAt || b.createdAt || b.assessmentDate || 0).getTime();
+          cmp = tA - tB;
+        }
+        return sortDirection === 'desc' ? -cmp : cmp;
       });
   }, [
     assessments,
@@ -420,6 +430,8 @@ export const AssessmentTable: React.FC = () => {
     duplicateMap,
     kecamatans,
     desas,
+    sortField,
+    sortDirection,
   ]);
 
   // Pagination logic
@@ -922,6 +934,30 @@ export const AssessmentTable: React.FC = () => {
             <RefreshCw className={`w-3.5 h-3.5 ${isRefreshing ? 'animate-spin text-indigo-600' : ''}`} />
             <span>Refresh</span>
           </button>
+
+          {/* Sort Controls */}
+          <div className="flex items-center gap-1 bg-white border border-slate-200 rounded-xl p-1 shadow-2xs">
+            <select
+              value={sortField}
+              onChange={(e) => setSortField(e.target.value as 'timestamp' | 'registrationCode')}
+              className="text-xs font-semibold text-slate-700 bg-transparent outline-none cursor-pointer px-2 py-1"
+              title="Urutkan berdasarkan"
+            >
+              <option value="timestamp">Waktu (WIB)</option>
+              <option value="registrationCode">No. Registrasi</option>
+            </select>
+            <button
+              onClick={() => setSortDirection(prev => prev === 'desc' ? 'asc' : 'desc')}
+              className="p-1.5 hover:bg-slate-100 rounded-lg text-slate-600 transition-colors cursor-pointer"
+              title={sortDirection === 'desc' ? 'Terbaru ke Terlama / Z-A' : 'Terlama ke Terbaru / A-Z'}
+            >
+              {sortDirection === 'desc' ? (
+                <svg xmlns="http://www.w3.org/2000/svg" width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><path d="m3 16 4 4 4-4"/><path d="M7 20V4"/><path d="M11 4h4"/><path d="M11 8h7"/><path d="M11 12h10"/></svg>
+              ) : (
+                <svg xmlns="http://www.w3.org/2000/svg" width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><path d="m3 8 4-4 4 4"/><path d="M7 4v16"/><path d="M11 4h4"/><path d="M11 8h7"/><path d="M11 12h10"/></svg>
+              )}
+            </button>
+          </div>
 
           {/* Export to Excel Multi-Sheet per Kecamatan */}
           <button
