@@ -322,31 +322,26 @@ export function getAssessmentLookupKeys(item: BuildingAssessment): string[] {
     keys.push(`id:${rawCode}`);
   }
 
-  if (cleanCode && !invalidCodes.has(cleanCode.toLowerCase()) && cleanCode.length >= 4) {
+  if (cleanCode && !invalidCodes.has(cleanCode.toLowerCase()) && cleanCode.length >= 3) {
     keys.push(`code:${cleanCode}`);
-    if (cleanBuilding && cleanBuilding.length >= 3 && !cleanBuilding.startsWith('survei bangunan')) {
+    if (cleanBuilding && cleanBuilding.length >= 3) {
       keys.push(`code_bldg:${cleanCode}::${cleanBuilding}`);
     }
-    // Location match
     if (cleanKec && cleanDesa) {
       keys.push(`code_loc:${cleanCode}::${cleanKec}::${cleanDesa}`);
     }
   }
 
-  // 3. Exact Location + Building Name match (for reliable cross-fetch identity)
-  if (cleanBuilding && cleanBuilding.length >= 4 && !cleanBuilding.startsWith('survei') && cleanKec && cleanDesa) {
-    keys.push(`loc_bldg:${cleanKec}::${cleanDesa}::${cleanBuilding}`);
+  // 3. Exact Location + Building Name match (for cross-fetch deduplication)
+  if (cleanBuilding && cleanBuilding.length >= 4 && !cleanBuilding.startsWith('survei lapangan') && cleanKec) {
+    keys.push(`loc_bldg:${cleanKec}::${cleanDesa || 'nodesa'}::${cleanBuilding}`);
   }
 
-  // 4. Exact Physical Spreadsheet Profile + Sheet Tab + Sheet Row Number
-  const profileId = (item.targetProfileId || '').toLowerCase().replace(/[^a-z0-9]/g, '_');
+  // 4. Exact Physical Sheet Tab + Sheet Row Number (Guarantees 1 row per physical spreadsheet row)
   const cleanSheet = (item.sourceSheet || item.targetSheetName || '').toLowerCase().replace(/[^a-z0-9]/g, '_');
   if (item.sheetRowNumber && item.sheetRowNumber >= 2 && cleanSheet) {
-    if (profileId) {
-      keys.push(`prof_row:${profileId}::${cleanSheet}::r${item.sheetRowNumber}`);
-    }
-    // Building name slug + sheet + row
-    if (cleanBuilding && cleanBuilding.length >= 3 && !cleanBuilding.startsWith('survei')) {
+    keys.push(`sheet_row:${cleanSheet}::r${item.sheetRowNumber}`);
+    if (cleanBuilding && cleanBuilding.length >= 3) {
       const bldgSlug = cleanBuilding.replace(/[^a-z0-9]/g, '').slice(0, 16);
       keys.push(`sheet_bldg_row:${cleanSheet}::r${item.sheetRowNumber}::${bldgSlug}`);
     }
@@ -362,12 +357,9 @@ export function getAssessmentLookupKeys(item: BuildingAssessment): string[] {
 }
 
 /**
- * Deduplicate an array of assessments strictly by exact ID, Registration Code + Building Name,
- * or exact physical sheet row within the same profile.
- * CRITICAL RULE: Never merge independent rows with different identities,
- * and NEVER merge an archive record with an active record.
- * This guarantees 100% preservation of all 207 historical records and all newly inputted active surveys,
- * while eliminating duplicate clones caused by multiple sheet queries or re-fetches.
+ * Deduplicate an array of assessments strictly by exact ID, Registration Code,
+ * Location + Building Name, or physical sheet row.
+ * Eliminates duplicate clones and prevents the dataset count from inflating.
  */
 export function deduplicateAssessmentsList(list: BuildingAssessment[]): BuildingAssessment[] {
   if (!Array.isArray(list) || list.length <= 1) return list || [];
@@ -390,29 +382,6 @@ export function deduplicateAssessmentsList(list: BuildingAssessment[]): Building
 
     if (matchedIndex !== undefined) {
       const existing = result[matchedIndex];
-
-      // Safety check: Never merge two completely distinct non-generic building names!
-      const existingName = normalizeString(existing.buildingName).replace(/\s*\(baris\s+\d+\)/i, '').trim();
-      const incomingName = normalizeString(item.buildingName).replace(/\s*\(baris\s+\d+\)/i, '').trim();
-      const isExistingGeneric = !existingName || existingName.startsWith('survei bangunan') || existingName.startsWith('bangunan desa') || existingName.startsWith('gedung reg');
-      const isIncomingGeneric = !incomingName || incomingName.startsWith('survei bangunan') || incomingName.startsWith('bangunan desa') || incomingName.startsWith('gedung reg');
-
-      if (
-        existingName &&
-        incomingName &&
-        !isExistingGeneric &&
-        !isIncomingGeneric &&
-        calculateTextSimilarity(existingName, incomingName) < 0.4 &&
-        item.id !== existing.id
-      ) {
-        // Different buildings! Do not merge! Add as new distinct record!
-        const newIdx = result.length;
-        result.push(item);
-        for (const key of candidateKeys) {
-          keyToResultIndex.set(key, newIdx);
-        }
-        continue;
-      }
 
       // Non-destructive merge of components (preserve detailed user survey data)
       const existingHasDetailedComps = existing.components && existing.components.some((c) => (c.damagePercentInput || 0) > 0 || c.notes);
@@ -460,25 +429,31 @@ export function deduplicateAssessmentsList(list: BuildingAssessment[]): Building
       const resolvedHsbgn = base.hsbgnPerM2 || other.hsbgnPerM2 || 5920000;
       const resolvedRehabCost = base.roundedRehabCost || other.roundedRehabCost || (resolvedArea > 0 && resolvedDamage > 0 ? Math.round(resolvedArea * resolvedHsbgn * (resolvedDamage / 100) * 1.08 / 100000) * 100000 : 0);
 
-      // Stable ID preservation: never discard active ass_ ID or custom UUID in favor of temporary sheet_ ID
+      // Stable ID preservation: prefer active uuid / ass_ ID over temporary sheet_ ID
       const stableId = existing.id && !existing.id.startsWith('sheet_')
         ? existing.id
         : item.id && !item.id.startsWith('sheet_')
         ? item.id
         : base.id || other.id;
 
-      // Stable Code preservation: prefer valid REG- official code
+      // Stable Code preservation: prefer valid official code
       const stableCode = base.code && !base.code.startsWith('REG-TEMP') && !base.code.startsWith('ass_')
         ? base.code
         : other.code && !other.code.startsWith('REG-TEMP') && !other.code.startsWith('ass_')
         ? other.code
         : base.code || other.code;
 
+      // Stable Building Name: prefer meaningful non-generic name
+      const isBaseGeneric = !base.buildingName || base.buildingName.startsWith('Survei Bangunan Lapangan (Baris');
+      const isOtherGeneric = !other.buildingName || other.buildingName.startsWith('Survei Bangunan Lapangan (Baris');
+      const resolvedBuildingName = !isBaseGeneric ? base.buildingName : (!isOtherGeneric ? other.buildingName : base.buildingName || other.buildingName);
+
       const mergedItem: BuildingAssessment = {
         ...other,
         ...base,
         id: stableId,
         code: stableCode,
+        buildingName: resolvedBuildingName,
         totalFloorAreaM2: resolvedArea,
         totalDamagePercent: resolvedDamage,
         hsbgnPerM2: resolvedHsbgn,

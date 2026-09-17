@@ -45,6 +45,7 @@ import {
   syncAllUsersToGoogleSheet,
   fetchUsersFromGoogleSheet,
   clearGoogleSheetsMemoryCache,
+  extractSpreadsheetId,
 } from '../services/googleSheetsService';
 import {
   encryptPassword,
@@ -913,12 +914,6 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
         if (data.success && Array.isArray(data.assessments)) {
           setAssessments((prev) => {
             const pool = [...data.assessments];
-            // Check if Pasar Aewoe is missing from both server and local; if missing, ensure it is restored
-            const hasPasarAewoe = pool.some((a) => (a.buildingName || '').toLowerCase().includes('pasar aewoe')) ||
-              prev.some((a) => (a.buildingName || '').toLowerCase().includes('pasar aewoe'));
-            if (!hasPasarAewoe) {
-              pool.push(DEFAULT_PASAR_AEWOE_ASSESSMENT);
-            }
             const merged = reconcileAndMergeAssessments(prev, pool);
             try {
               localStorage.setItem(STORAGE_KEYS.ASSESSMENTS, JSON.stringify(merged));
@@ -3190,14 +3185,7 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
       await syncFromGoogleSheet(false, true);
     } catch {}
 
-    // 5. Ensure "Pasar Aewoe Unit Satu" is permanently guaranteed in the recovered dataset
-    const hasPasarAewoe = recoveredPool.some((a) => (a.buildingName || '').toLowerCase().includes('pasar aewoe')) ||
-      assessments.some((a) => (a.buildingName || '').toLowerCase().includes('pasar aewoe'));
-    if (!hasPasarAewoe) {
-      recoveredPool.push(DEFAULT_PASAR_AEWOE_ASSESSMENT);
-    }
-
-    // 6. Merge all recovered records
+    // 5. Merge all recovered records cleanly without injecting fake default records
     let finalCount = 0;
     setAssessments((prev) => {
       const merged = reconcileAndMergeAssessments(prev, recoveredPool);
@@ -3215,7 +3203,7 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
       return merged;
     });
 
-    const msg = `Pemulihan data selesai! Seluruh ${finalCount} data (termasuk Pasar Aewoe Unit Satu dan seluruh rekap kecamatan) kini aktif dan siap dikirim ke Google Sheet.`;
+    const msg = `Pemulihan data selesai! Seluruh ${finalCount} data penilaian aktif berhasil dipulihkan.`;
     showToast(msg, 'success');
     return {
       success: true,
@@ -4043,7 +4031,15 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
           },
         ];
 
-    const validProfiles = profilesList.filter((p) => p.spreadsheetUrl && isConfiguredSheetUrl(p.spreadsheetUrl));
+    // Filter to valid profiles and ensure unique spreadsheet targets
+    const seenSheetTargets = new Set<string>();
+    const validProfiles = profilesList.filter((p) => {
+      if (!p.spreadsheetUrl || !isConfiguredSheetUrl(p.spreadsheetUrl)) return false;
+      const sheetId = extractSpreadsheetId(p.spreadsheetUrl) || p.spreadsheetUrl;
+      if (seenSheetTargets.has(sheetId)) return false;
+      seenSheetTargets.add(sheetId);
+      return true;
+    });
     if (validProfiles.length === 0) {
       if (googleSheetConfig.spreadsheetUrl && isConfiguredSheetUrl(googleSheetConfig.spreadsheetUrl)) {
         return syncFromGoogleSheet(showToastAlert, forceRefresh);

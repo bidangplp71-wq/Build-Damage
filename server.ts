@@ -210,49 +210,75 @@ app.use('/uploads', express.static(path.join(process.cwd(), 'uploads')));
 // ASSESSMENTS API (Zero-quota Cloud Persistence)
 // ==========================================
 
-// Safe deduplication for server-stored assessments strictly by ID to preserve all rows
+// Safe deduplication for server-stored assessments by ID, Registration Code, Location, and Sheet Row
 function deduplicateServerAssessments(list: any[]): any[] {
   if (!Array.isArray(list) || list.length <= 1) return list || [];
   const result: any[] = [];
-  const seenIdMap = new Map<string, number>();
+  const keyToIdx = new Map<string, number>();
 
   for (const item of list) {
-    if (!item || !item.id) continue;
+    if (!item) continue;
 
-    let matchIdx = -1;
-    if (seenIdMap.has(item.id)) {
-      matchIdx = seenIdMap.get(item.id)!;
+    const keys: string[] = [];
+    if (item.id && String(item.id).trim()) {
+      keys.push(`id:${String(item.id).trim()}`);
+    }
+    const rawCode = String(item.code || '').trim();
+    if (rawCode && rawCode.length >= 3 && !rawCode.startsWith('REG-TEMP') && !rawCode.startsWith('REG-PREVIEW')) {
+      keys.push(`code:${rawCode.toUpperCase()}`);
+    }
+    const cleanBldg = String(item.buildingName || '').toLowerCase().replace(/\s*\(baris\s+\d+\)/i, '').trim();
+    const cleanKec = String(item.kecamatanName || item.kecamatanId || '').toLowerCase().replace(/[^a-z0-9]/g, '_');
+    const cleanDesa = String(item.desaName || '').toLowerCase().trim();
+    if (cleanBldg && cleanBldg.length >= 4 && !cleanBldg.startsWith('survei lapangan') && cleanKec) {
+      keys.push(`loc_bldg:${cleanKec}::${cleanDesa || 'nodesa'}::${cleanBldg}`);
+    }
+    const cleanSheet = String(item.sourceSheet || item.targetSheetName || '').toLowerCase().replace(/[^a-z0-9]/g, '_');
+    if (item.sheetRowNumber && item.sheetRowNumber >= 2 && cleanSheet) {
+      keys.push(`sheet_row:${cleanSheet}::r${item.sheetRowNumber}`);
     }
 
-    if (matchIdx !== -1) {
-      const existing = result[matchIdx];
-
-      // Safety check: if building names are distinct non-generic names, keep both
-      const existingName = String(existing.buildingName || '').toLowerCase().trim();
-      const incomingName = String(item.buildingName || '').toLowerCase().trim();
-      const isExistingGeneric = !existingName || existingName.startsWith('survei');
-      const isIncomingGeneric = !incomingName || incomingName.startsWith('survei');
-
-      if (existingName && incomingName && !isExistingGeneric && !isIncomingGeneric && existingName !== incomingName) {
-        // Different buildings, keep both
-        const newIdx = result.length;
-        result.push(item);
-        seenIdMap.set(`${item.id}_${item.buildingName}`, newIdx);
-        continue;
+    let matchIdx: number | undefined = undefined;
+    for (const k of keys) {
+      if (keyToIdx.has(k)) {
+        matchIdx = keyToIdx.get(k);
+        break;
       }
+    }
 
+    if (matchIdx !== undefined) {
+      const existing = result[matchIdx];
       const mergedPhotos =
         item.photos && item.photos.length > 0 ? item.photos : existing.photos || [];
       const existingTime = new Date(existing.updatedAt || existing.createdAt || 0).getTime();
       const incomingTime = new Date(item.updatedAt || item.createdAt || 0).getTime();
+      
+      const stableId = existing.id && !String(existing.id).startsWith('sheet_')
+        ? existing.id
+        : item.id && !String(item.id).startsWith('sheet_')
+        ? item.id
+        : item.id || existing.id;
+
+      const stableCode = existing.code && !String(existing.code).startsWith('REG-TEMP')
+        ? existing.code
+        : item.code && !String(item.code).startsWith('REG-TEMP')
+        ? item.code
+        : item.code || existing.code;
+
       result[matchIdx] =
         incomingTime >= existingTime
-          ? { ...existing, ...item, photos: mergedPhotos }
-          : { ...item, ...existing, photos: mergedPhotos };
+          ? { ...existing, ...item, id: stableId, code: stableCode, photos: mergedPhotos }
+          : { ...item, ...existing, id: stableId, code: stableCode, photos: mergedPhotos };
+
+      for (const k of keys) {
+        keyToIdx.set(k, matchIdx);
+      }
     } else {
       const newIdx = result.length;
       result.push(item);
-      seenIdMap.set(item.id, newIdx);
+      for (const k of keys) {
+        keyToIdx.set(k, newIdx);
+      }
     }
   }
   return result;
