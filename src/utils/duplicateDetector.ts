@@ -223,27 +223,23 @@ export function isArchiveSource(sourceName?: string | null): boolean {
   if (
     lower.includes('arsip') ||
     lower.includes('archive') ||
-    lower.includes('lama') ||
+    lower.includes('data lama') ||
+    lower.includes('datalama') ||
+    lower.includes('data_lama') ||
     lower.includes('old') ||
     lower.includes('read only') ||
     lower.includes('readonly') ||
     lower.includes('backup') ||
-    lower.includes('2023') ||
-    lower.includes('2024') ||
-    lower.includes('2025') ||
     lower.includes('buku_arsip') ||
     lower.includes('buku 2') ||
     lower.includes('buku_2') ||
-    lower.includes('riwayat')
+    lower.includes('riwayat_lama')
   ) {
     return true;
   }
 
-  // Format tab lama tanpa titik (e.g. "Kec Aesesa", "Kec Boawae", dsb.) sedangkan standar aktif SIM-PKBG menggunakan titik: "Kec. <Nama>"
-  if (/^kec\s+[a-z]/i.test(trimmed) && !/^kec\.\s*/i.test(trimmed)) {
-    return true;
-  }
-
+  // NOTE: All Kecamatan sheets (e.g. "Kec. Aesesa", "Kec Aesesa", "Kec. Boawae", "Kec Boawae", etc.)
+  // are 100% active operational sheets and must NEVER be flagged as archive.
   return false;
 }
 
@@ -256,9 +252,8 @@ export function isArchiveAssessment(item?: Partial<BuildingAssessment> | null): 
   if (isArchiveSource(item.targetSheetName)) return true;
   if (isArchiveSource(item.targetProfileName)) return true;
   if (item.targetProfileId === 'profile_backup_new') return true;
-  if (item.code && (item.code.includes('-2023-') || item.code.includes('-2024-') || item.code.includes('-2025-'))) {
-    return true;
-  }
+  // Note: Only flag as archive if explicitly marked in source sheet / profile,
+  // never flag active surveys based solely on registration code.
   return false;
 }
 

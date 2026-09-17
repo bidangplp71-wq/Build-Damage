@@ -51,6 +51,7 @@ import {
   Lock,
   BookOpen,
   ArrowRightLeft,
+  RotateCcw,
 } from 'lucide-react';
 import { PhotoViewerModal } from './PhotoViewerModal';
 import { DuplicateAuditModal } from './DuplicateAuditModal';
@@ -58,6 +59,7 @@ import { DataFulfillmentCard } from './DataFulfillmentCard';
 import { PortfolioRecapModal } from './PortfolioRecapModal';
 import { BufferQueueBanner } from './BufferQueueBanner';
 import { SheetBookSelector } from './SheetBookSelector';
+import { DataRecoveryModal } from './DataRecoveryModal';
 
 export const AssessmentTable: React.FC = () => {
   const {
@@ -190,6 +192,9 @@ export const AssessmentTable: React.FC = () => {
 
   // Syncing state per ID
   const [syncingId, setSyncingId] = useState<string | null>(null);
+
+  // Data Recovery Modal state
+  const [showRecoveryModal, setShowRecoveryModal] = useState<boolean>(false);
 
   // Duplicate detection & audit states
   const [showDuplicateAuditModal, setShowDuplicateAuditModal] = useState(false);
@@ -891,6 +896,16 @@ export const AssessmentTable: React.FC = () => {
           >
             <Layers className="w-3.5 h-3.5" />
             <span>{pageSize >= filteredAssessments.length && pageSize >= 100 ? `Tampil Sekaligus (${filteredAssessments.length})` : 'Tampilkan Sekaligus'}</span>
+          </button>
+
+          {/* Pusat Pemulihan Data Kemarin & Sinkronisasi */}
+          <button
+            onClick={() => setShowRecoveryModal(true)}
+            title="Pulihkan data input kemarin, periksa sheet aktif, dan pastikan tidak ada data yang tersembunyi"
+            className="flex items-center gap-1.5 px-3 py-2 text-xs font-bold text-blue-900 bg-blue-100 hover:bg-blue-200 rounded-xl border border-blue-300 transition-colors cursor-pointer shadow-2xs"
+          >
+            <RotateCcw className="w-3.5 h-3.5 text-blue-700" />
+            <span>Pulihkan Data Kemarin</span>
           </button>
 
           {/* Refresh button */}
@@ -2580,6 +2595,15 @@ export const AssessmentTable: React.FC = () => {
           assessments={assessments}
           kecamatans={kecamatans}
           desas={desas}
+        />
+      )}
+
+      {/* MODAL PUSAT PEMULIHAN DATA & RIWAYAT INPUT */}
+      {showRecoveryModal && (
+        <DataRecoveryModal
+          isOpen={showRecoveryModal}
+          onClose={() => setShowRecoveryModal(false)}
+          onSelectAssessment={(item) => setSelectedAssessmentForDetail(item)}
         />
       )}
     </div>

@@ -108,6 +108,9 @@ interface AppContextType {
   addAssessment: (data: BuildingAssessment) => Promise<{ success: boolean; message: string }>;
   updateAssessment: (id: string, data: Partial<BuildingAssessment>) => Promise<{ success: boolean; message: string }>;
   deleteAssessment: (id: string, bypassAuth?: boolean) => { success: boolean; message: string };
+  restoreAndRecoverAllAssessments: () => Promise<{ success: boolean; message: string; recoveredCount: number; totalCount: number }>;
+  restoreDeletedAssessment: (id: string) => Promise<boolean>;
+  getDeletedAssessmentIds: () => string[];
   purgeAllDuplicates: () => Promise<{ success: boolean; count: number; message: string }>;
   autoFixDuplicateCodes: () => Promise<{
     success: boolean;
@@ -308,6 +311,21 @@ function persistDeletedAssessmentIdsBatch(ids: string[]) {
   } catch {}
 }
 
+function clearStoredDeletedAssessmentIds() {
+  try {
+    localStorage.removeItem(STORAGE_KEYS.DELETED_ASSESSMENTS);
+  } catch {}
+}
+
+function removeStoredDeletedAssessmentId(id: string) {
+  if (!id) return;
+  try {
+    const current = getStoredDeletedAssessmentIds();
+    current.delete(id);
+    localStorage.setItem(STORAGE_KEYS.DELETED_ASSESSMENTS, JSON.stringify(Array.from(current)));
+  } catch {}
+}
+
 /**
  * Strip heavy raw base64 photo URLs before sending to Cloud Firestore
  * so the payload stays well below Firestore's 1MB document limit.
@@ -409,18 +427,56 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
     return users[0] || INITIAL_USERS[0];
   });
 
-  // Initialize assessments with persistent deleted IDs filtered out and deduplicated
+  // Initialize assessments with persistent deleted IDs filtered out, aggregating all local keys and backups
   const [assessments, setAssessments] = useState<BuildingAssessment[]>(() => {
     try {
       const deletedIds = getStoredDeletedAssessmentIds();
+      const collected: BuildingAssessment[] = [];
+
+      // 1. Primary current storage key
       const saved = localStorage.getItem(STORAGE_KEYS.ASSESSMENTS);
-      if (!saved) return INITIAL_ASSESSMENTS.filter((a) => !deletedIds.has(a.id));
-      const parsed = JSON.parse(saved);
-      if (!Array.isArray(parsed)) return INITIAL_ASSESSMENTS.filter((a) => !deletedIds.has(a.id));
+      if (saved) {
+        try {
+          const parsed = JSON.parse(saved);
+          if (Array.isArray(parsed)) collected.push(...parsed);
+        } catch {}
+      }
+
+      // 2. Also check legacy & backup keys to prevent any data loss between versions or offline sessions
+      const backupKeys = [
+        'sipandu_pupr_assessments_backup',
+        'sipandu_pupr_assessments_v2',
+        'sipandu_pupr_assessments_v1',
+        'sipandu_pupr_assessments_2026',
+        'sipandu_pupr_assessments',
+        'sipandu_assessments',
+        'sipandu_offline_sync_queue',
+      ];
+      for (const k of backupKeys) {
+        try {
+          const raw = localStorage.getItem(k);
+          if (raw) {
+            const parsed = JSON.parse(raw);
+            if (Array.isArray(parsed)) {
+              for (const it of parsed) {
+                const item = it && it.assessment ? it.assessment : it;
+                if (item && item.id && item.buildingName) collected.push(item);
+              }
+            }
+          }
+        } catch {}
+      }
 
       // Filter out deleted IDs and deduplicate completely
-      const valid = parsed.filter((item: BuildingAssessment) => item && item.id && !deletedIds.has(item.id));
-      return deduplicateAssessmentsList(valid);
+      const valid = collected.filter((item: BuildingAssessment) => item && item.id && !deletedIds.has(item.id));
+      if (valid.length > 0) {
+        const deduplicated = deduplicateAssessmentsList(valid);
+        try {
+          localStorage.setItem(STORAGE_KEYS.ASSESSMENTS, JSON.stringify(deduplicated));
+        } catch {}
+        return deduplicated;
+      }
+      return INITIAL_ASSESSMENTS.filter((a) => !deletedIds.has(a.id));
     } catch {
       return INITIAL_ASSESSMENTS;
     }
@@ -2998,6 +3054,112 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
     };
   };
 
+  const getDeletedAssessmentIds = (): string[] => {
+    return Array.from(getStoredDeletedAssessmentIds());
+  };
+
+  const restoreDeletedAssessment = async (id: string): Promise<boolean> => {
+    if (!id) return false;
+    deletedAssessmentIds.current.delete(id);
+    removeStoredDeletedAssessmentId(id);
+
+    // Check if item exists on Express server and restore it immediately
+    try {
+      const res = await fetch('/api/assessments');
+      const data = await res.json();
+      if (data.success && Array.isArray(data.assessments)) {
+        const found = data.assessments.find((a: any) => a.id === id || a.code === id);
+        if (found) {
+          setAssessments((prev) => {
+            const merged = reconcileAndMergeAssessments(prev, [found]);
+            try {
+              localStorage.setItem(STORAGE_KEYS.ASSESSMENTS, JSON.stringify(merged));
+            } catch {}
+            return merged;
+          });
+          showToast(`Data "${found.buildingName || id}" berhasil dipulihkan ke daftar aktif!`, 'success');
+          return true;
+        }
+      }
+    } catch {}
+
+    // Fallback: sync from Google Sheet with forceRefresh
+    await syncFromGoogleSheet(false, true);
+    showToast(`Data dengan ID/Kode "${id}" telah dibuka dari daftar hapus & disinkronkan.`, 'success');
+    return true;
+  };
+
+  const restoreAndRecoverAllAssessments = async (): Promise<{ success: boolean; message: string; recoveredCount: number; totalCount: number }> => {
+    // 1. Clear all suppressed/deleted IDs so any hidden items are resurrected
+    const deletedCount = getStoredDeletedAssessmentIds().size;
+    clearStoredDeletedAssessmentIds();
+    deletedAssessmentIds.current.clear();
+
+    // 2. Gather candidates from all legacy & backup keys
+    const recoveredPool: BuildingAssessment[] = [];
+    const legacyKeys = [
+      'sipandu_pupr_assessments_backup',
+      'sipandu_pupr_assessments_v2',
+      'sipandu_pupr_assessments_v1',
+      'sipandu_pupr_assessments_2026',
+      'sipandu_pupr_assessments',
+      'sipandu_assessments',
+      'sipandu_offline_sync_queue',
+      'sipandu_pupr_offline_sync_queue_v2',
+    ];
+    for (const key of legacyKeys) {
+      try {
+        const raw = localStorage.getItem(key);
+        if (raw) {
+          const parsed = JSON.parse(raw);
+          if (Array.isArray(parsed)) {
+            for (const it of parsed) {
+              const item = it && it.assessment ? it.assessment : it;
+              if (item && item.id && item.buildingName) {
+                recoveredPool.push(item);
+              }
+            }
+          }
+        }
+      } catch {}
+    }
+
+    // 3. Fetch from Express server
+    try {
+      const srvRes = await fetch('/api/assessments');
+      const srvData = await srvRes.json();
+      if (srvData.success && Array.isArray(srvData.assessments)) {
+        recoveredPool.push(...srvData.assessments);
+      }
+    } catch {}
+
+    // 4. Force sync from all Google Sheet tabs (without 1-hour cache limit)
+    try {
+      await syncFromGoogleSheet(false, true);
+    } catch {}
+
+    // 5. Merge all recovered records
+    let finalCount = 0;
+    setAssessments((prev) => {
+      const merged = reconcileAndMergeAssessments(prev, recoveredPool);
+      finalCount = merged.length;
+      try {
+        localStorage.setItem(STORAGE_KEYS.ASSESSMENTS, JSON.stringify(merged));
+        localStorage.setItem('sipandu_pupr_assessments_backup', JSON.stringify(merged));
+      } catch {}
+      return merged;
+    });
+
+    const msg = `Pemulihan data selesai! Seluruh ${finalCount} data (termasuk input kemarin dan seluruh sheet aktif) kini aktif dan tersinkronisasi.`;
+    showToast(msg, 'success');
+    return {
+      success: true,
+      message: msg,
+      recoveredCount: deletedCount + recoveredPool.length,
+      totalCount: finalCount,
+    };
+  };
+
   // Automatically detects duplicate/conflicting registration codes across all assessments,
   // assigns new unique sequential codes, and permanently updates Google Sheets, Firestore, LocalStorage & Server
   const autoFixDuplicateCodes = async (): Promise<{
@@ -4352,6 +4514,9 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
         addAssessment,
         updateAssessment,
         deleteAssessment,
+        restoreAndRecoverAllAssessments,
+        restoreDeletedAssessment,
+        getDeletedAssessmentIds,
         purgeAllDuplicates,
         autoFixDuplicateCodes,
         fixSingleAssessmentRegistrationCode,

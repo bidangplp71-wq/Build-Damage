@@ -2823,7 +2823,7 @@ interface SheetAssessmentsCache {
   timestamp: number;
 }
 let memoryAssessmentsCache: SheetAssessmentsCache | null = null;
-const CACHE_TTL_MS = 60 * 60 * 1000; // 1-hour in-memory cache to prevent tab-switching reloads and browser crashes
+const CACHE_TTL_MS = 5 * 1000; // 5-second lightweight cache so newly added and yesterday's inputs appear immediately
 
 /**
  * Clears the Google Sheet memory cache when manual sync is requested
