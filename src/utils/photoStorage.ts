@@ -137,15 +137,10 @@ export async function savePhotosLocally(
 }
 
 /**
- * Get photo by ID from in-memory cache, IndexedDB, or server uploads
+ * Get photo by ID from in-memory cache, IndexedDB, or server uploads with assessment ID validation check
  */
-export async function getPhotoLocally(photoId: string): Promise<string | null> {
+export async function getPhotoLocally(photoId: string, expectedAssessmentId?: string): Promise<string | null> {
   if (!photoId) return null;
-
-  // Check hot memory cache first (0ms)
-  if (memoryPhotoCache.has(photoId)) {
-    return memoryPhotoCache.get(photoId) || null;
-  }
 
   try {
     const db = await getDb();
@@ -157,6 +152,12 @@ export async function getPhotoLocally(photoId: string): Promise<string | null> {
       request.onsuccess = () => {
         const result = request.result as StoredPhotoRecord | undefined;
         if (result?.url) {
+          // Validation check: ensure photo assessmentId maps correctly to expected building assessment ID
+          if (expectedAssessmentId && result.assessmentId && result.assessmentId !== 'general' && result.assessmentId !== expectedAssessmentId) {
+            console.warn(`[PhotoLoader Validation] Photo ID ${photoId} belongs to assessment "${result.assessmentId}", but requested for "${expectedAssessmentId}". Rejected to ensure accurate building data alignment.`);
+            resolve(null);
+            return;
+          }
           memoryPhotoCache.set(photoId, result.url);
           resolve(result.url);
         } else {

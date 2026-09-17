@@ -18,11 +18,12 @@ interface BuildingPhotoGalleryProps {
 const GalleryThumbnail: React.FC<{
   photo: BuildingPhoto;
   index: number;
+  assessmentId?: string;
   isEditable?: boolean;
   onSelect: () => void;
   onEditPhoto?: (photo: BuildingPhoto) => void;
   onDeletePhoto?: (photoId: string) => void;
-}> = ({ photo, index, isEditable, onSelect, onEditPhoto, onDeletePhoto }) => {
+}> = ({ photo, index, assessmentId, isEditable, onSelect, onEditPhoto, onDeletePhoto }) => {
   const isFolder = isGoogleDriveFolderUrl(photo.url || '');
   const normalizedInitial = isFolder ? '' : normalizeDirectImageUrl(photo.url || '');
   const [resolvedUrl, setResolvedUrl] = useState<string>(normalizedInitial);
@@ -46,8 +47,8 @@ const GalleryThumbnail: React.FC<{
       setHasError(false);
       setIsLoading(false);
     } else if (photo.id) {
-      // Try resolving from local IndexedDB cache
-      getPhotoLocally(photo.id).then((local) => {
+      // Try resolving from local IndexedDB cache with assessmentId validation check
+      getPhotoLocally(photo.id, assessmentId).then((local) => {
         if (isMounted) {
           if (local) {
             setResolvedUrl(local);
@@ -65,7 +66,7 @@ const GalleryThumbnail: React.FC<{
     return () => {
       isMounted = false;
     };
-  }, [photo.id, photo.url]);
+  }, [photo.id, photo.url, assessmentId]);
 
   const handleImageError = () => {
     // 1. Try alternative Google Drive direct thumbnail URL if applicable
@@ -79,9 +80,9 @@ const GalleryThumbnail: React.FC<{
       }
     }
 
-    // 2. If remote URL failed, try fallback to local IndexedDB
+    // 2. If remote URL failed, try fallback to local IndexedDB with assessmentId validation check
     if (photo.id && resolvedUrl !== '') {
-      getPhotoLocally(photo.id).then((local) => {
+      getPhotoLocally(photo.id, assessmentId).then((local) => {
         if (local && local !== resolvedUrl) {
           setResolvedUrl(local);
           setHasError(false);
@@ -302,6 +303,7 @@ export const BuildingPhotoGallery: React.FC<BuildingPhotoGalleryProps> = ({
             key={photo.id || index}
             photo={photo}
             index={index}
+            assessmentId={assessmentId}
             isEditable={isEditable}
             onSelect={() => setSelectedPhotoIndex(index)}
             onEditPhoto={onEditPhoto}
