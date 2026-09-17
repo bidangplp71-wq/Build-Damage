@@ -488,6 +488,7 @@ export interface SpreadsheetProfile {
   createdAt: string;
   lastUsedAt?: string;
   isDefault?: boolean;
+  isActiveForLoad?: boolean; // Toggles whether this sheet's data is loaded during sync
 }
 
 export interface GoogleSheetConfig {

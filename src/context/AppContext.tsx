@@ -4034,6 +4034,9 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
     // Filter to valid profiles and ensure unique spreadsheet targets
     const seenSheetTargets = new Set<string>();
     const validProfiles = profilesList.filter((p) => {
+      // Skip profiles that are explicitly disabled for loading
+      if (p.isActiveForLoad === false) return false;
+      
       if (!p.spreadsheetUrl || !isConfiguredSheetUrl(p.spreadsheetUrl)) return false;
       const sheetId = extractSpreadsheetId(p.spreadsheetUrl) || p.spreadsheetUrl;
       if (seenSheetTargets.has(sheetId)) return false;

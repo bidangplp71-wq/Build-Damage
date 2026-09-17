@@ -326,6 +326,39 @@ export const SheetBookSelector: React.FC<SheetBookSelectorProps> = ({
     showToast('Halaman spreadsheet berhasil dihapus dari daftar buku.', 'info');
   };
 
+  // Toggle whether to load this sheet's data during sync
+  const handleToggleLoad = (profile: SpreadsheetProfile) => {
+    if (!isAdmin) {
+      showToast('Hanya Super Admin dan Admin yang dapat mengatur muat data.', 'error');
+      return;
+    }
+    
+    // Prevent disabling the globally active profile just in case
+    if (profile.id === activeProfileId && profile.isActiveForLoad !== false) {
+       // Optional: We might allow disabling it, but usually the active profile should be loaded.
+       // showToast('Halaman aktif global tidak dapat dinonaktifkan pemuatannya.', 'warning');
+    }
+
+    const currentStatus = profile.isActiveForLoad !== false; // defaults to true
+    const updatedProfiles = profiles.map((p) => 
+      p.id === profile.id ? { ...p, isActiveForLoad: !currentStatus } : p
+    );
+
+    updateGoogleSheetConfig({
+      ...googleSheetConfig,
+      spreadsheetProfiles: updatedProfiles,
+    });
+
+    logUserActivity(
+      'SYNC_GOOGLE_SHEET',
+      'Integrasi Google Sheet',
+      `${!currentStatus ? 'Mengaktifkan' : 'Menonaktifkan'} pemuatan data untuk: ${profile.name}`,
+      profile.name
+    );
+
+    showToast(`Pemuatan data untuk halaman ini telah ${!currentStatus ? 'diaktifkan' : 'dinonaktifkan'}. Silakan klik tombol "Refresh Data" di tabel untuk melihat perubahan.`, 'success');
+  };
+
   // Status Badge UI helper
   const renderStatusBadge = (status?: SheetCapacityStatus, rowCount: number = 0, maxRows: number = 2000) => {
     const isOverCapacity = rowCount >= maxRows || status === 'full';
@@ -478,6 +511,7 @@ export const SheetBookSelector: React.FC<SheetBookSelectorProps> = ({
           {profiles.map((profile, idx) => {
             const isGloballyActive = profile.id === activeProfileId;
             const isCurrentlyFiltered = selectedViewProfileId === profile.id;
+            const isLoadDisabled = profile.isActiveForLoad === false;
             const rowCount = profileItemCounts[profile.id] || 0;
             const maxRows = profile.maxCapacityRows || 2000;
             const pct = Math.min(100, Math.round((rowCount / maxRows) * 100));
@@ -490,6 +524,8 @@ export const SheetBookSelector: React.FC<SheetBookSelectorProps> = ({
                     ? 'bg-white border-emerald-400 shadow-sm ring-2 ring-emerald-500/20'
                     : isCurrentlyFiltered
                     ? 'bg-white border-blue-400 shadow-sm ring-2 ring-blue-500/20'
+                    : isLoadDisabled
+                    ? 'bg-slate-50/50 border-slate-200/60 opacity-80'
                     : 'bg-white/80 border-slate-200 hover:border-slate-300 hover:bg-white shadow-2xs'
                 }`}
               >
@@ -501,6 +537,8 @@ export const SheetBookSelector: React.FC<SheetBookSelectorProps> = ({
                         className={`w-7 h-7 rounded-lg flex items-center justify-center font-black text-xs shrink-0 ${
                           isGloballyActive
                             ? 'bg-emerald-600 text-white'
+                            : isLoadDisabled
+                            ? 'bg-slate-200 text-slate-500'
                             : 'bg-slate-100 text-slate-700'
                         }`}
                       >
@@ -508,12 +546,17 @@ export const SheetBookSelector: React.FC<SheetBookSelectorProps> = ({
                       </div>
                       <div className="min-w-0">
                         <div className="flex items-center gap-1.5">
-                          <h4 className="font-bold text-xs text-slate-900 truncate">
+                          <h4 className={`font-bold text-xs truncate ${isLoadDisabled ? 'text-slate-500 line-through' : 'text-slate-900'}`}>
                             {profile.name}
                           </h4>
                         </div>
                         <div className="flex items-center gap-1 mt-0.5">
-                          {isGloballyActive ? (
+                          {isLoadDisabled ? (
+                            <span className="inline-flex items-center gap-1 px-1.5 py-0.2 rounded bg-slate-200 text-slate-600 text-[9px] font-black uppercase">
+                              <X className="w-2.5 h-2.5" />
+                              Pemuatan Diabaikan
+                            </span>
+                          ) : isGloballyActive ? (
                             <span className="inline-flex items-center gap-1 px-1.5 py-0.2 rounded bg-emerald-100 text-emerald-800 text-[9px] font-black uppercase">
                               <CheckCircle2 className="w-2.5 h-2.5" />
                               Aktif Global (Semua User)
@@ -603,11 +646,24 @@ export const SheetBookSelector: React.FC<SheetBookSelectorProps> = ({
                     </button>
                   )}
 
-                  {/* Set Active Global Button for Super Admin / Admin */}
+                  {/* Actions for Super Admin / Admin */}
                   {isAdmin && (
-                    <>
+                    <div className="flex items-center gap-1.5">
+                      <button
+                        type="button"
+                        onClick={() => handleToggleLoad(profile)}
+                        className={`inline-flex items-center gap-1 px-2 py-1 rounded-md font-bold text-[10px] uppercase transition-colors cursor-pointer ${
+                          profile.isActiveForLoad !== false
+                            ? 'bg-blue-100 text-blue-800 hover:bg-blue-200'
+                            : 'bg-slate-200 text-slate-500 hover:bg-slate-300 line-through'
+                        }`}
+                        title={profile.isActiveForLoad !== false ? 'Data halaman ini dimuat saat refresh. Klik untuk non-aktifkan.' : 'Data halaman ini diabaikan. Klik untuk aktifkan muat data.'}
+                      >
+                        {profile.isActiveForLoad !== false ? 'Muat' : 'Skip'}
+                      </button>
+
                       {isGloballyActive ? (
-                        <span className="inline-flex items-center gap-1 text-[11px] font-bold text-emerald-700">
+                        <span className="inline-flex items-center gap-1 text-[11px] font-bold text-emerald-700 ml-1">
                           <Check className="w-3.5 h-3.5 text-emerald-600" />
                           <span>Tujuan Utama</span>
                         </span>
@@ -615,14 +671,14 @@ export const SheetBookSelector: React.FC<SheetBookSelectorProps> = ({
                         <button
                           type="button"
                           onClick={() => handleSetActiveGlobal(profile)}
-                          className="inline-flex items-center gap-1 px-2.5 py-1 bg-emerald-600 hover:bg-emerald-700 text-white rounded-lg font-bold text-[11px] shadow-2xs transition-colors cursor-pointer"
+                          className="inline-flex items-center gap-1 px-2.5 py-1 bg-emerald-600 hover:bg-emerald-700 text-white rounded-lg font-bold text-[11px] shadow-2xs transition-colors cursor-pointer ml-1"
                           title="Setel halaman ini agar otomatis menjadi tujuan simpan seluruh user"
                         >
                           <BookmarkCheck className="w-3 h-3" />
-                          <span>Jadikan Aktif</span>
+                          <span>Jadikan Utama</span>
                         </button>
                       )}
-                    </>
+                    </div>
                   )}
                 </div>
               </div>
