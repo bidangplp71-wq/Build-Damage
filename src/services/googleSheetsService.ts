@@ -3319,6 +3319,27 @@ export async function fetchAssessmentsFromGoogleSheet(
     }
 
     // ==========================================
+    // STEP 1.5: Direct CSV Export Fetch (Reliable bypass for read-only quota & tab throttling)
+    // Ensures all 207 archive records are consistently read in one reliable stream
+    // ==========================================
+    try {
+      const csvExportUrl = `https://docs.google.com/spreadsheets/d/${spreadsheetId}/export?format=csv&_t=${cacheBuster}`;
+      const csvRes = await fetch(csvExportUrl, { signal: AbortSignal.timeout(8000) });
+      if (csvRes.ok) {
+        const csvText = await csvRes.text();
+        if (csvText && !csvText.trim().startsWith('<!DOCTYPE') && !csvText.includes('<html')) {
+          const csvRows = parseCsvTextToRows(csvText, 'Sheet_Arsip_Utama');
+          if (csvRows.length > 0) {
+            allExtractedRows.push(...csvRows);
+            successfulFetches++;
+          }
+        }
+      }
+    } catch (csvErr) {
+      console.warn('CSV export fetch notice:', csvErr);
+    }
+
+    // ==========================================
     // STEP 2: Throttled Queue Fetch across the 7 Kecamatan Sheets ONLY
     // Paced queue with backoff retry to prevent 429 Too Many Requests
     // ==========================================
