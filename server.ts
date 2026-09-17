@@ -1665,12 +1665,13 @@ async function fetchKecamatanRowsOnServer(
     return null;
   };
 
-  // Check candidate tabs: if BOTH active ("Kec. X") and archive ("Kec X") exist, collect both!
+  // Stop after finding the first valid matching tab for this Kecamatan
   for (const alias of candidateTabs) {
     const res = await fetchSingleAliasWithRetry(alias);
     if (res && res.rows.length > 0) {
       collectedRows.push(...res.rows);
       matchedTabs.push(res.matchedTab);
+      break; // Found the active tab for this kecamatan, do NOT duplicate with aliases!
     }
     await new Promise((r) => setTimeout(r, 60));
   }

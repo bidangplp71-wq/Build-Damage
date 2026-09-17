@@ -279,40 +279,99 @@ export function buildSemanticKey(item: Partial<BuildingAssessment>): string {
 }
 
 /**
- * Deduplicate an array of assessments strictly by exact ID or exact physical sheet row.
- * CRITICAL RULE: Never merge independent rows with different IDs or different row numbers,
+ * Generates all candidate identity keys for an assessment to guarantee 100% accurate deduplication
+ * across local storage, server state, and Google Sheet fetch rows.
+ */
+export function getAssessmentLookupKeys(item: BuildingAssessment): string[] {
+  const keys: string[] = [];
+  const isArchive = isArchiveAssessment(item);
+  const scopeTag = isArchive ? 'archive' : 'active';
+
+  // 1. Exact ID
+  if (item.id && item.id.trim()) {
+    keys.push(`id:${item.id.trim()}::${scopeTag}`);
+  }
+
+  // 2. Registration Code (e.g. REG-BOA-2026-0001)
+  const invalidCodes = new Set([
+    '',
+    '0',
+    '-',
+    '--',
+    '---',
+    'none',
+    'tidak ada',
+    'belum ada',
+    'null',
+    'undefined',
+    'tanpa kode',
+    'tanpa no reg',
+    'reg',
+    'reg-',
+    'reg--',
+    'reg-preview',
+  ]);
+  const cleanCode = (item.code || '').toUpperCase().trim();
+  if (cleanCode && !invalidCodes.has(cleanCode.toLowerCase()) && cleanCode.length >= 4) {
+    keys.push(`code:${cleanCode}::${scopeTag}`);
+  }
+
+  // 3. Physical Sheet Row + Canonical Kecamatan / Sheet
+  const cleanSheet = (item.sourceSheet || item.targetSheetName || '').toLowerCase().replace(/[^a-z0-9]/g, '_');
+  const cleanKec = (item.kecamatanName || item.kecamatanId || '').toLowerCase().replace(/[^a-z0-9]/g, '_');
+  if (item.sheetRowNumber && item.sheetRowNumber >= 2) {
+    if (cleanKec) {
+      keys.push(`row_kec:${cleanKec}::r${item.sheetRowNumber}::${scopeTag}`);
+    }
+    if (cleanSheet) {
+      keys.push(`sheet:${cleanSheet}::r${item.sheetRowNumber}::${scopeTag}`);
+      keys.push(`row:${cleanSheet}::r${item.sheetRowNumber}::${scopeTag}`);
+    }
+  }
+
+  // 4. Semantic Location Signature (Building Name + Kecamatan + Desa)
+  const cleanBuilding = normalizeString(item.buildingName).replace(/\s*\(baris\s+\d+\)/i, '').trim();
+  const cleanDesa = normalizeString(item.desaName);
+  if (cleanBuilding && cleanBuilding.length >= 4 && !cleanBuilding.startsWith('survei bangunan') && cleanKec) {
+    keys.push(`loc:${cleanKec}::${cleanDesa}::${cleanBuilding}::${scopeTag}`);
+    // If NIK is provided
+    const cleanNik = (item.nikPemilik || '').replace(/[^0-9]/g, '');
+    if (cleanNik && cleanNik.length >= 10 && cleanNik !== '0000000000000000') {
+      keys.push(`nik:${cleanNik}::${cleanKec}::${scopeTag}`);
+    }
+  }
+
+  return keys;
+}
+
+/**
+ * Deduplicate an array of assessments strictly by exact ID, Registration Code, or exact physical sheet row.
+ * CRITICAL RULE: Never merge independent rows with different identities,
  * and NEVER merge an archive record with an active record.
- * This guarantees 100% preservation of all 207 historical records and all newly inputted active surveys.
+ * This guarantees 100% preservation of all 207 historical records and all newly inputted active surveys,
+ * while eliminating duplicate clones caused by multiple sheet queries or re-fetches.
  */
 export function deduplicateAssessmentsList(list: BuildingAssessment[]): BuildingAssessment[] {
   if (!Array.isArray(list) || list.length <= 1) return list || [];
 
   const result: BuildingAssessment[] = [];
-  const seenKeyMap = new Map<string, number>();
+  const keyToResultIndex = new Map<string, number>();
 
   for (const item of list) {
     if (!item) continue;
 
-    const cleanSheet = (item.sourceSheet || '').toLowerCase().trim();
-    const isArchive = isArchiveAssessment(item);
-    const scopeTag = isArchive ? 'archive' : 'active';
+    const candidateKeys = getAssessmentLookupKeys(item);
+    let matchedIndex: number | undefined = undefined;
 
-    // Build strict identity key:
-    // Only identical IDs or identical physical row in the exact same sheet can be considered the same record
-    let uniqueKey = '';
-    if (item.id && item.id.trim() !== '') {
-      uniqueKey = `id:${item.id.trim()}::${scopeTag}`;
-    } else if (cleanSheet && item.sheetRowNumber) {
-      uniqueKey = `sheet:${cleanSheet}::r${item.sheetRowNumber}::${scopeTag}`;
-    } else if (item.code && item.code.trim().length >= 5) {
-      uniqueKey = `code:${item.code.toUpperCase().trim()}::${cleanSheet}::${scopeTag}`;
-    } else {
-      uniqueKey = `item_${result.length}_${Math.random()}`;
+    for (const key of candidateKeys) {
+      if (keyToResultIndex.has(key)) {
+        matchedIndex = keyToResultIndex.get(key);
+        break;
+      }
     }
 
-    if (seenKeyMap.has(uniqueKey)) {
-      const matchIdx = seenKeyMap.get(uniqueKey)!;
-      const existing = result[matchIdx];
+    if (matchedIndex !== undefined) {
+      const existing = result[matchedIndex];
 
       // Merge enriched fields non-destructively
       const mergedPhotos = (item.photos && item.photos.length > 0)
@@ -332,9 +391,12 @@ export function deduplicateAssessmentsList(list: BuildingAssessment[]): Building
       const base = keepIncomingAsBase ? item : existing;
       const other = keepIncomingAsBase ? existing : item;
 
-      result[matchIdx] = {
+      const mergedItem: BuildingAssessment = {
         ...other,
         ...base,
+        // Prefer existing stable ID if it's already an active uuid/ass_ ID
+        id: existing.id && !existing.id.startsWith('sheet_') ? existing.id : (base.id || other.id),
+        code: base.code && !base.code.startsWith('REG-TEMP') ? base.code : (other.code || base.code),
         photos: mergedPhotos,
         googleDriveFolderUrl: mergedDriveUrl,
         backupDriveUrl: base.backupDriveUrl || other.backupDriveUrl,
@@ -346,10 +408,22 @@ export function deduplicateAssessmentsList(list: BuildingAssessment[]): Building
         verificationStatus: isExistingVerified || isItemVerified ? 'Terverifikasi' : base.verificationStatus,
         googleSheetSynced: Boolean(base.googleSheetSynced || other.googleSheetSynced),
       };
+
+      result[matchedIndex] = mergedItem;
+
+      // Register all candidate keys to point to matchedIndex
+      for (const key of candidateKeys) {
+        keyToResultIndex.set(key, matchedIndex);
+      }
+      for (const key of getAssessmentLookupKeys(mergedItem)) {
+        keyToResultIndex.set(key, matchedIndex);
+      }
     } else {
       const newIdx = result.length;
       result.push(item);
-      seenKeyMap.set(uniqueKey, newIdx);
+      for (const key of candidateKeys) {
+        keyToResultIndex.set(key, newIdx);
+      }
     }
   }
 

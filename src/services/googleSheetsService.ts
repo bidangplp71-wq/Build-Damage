@@ -2474,12 +2474,13 @@ export function parseExtractedRowsToAssessments(
 
     // Deterministic key per physical row from each kecamatan sheet so 100% of rows are preserved
     const cleanBuilding = buildingName.toLowerCase().replace(/\s*\(baris\s+\d+\)/i, '').trim();
+    const canonicalKec = kecInfo.id || kecInfo.name.toLowerCase().replace(/[^a-z0-9]/g, '_');
     const cleanKec = kecInfo.name.toLowerCase().trim();
     const cleanDesa = desaName.toLowerCase().trim();
-    const cleanSheet = (sourceSheet || 'sheet').toLowerCase().replace(/[^a-z0-9]/g, '_');
+    const cleanSheet = (sourceSheet || `Kec. ${kecInfo.name}`).toLowerCase().replace(/[^a-z0-9]/g, '_');
 
     // Each row in each kecamatan sheet is an independent building survey record
-    const dedupeKey = `row:${cleanSheet}::r${sheetRowNumber}`;
+    const dedupeKey = `row:${canonicalKec}::r${sheetRowNumber}`;
 
     // Registration code assignment: automatically guarantee 100% uniqueness even if surveyor did not resequence
     let code = rawCode;
@@ -3307,6 +3308,7 @@ export async function fetchAssessmentsFromGoogleSheet(
           allExtractedRows.push(...res.rows);
           successfulFetches++;
           groupRowsFound += res.rows.length;
+          break; // Stop at the first working tab for this kecamatan, do NOT duplicate with aliases!
         }
         // Small pause between alias probes
         await new Promise((r) => setTimeout(r, 60));
