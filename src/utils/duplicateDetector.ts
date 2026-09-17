@@ -287,15 +287,13 @@ export function buildSemanticKey(item: Partial<BuildingAssessment>): string {
  */
 export function getAssessmentLookupKeys(item: BuildingAssessment): string[] {
   const keys: string[] = [];
-  const isArchive = isArchiveAssessment(item);
-  const scopeTag = isArchive ? 'archive' : 'active';
 
   // 1. Exact Unique ID
   if (item.id && item.id.trim()) {
     keys.push(`id:${item.id.trim()}`);
   }
 
-  // 2. Registration Code + Building Name/Location Signature
+  // 2. Registration Code / Code as ID
   const invalidCodes = new Set([
     '',
     '0',
@@ -314,12 +312,18 @@ export function getAssessmentLookupKeys(item: BuildingAssessment): string[] {
     'reg--',
     'reg-preview',
   ]);
-  const cleanCode = (item.code || '').toUpperCase().trim();
+  const rawCode = (item.code || '').trim();
+  const cleanCode = rawCode.toUpperCase();
   const cleanBuilding = normalizeString(item.buildingName).replace(/\s*\(baris\s+\d+\)/i, '').trim();
   const cleanKec = (item.kecamatanName || item.kecamatanId || '').toLowerCase().replace(/[^a-z0-9]/g, '_');
   const cleanDesa = normalizeString(item.desaName);
 
+  if (rawCode && (rawCode.startsWith('ass_') || rawCode.startsWith('uuid_') || /^[0-9a-f]{8}-[0-9a-f]{4}/i.test(rawCode))) {
+    keys.push(`id:${rawCode}`);
+  }
+
   if (cleanCode && !invalidCodes.has(cleanCode.toLowerCase()) && cleanCode.length >= 4) {
+    keys.push(`code:${cleanCode}`);
     if (cleanBuilding && cleanBuilding.length >= 3 && !cleanBuilding.startsWith('survei bangunan')) {
       keys.push(`code_bldg:${cleanCode}::${cleanBuilding}`);
     }
@@ -329,7 +333,12 @@ export function getAssessmentLookupKeys(item: BuildingAssessment): string[] {
     }
   }
 
-  // 3. Exact Physical Spreadsheet Profile + Sheet Tab + Sheet Row Number
+  // 3. Exact Location + Building Name match (for reliable cross-fetch identity)
+  if (cleanBuilding && cleanBuilding.length >= 4 && !cleanBuilding.startsWith('survei') && cleanKec && cleanDesa) {
+    keys.push(`loc_bldg:${cleanKec}::${cleanDesa}::${cleanBuilding}`);
+  }
+
+  // 4. Exact Physical Spreadsheet Profile + Sheet Tab + Sheet Row Number
   const profileId = (item.targetProfileId || '').toLowerCase().replace(/[^a-z0-9]/g, '_');
   const cleanSheet = (item.sourceSheet || item.targetSheetName || '').toLowerCase().replace(/[^a-z0-9]/g, '_');
   if (item.sheetRowNumber && item.sheetRowNumber >= 2 && cleanSheet) {
@@ -343,7 +352,7 @@ export function getAssessmentLookupKeys(item: BuildingAssessment): string[] {
     }
   }
 
-  // 4. Exact NIK + Kecamatan Match
+  // 5. Exact NIK + Kecamatan Match
   const cleanNik = (item.nikPemilik || '').replace(/[^0-9]/g, '');
   if (cleanNik && cleanNik.length >= 10 && cleanNik !== '0000000000000000' && cleanKec) {
     keys.push(`nik_loc:${cleanNik}::${cleanKec}`);
@@ -357,7 +366,7 @@ export function getAssessmentLookupKeys(item: BuildingAssessment): string[] {
  * or exact physical sheet row within the same profile.
  * CRITICAL RULE: Never merge independent rows with different identities,
  * and NEVER merge an archive record with an active record.
- * This guarantees 100% preservation of all 207 historical records and all 144 newly inputted active surveys (total 351),
+ * This guarantees 100% preservation of all 207 historical records and all newly inputted active surveys,
  * while eliminating duplicate clones caused by multiple sheet queries or re-fetches.
  */
 export function deduplicateAssessmentsList(list: BuildingAssessment[]): BuildingAssessment[] {
@@ -405,10 +414,33 @@ export function deduplicateAssessmentsList(list: BuildingAssessment[]): Building
         continue;
       }
 
-      // Merge enriched fields non-destructively
-      const mergedPhotos = (item.photos && item.photos.length > 0)
-        ? item.photos
-        : (existing.photos || []);
+      // Non-destructive merge of components (preserve detailed user survey data)
+      const existingHasDetailedComps = existing.components && existing.components.some((c) => (c.damagePercentInput || 0) > 0 || c.notes);
+      const incomingHasDetailedComps = item.components && item.components.some((c) => (c.damagePercentInput || 0) > 0 || c.notes);
+      const mergedComponents = incomingHasDetailedComps
+        ? item.components
+        : existingHasDetailedComps
+        ? existing.components
+        : item.components || existing.components;
+
+      // Non-destructive merge of photos
+      const existingPhotos = existing.photos || [];
+      const incomingPhotos = item.photos || [];
+      const photoUrls = new Set<string>();
+      const mergedPhotos: any[] = [];
+      [...existingPhotos, ...incomingPhotos].forEach((p) => {
+        const url = p.url || (p as any).dataUrl || '';
+        if (url && !photoUrls.has(url)) {
+          photoUrls.add(url);
+          mergedPhotos.push(p);
+        } else if (!url && p.id && !mergedPhotos.some((mp) => mp.id === p.id)) {
+          mergedPhotos.push(p);
+        }
+      });
+      if (mergedPhotos.length === 0 && (existingPhotos.length > 0 || incomingPhotos.length > 0)) {
+        mergedPhotos.push(...(existingPhotos.length > 0 ? existingPhotos : incomingPhotos));
+      }
+
       const mergedDriveUrl = item.googleDriveFolderUrl || item.backupDriveUrl || existing.googleDriveFolderUrl || existing.backupDriveUrl;
       const isItemVerified = item.verificationStatus === 'Terverifikasi';
       const isExistingVerified = existing.verificationStatus === 'Terverifikasi';
@@ -428,19 +460,43 @@ export function deduplicateAssessmentsList(list: BuildingAssessment[]): Building
       const resolvedHsbgn = base.hsbgnPerM2 || other.hsbgnPerM2 || 5920000;
       const resolvedRehabCost = base.roundedRehabCost || other.roundedRehabCost || (resolvedArea > 0 && resolvedDamage > 0 ? Math.round(resolvedArea * resolvedHsbgn * (resolvedDamage / 100) * 1.08 / 100000) * 100000 : 0);
 
+      // Stable ID preservation: never discard active ass_ ID or custom UUID in favor of temporary sheet_ ID
+      const stableId = existing.id && !existing.id.startsWith('sheet_')
+        ? existing.id
+        : item.id && !item.id.startsWith('sheet_')
+        ? item.id
+        : base.id || other.id;
+
+      // Stable Code preservation: prefer valid REG- official code
+      const stableCode = base.code && !base.code.startsWith('REG-TEMP') && !base.code.startsWith('ass_')
+        ? base.code
+        : other.code && !other.code.startsWith('REG-TEMP') && !other.code.startsWith('ass_')
+        ? other.code
+        : base.code || other.code;
+
       const mergedItem: BuildingAssessment = {
         ...other,
         ...base,
-        // Prefer existing stable ID if it's already an active uuid/ass_ ID
-        id: existing.id && !existing.id.startsWith('sheet_') ? existing.id : (base.id || other.id),
-        code: base.code && !base.code.startsWith('REG-TEMP') ? base.code : (other.code || base.code),
+        id: stableId,
+        code: stableCode,
         totalFloorAreaM2: resolvedArea,
         totalDamagePercent: resolvedDamage,
         hsbgnPerM2: resolvedHsbgn,
         roundedRehabCost: resolvedRehabCost,
         totalRehabCost: base.totalRehabCost || other.totalRehabCost || resolvedRehabCost,
         costTerbilang: base.costTerbilang || other.costTerbilang || (resolvedRehabCost > 0 ? `${terbilang(resolvedRehabCost)} Rupiah` : '-'),
+        components: mergedComponents,
         photos: mergedPhotos,
+        createdBy: existing.createdBy || item.createdBy || base.createdBy,
+        createdByName: existing.createdByName || item.createdByName || base.createdByName,
+        createdAt: existing.createdAt || item.createdAt || base.createdAt || new Date().toISOString(),
+        headOfDepartment: (base.headOfDepartment?.name && base.headOfDepartment.name !== '-')
+          ? base.headOfDepartment
+          : (other.headOfDepartment?.name && other.headOfDepartment.name !== '-' ? other.headOfDepartment : (base.headOfDepartment || other.headOfDepartment)),
+        analysisTeam: (base.analysisTeam && base.analysisTeam.length > 0)
+          ? base.analysisTeam
+          : (other.analysisTeam && other.analysisTeam.length > 0 ? other.analysisTeam : []),
+        cityLocation: base.cityLocation || other.cityLocation,
         googleDriveFolderUrl: mergedDriveUrl,
         backupDriveUrl: base.backupDriveUrl || other.backupDriveUrl,
         sourceSheet: base.sourceSheet || other.sourceSheet,

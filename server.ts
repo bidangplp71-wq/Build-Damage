@@ -307,6 +307,7 @@ async function forwardAssessmentToGoogleSheet(
 
     const rowData: Record<string, any> = {
       'No Registrasi': assessment.code || assessment.id,
+      'ID Penilaian': assessment.id,
       'Nama Bangunan': assessment.buildingName,
       'Kategori / Fungsi Bangunan': assessment.buildingCategory || 'Gedung Pemerintah',
       'Jenis Bencana': assessment.disasterType || 'Gempa Bumi',
@@ -385,6 +386,7 @@ async function forwardAssessmentToGoogleSheet(
       includeMasterSummary: isExplicit ? false : (config.includeMasterSummarySheet !== false),
       spreadsheetUrl: config.spreadsheetUrl || '',
       spreadsheetId,
+      assessmentId: assessment.id,
       registrationCode: assessment.code || assessment.id,
       previousRegistrationCode: assessment.code || assessment.id,
       data: rowData,

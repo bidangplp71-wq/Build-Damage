@@ -208,6 +208,7 @@ export function formatAssessmentForGoogleSheet(item: BuildingAssessment) {
 
   const rawRow: Record<string, any> = {
     'No Registrasi': item.code || item.id,
+    'ID Penilaian': item.id,
     'Nama Bangunan': item.buildingName,
     'Kategori / Fungsi Bangunan': item.buildingCategory || 'Gedung Pemerintah',
     'Jenis Bencana': item.disasterType,
@@ -999,71 +1000,81 @@ function getOrCreateSheet(ss, name) {
 }
 
 /**
- * Menghapus baris yang cocok berdasarkan No Registrasi, Nama Bangunan, atau nomor baris
+ * Menghapus baris yang cocok berdasarkan No Registrasi, ID Penilaian, atau nomor baris
  */
-function deleteMatchingRow(sheet, regCode, prevRegCode, buildingName, sheetRowNumber) {
+function deleteMatchingRow(sheet, regCode, prevRegCode, buildingName, sheetRowNumber, assessmentId) {
   if (!sheet || sheet.getLastRow() <= 1) return false;
   var allData = sheet.getDataRange().getValues();
   var currentHeaders = allData[0];
+  var colId = -1;
   var colReg = -1;
   var colName = -1;
 
   for (var c = 0; c < currentHeaders.length; c++) {
     var h = String(currentHeaders[c]).toLowerCase().trim();
-    if (colReg === -1 && (h.indexOf('registrasi') !== -1 || h.indexOf('kode') !== -1 || h === 'id')) colReg = c;
-    if (colName === -1 && (h.indexOf('bangunan') !== -1 || h.indexOf('gedung') !== -1 || h.indexOf('pemilik') !== -1 || h === 'nama')) colName = c;
+    if (colId === -1 && (h === 'id penilaian' || h === 'id' || h === 'uuid')) colId = c;
+    if (colReg === -1 && (h.indexOf('registrasi') !== -1 || h.indexOf('kode') !== -1)) colReg = c;
+    if (colName === -1 && (h.indexOf('bangunan') !== -1 || h.indexOf('gedung') !== -1)) colName = c;
   }
 
   var foundIndex = -1;
+  var idTarget = (assessmentId || '').toString().trim().toLowerCase();
   var regTarget = (regCode || '').toString().trim().toLowerCase();
   var prevRegTarget = (prevRegCode || '').toString().trim().toLowerCase();
   var bldgTarget = (buildingName || '').toString().trim().toLowerCase();
 
-  // Match 1: By sheetRowNumber if provided and in bounds
-  if (sheetRowNumber && sheetRowNumber >= 2 && sheetRowNumber <= allData.length) {
-    var candRow = allData[sheetRowNumber - 1];
-    var candName = colName >= 0 ? String(candRow[colName]).toLowerCase().trim() : '';
-    var candReg = colReg >= 0 ? String(candRow[colReg]).toLowerCase().trim() : '';
-    if (!bldgTarget || candName.indexOf(bldgTarget) !== -1 || bldgTarget.indexOf(candName) !== -1 || (regTarget && candReg === regTarget)) {
-      foundIndex = sheetRowNumber;
+  // Match 0: By Exact assessmentId if present
+  if (idTarget && colId >= 0) {
+    for (var r0 = 1; r0 < allData.length; r0++) {
+      if (String(allData[r0][colId]).trim().toLowerCase() === idTarget) {
+        foundIndex = r0 + 1;
+        break;
+      }
     }
   }
 
-  // Match 2: By regCode
-  if (foundIndex === -1 && regTarget && regTarget !== '-' && regTarget.indexOf('assess_') !== 0) {
+  // Match 1: By exact regCode (only if valid non-generic code)
+  if (foundIndex === -1 && regTarget && regTarget !== '-' && regTarget.length >= 4) {
     for (var r1 = 1; r1 < allData.length; r1++) {
-      if ((colReg >= 0 && String(allData[r1][colReg]).trim().toLowerCase() === regTarget) || String(allData[r1][0]).trim().toLowerCase() === regTarget) {
+      var valReg = colReg >= 0 ? String(allData[r1][colReg]).trim().toLowerCase() : '';
+      var valCol0 = String(allData[r1][0]).trim().toLowerCase();
+      if (valReg === regTarget || valCol0 === regTarget) {
         foundIndex = r1 + 1;
         break;
       }
     }
   }
 
-  // Match 3: By prevRegCode
-  if (foundIndex === -1 && prevRegTarget && prevRegTarget !== '-') {
+  // Match 2: By exact prevRegCode
+  if (foundIndex === -1 && prevRegTarget && prevRegTarget !== '-' && prevRegTarget.length >= 4) {
     for (var r2 = 1; r2 < allData.length; r2++) {
-      if ((colReg >= 0 && String(allData[r2][colReg]).trim().toLowerCase() === prevRegTarget) || String(allData[r2][0]).trim().toLowerCase() === prevRegTarget) {
+      var valReg2 = colReg >= 0 ? String(allData[r2][colReg]).trim().toLowerCase() : '';
+      var valCol02 = String(allData[r2][0]).trim().toLowerCase();
+      if (valReg2 === prevRegTarget || valCol02 === prevRegTarget) {
         foundIndex = r2 + 1;
         break;
       }
     }
   }
 
-  // Match 4: By buildingName (case-insensitive)
-  if (foundIndex === -1 && bldgTarget && bldgTarget.length > 2) {
+  // Match 3: By sheetRowNumber if provided, within bounds, and matching building or code exactly
+  if (foundIndex === -1 && sheetRowNumber && sheetRowNumber >= 2 && sheetRowNumber <= allData.length) {
+    var candRow = allData[sheetRowNumber - 1];
+    var candName = colName >= 0 ? String(candRow[colName]).toLowerCase().trim() : '';
+    var candReg = colReg >= 0 ? String(candRow[colReg]).toLowerCase().trim() : '';
+    if ((bldgTarget && candName === bldgTarget) || (regTarget && candReg === regTarget)) {
+      foundIndex = sheetRowNumber;
+    }
+  }
+
+  // Match 4: By EXACT buildingName (strictly equal match, never substring indexOf)
+  if (foundIndex === -1 && bldgTarget && bldgTarget.length >= 5 && !bldgTarget.startsWith('survei bangunan')) {
     for (var r3 = 1; r3 < allData.length; r3++) {
       var rowBldg = colName >= 0 ? String(allData[r3][colName]).trim().toLowerCase() : '';
-      if (rowBldg && (rowBldg === bldgTarget || rowBldg.indexOf(bldgTarget) !== -1 || bldgTarget.indexOf(rowBldg) !== -1)) {
+      if (rowBldg && rowBldg === bldgTarget) {
         foundIndex = r3 + 1;
         break;
       }
-      for (var cc = 0; cc < allData[r3].length; cc++) {
-        if (String(allData[r3][cc]).trim().toLowerCase() === bldgTarget) {
-          foundIndex = r3 + 1;
-          break;
-        }
-      }
-      if (foundIndex !== -1) break;
     }
   }
 
@@ -1092,6 +1103,7 @@ function saveOrUpdateRow(sheet, rowData, regCode, prevRegCode, action, headerBgC
   if (!sheet || !rowData) return;
   extraParams = extraParams || {};
   var bldgName = (extraParams.buildingName || rowData['Nama Bangunan'] || '').toString().trim();
+  var assessmentId = (extraParams.assessmentId || rowData['ID Penilaian'] || rowData['ID'] || '').toString().trim();
   var sheetRowNumber = extraParams.sheetRowNumber;
   var headers = Object.keys(rowData);
   
@@ -1110,55 +1122,73 @@ function saveOrUpdateRow(sheet, rowData, regCode, prevRegCode, action, headerBgC
   
   if (lastRow > 1) {
     var allData = sheet.getDataRange().getValues();
+    var colId = -1;
     var colReg = -1;
     var colName = -1;
     for (var c = 0; c < currentHeaders.length; c++) {
       var h = String(currentHeaders[c]).toLowerCase().trim();
-      if (colReg === -1 && (h.indexOf('registrasi') !== -1 || h.indexOf('kode') !== -1 || h === 'id')) colReg = c;
-      if (colName === -1 && (h.indexOf('bangunan') !== -1 || h.indexOf('gedung') !== -1 || h.indexOf('pemilik') !== -1 || h === 'nama')) colName = c;
+      if (colId === -1 && (h === 'id penilaian' || h === 'id' || h === 'uuid')) colId = c;
+      if (colReg === -1 && (h.indexOf('registrasi') !== -1 || h.indexOf('kode') !== -1)) colReg = c;
+      if (colName === -1 && (h.indexOf('bangunan') !== -1 || h.indexOf('gedung') !== -1)) colName = c;
     }
 
     var foundIndex = -1;
+    var idTarget = assessmentId.toLowerCase();
     var regTarget = (regCode || '').toString().trim().toLowerCase();
     var prevRegTarget = (prevRegCode || '').toString().trim().toLowerCase();
     var bldgTarget = bldgName.toLowerCase();
 
-    // Match 1: By sheetRowNumber if provided
-    if (sheetRowNumber && sheetRowNumber >= 2 && sheetRowNumber <= allData.length) {
-      var candRow = allData[sheetRowNumber - 1];
-      var candName = colName >= 0 ? String(candRow[colName]).toLowerCase().trim() : '';
-      if (!bldgTarget || candName.indexOf(bldgTarget) !== -1 || bldgTarget.indexOf(candName) !== -1) {
-        foundIndex = sheetRowNumber;
+    // 1. Check by exact unique ID Penilaian if column exists
+    if (idTarget && colId >= 0) {
+      for (var r0 = 1; r0 < allData.length; r0++) {
+        if (String(allData[r0][colId]).trim().toLowerCase() === idTarget) {
+          foundIndex = r0 + 1;
+          break;
+        }
       }
     }
 
-    // Match 2: By regCode
-    if (foundIndex === -1 && regTarget && regTarget !== '-' && regTarget.indexOf('assess_') !== 0) {
+    // 2. Check by exact regCode (only if real valid code)
+    if (foundIndex === -1 && regTarget && regTarget !== '-' && regTarget.length >= 4) {
       for (var r1 = 1; r1 < allData.length; r1++) {
-        if ((colReg >= 0 && String(allData[r1][colReg]).trim().toLowerCase() === regTarget) || String(allData[r1][0]).trim().toLowerCase() === regTarget) {
+        var valReg = colReg >= 0 ? String(allData[r1][colReg]).trim().toLowerCase() : '';
+        var valCol0 = String(allData[r1][0]).trim().toLowerCase();
+        if (valReg === regTarget || valCol0 === regTarget) {
           foundIndex = r1 + 1;
           break;
         }
       }
     }
 
-    // Match 3: By prevRegCode
-    if (foundIndex === -1 && prevRegTarget && prevRegTarget !== '-') {
-      for (var r2 = 1; r2 < allData.length; r2++) {
-        if ((colReg >= 0 && String(allData[r2][colReg]).trim().toLowerCase() === prevRegTarget) || String(allData[r2][0]).trim().toLowerCase() === prevRegTarget) {
-          foundIndex = r2 + 1;
-          break;
+    // 3. If action is 'update' (not insert), also check prevRegCode, sheetRowNumber, and exact building name
+    if (action === 'update' || action === 'delete') {
+      if (foundIndex === -1 && prevRegTarget && prevRegTarget !== '-' && prevRegTarget.length >= 4) {
+        for (var r2 = 1; r2 < allData.length; r2++) {
+          var valReg2 = colReg >= 0 ? String(allData[r2][colReg]).trim().toLowerCase() : '';
+          var valCol02 = String(allData[r2][0]).trim().toLowerCase();
+          if (valReg2 === prevRegTarget || valCol02 === prevRegTarget) {
+            foundIndex = r2 + 1;
+            break;
+          }
         }
       }
-    }
 
-    // Match 4: By buildingName
-    if (foundIndex === -1 && bldgTarget && bldgTarget.length > 2) {
-      for (var r3 = 1; r3 < allData.length; r3++) {
-        var rowBldg = colName >= 0 ? String(allData[r3][colName]).trim().toLowerCase() : '';
-        if (rowBldg && (rowBldg === bldgTarget || rowBldg.indexOf(bldgTarget) !== -1 || bldgTarget.indexOf(rowBldg) !== -1)) {
-          foundIndex = r3 + 1;
-          break;
+      if (foundIndex === -1 && sheetRowNumber && sheetRowNumber >= 2 && sheetRowNumber <= allData.length) {
+        var candRow = allData[sheetRowNumber - 1];
+        var candName = colName >= 0 ? String(candRow[colName]).toLowerCase().trim() : '';
+        var candReg = colReg >= 0 ? String(candRow[colReg]).toLowerCase().trim() : '';
+        if ((bldgTarget && candName === bldgTarget) || (regTarget && candReg === regTarget)) {
+          foundIndex = sheetRowNumber;
+        }
+      }
+
+      if (foundIndex === -1 && bldgTarget && bldgTarget.length >= 5 && !bldgTarget.startsWith('survei bangunan')) {
+        for (var r3 = 1; r3 < allData.length; r3++) {
+          var rowBldg = colName >= 0 ? String(allData[r3][colName]).trim().toLowerCase() : '';
+          if (rowBldg && rowBldg === bldgTarget) {
+            foundIndex = r3 + 1;
+            break;
+          }
         }
       }
     }
@@ -2472,7 +2502,10 @@ export function parseExtractedRowsToAssessments(
     const noKkPemilik = String(getVal(rowObj, ['No KK Pemilik', 'No KK', 'Nomor KK', 'No. KK']) || '0');
 
     // Deterministic key per physical row from each kecamatan sheet so 100% of rows are preserved
-    const rawId = String(getVal(rowObj, ['ID Penilaian', 'ID', 'ID Gedung', 'Assessment ID', 'AssessmentId', 'UUID']) || '').trim();
+    let rawId = String(getVal(rowObj, ['ID Penilaian', 'ID', 'ID Gedung', 'Assessment ID', 'AssessmentId', 'UUID']) || '').trim();
+    if (!rawId && rawCode && (rawCode.startsWith('ass_') || rawCode.startsWith('uuid_') || /^[0-9a-f]{8}-[0-9a-f]{4}/i.test(rawCode))) {
+      rawId = rawCode;
+    }
     const cleanBuilding = buildingName.toLowerCase().replace(/\s*\(baris\s+\d+\)/i, '').trim();
     const cleanBldgSlug = cleanBuilding.replace(/[^a-z0-9]/g, '').slice(0, 16);
     const canonicalKec = kecInfo.id || kecInfo.name.toLowerCase().replace(/[^a-z0-9]/g, '_');

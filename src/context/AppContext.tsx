@@ -2625,9 +2625,19 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
       ? data.id.trim()
       : `ass_${Date.now()}_${Math.random().toString(36).substring(2, 9)}`;
 
+    const rawCode = (data.code || '').trim();
+    const finalCode = (rawCode && !rawCode.startsWith('REG-TEMP') && !rawCode.startsWith('REG-PREVIEW') && rawCode.length >= 3)
+      ? rawCode
+      : generateNextRegistrationCode(assessments);
+    const targetKecName = data.kecamatanName || 'Boawae';
+    const finalSheetName = data.targetSheetName || data.sourceSheet || `Kec. ${targetKecName}`;
+
     const assessmentToSave: BuildingAssessment = {
       ...data,
       id: finalId,
+      code: finalCode,
+      targetSheetName: finalSheetName,
+      sourceSheet: data.sourceSheet || finalSheetName,
       createdAt: data.createdAt || new Date().toISOString(),
       updatedAt: new Date().toISOString(),
       googleSheetSynced: hasGSheet,
