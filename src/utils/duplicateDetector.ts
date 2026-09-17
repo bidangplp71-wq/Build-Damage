@@ -392,25 +392,6 @@ export function deduplicateAssessmentsList(list: BuildingAssessment[]): Building
         ? existing.components
         : item.components || existing.components;
 
-      // Non-destructive merge of photos
-      const existingPhotos = existing.photos || [];
-      const incomingPhotos = item.photos || [];
-      const photoUrls = new Set<string>();
-      const mergedPhotos: any[] = [];
-      [...existingPhotos, ...incomingPhotos].forEach((p) => {
-        const url = p.url || (p as any).dataUrl || '';
-        if (url && !photoUrls.has(url)) {
-          photoUrls.add(url);
-          mergedPhotos.push(p);
-        } else if (!url && p.id && !mergedPhotos.some((mp) => mp.id === p.id)) {
-          mergedPhotos.push(p);
-        }
-      });
-      if (mergedPhotos.length === 0 && (existingPhotos.length > 0 || incomingPhotos.length > 0)) {
-        mergedPhotos.push(...(existingPhotos.length > 0 ? existingPhotos : incomingPhotos));
-      }
-
-      const mergedDriveUrl = item.googleDriveFolderUrl || item.backupDriveUrl || existing.googleDriveFolderUrl || existing.backupDriveUrl;
       const isItemVerified = item.verificationStatus === 'Terverifikasi';
       const isExistingVerified = existing.verificationStatus === 'Terverifikasi';
       const existingTime = new Date(existing.updatedAt || existing.createdAt || 0).getTime();
@@ -420,6 +401,38 @@ export function deduplicateAssessmentsList(list: BuildingAssessment[]): Building
         : !isItemVerified && isExistingVerified
         ? false
         : incomingTime >= existingTime;
+
+      // Strict photo isolation: only merge photos if they represent the exact same building ID, Code, or exact Name.
+      // Never mix photos between different buildings (e.g. school vs market).
+      const areSameBuilding = (existing.id && item.id && existing.id === item.id) ||
+        (existing.code && item.code && existing.code === item.code) ||
+        (existing.buildingName && item.buildingName && existing.buildingName.toLowerCase().trim() === item.buildingName.toLowerCase().trim());
+
+      const existingPhotos = existing.photos || [];
+      const incomingPhotos = item.photos || [];
+      const mergedPhotos: any[] = [];
+
+      if (areSameBuilding) {
+        const photoUrls = new Set<string>();
+        [...existingPhotos, ...incomingPhotos].forEach((p) => {
+          const url = p.url || (p as any).dataUrl || '';
+          if (url && !photoUrls.has(url)) {
+            photoUrls.add(url);
+            mergedPhotos.push(p);
+          } else if (!url && p.id && !mergedPhotos.some((mp) => mp.id === p.id)) {
+            mergedPhotos.push(p);
+          }
+        });
+        if (mergedPhotos.length === 0) {
+          mergedPhotos.push(...(existingPhotos.length > 0 ? existingPhotos : incomingPhotos));
+        }
+      } else {
+        // Different buildings: strictly keep the base item's photos, do not cross-contaminate
+        const basePhotos = keepIncomingAsBase ? incomingPhotos : existingPhotos;
+        mergedPhotos.push(...basePhotos);
+      }
+
+      const mergedDriveUrl = item.googleDriveFolderUrl || item.backupDriveUrl || existing.googleDriveFolderUrl || existing.backupDriveUrl;
 
       const base = keepIncomingAsBase ? item : existing;
       const other = keepIncomingAsBase ? existing : item;

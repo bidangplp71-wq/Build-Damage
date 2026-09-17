@@ -682,13 +682,14 @@ function doPost(e) {
     var json = JSON.parse(e.postData.contents);
     var action = json.action || 'insert';
     var splitByKecamatan = json.splitByKecamatan !== false; // Default true (Multi-Sheet per Kecamatan)
+    var includeMasterSummary = json.includeMasterSummary !== false;
     var masterSheetName = json.sheetName || "Data_Penilaian_Kerusakan_PUPR";
     
     var ss;
     var targetId = json.spreadsheetId;
     if (!targetId && json.spreadsheetUrl) {
-      var m = json.spreadsheetUrl.match(/\/spreadsheets\/d\/([a-zA-Z0-9-_]+)/);
-      if (m && m[1]) targetId = m[1];
+      var m = json.spreadsheetUrl.match(new RegExp('/spreadsheets/d/([a-zA-Z0-9-_]+)'));
+      if (m && m[1]) { targetId = m[1]; }
     }
     if (targetId) {
       try {

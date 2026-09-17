@@ -248,8 +248,14 @@ function deduplicateServerAssessments(list: any[]): any[] {
 
     if (matchIdx !== undefined) {
       const existing = result[matchIdx];
-      const mergedPhotos =
-        item.photos && item.photos.length > 0 ? item.photos : existing.photos || [];
+      const areSameBldg = (existing.id && item.id && existing.id === item.id) ||
+        (existing.code && item.code && existing.code === item.code) ||
+        (existing.buildingName && item.buildingName && String(existing.buildingName).toLowerCase().trim() === String(item.buildingName).toLowerCase().trim());
+
+      const mergedPhotos = areSameBldg
+        ? [...(existing.photos || []), ...(item.photos || [])].filter((p, idx, arr) => arr.findIndex(x => (x.url || (x as any).dataUrl) === (p.url || (p as any).dataUrl)) === idx)
+        : (new Date(item.updatedAt || item.createdAt || 0).getTime() >= new Date(existing.updatedAt || existing.createdAt || 0).getTime() ? (item.photos || existing.photos || []) : (existing.photos || item.photos || []));
+
       const existingTime = new Date(existing.updatedAt || existing.createdAt || 0).getTime();
       const incomingTime = new Date(item.updatedAt || item.createdAt || 0).getTime();
       
