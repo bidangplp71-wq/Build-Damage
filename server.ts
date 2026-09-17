@@ -233,10 +233,6 @@ function deduplicateServerAssessments(list: any[]): any[] {
     if (cleanBldg && cleanBldg.length >= 4 && !cleanBldg.startsWith('survei lapangan') && cleanKec) {
       keys.push(`loc_bldg:${cleanKec}::${cleanDesa || 'nodesa'}::${cleanBldg}`);
     }
-    const cleanSheet = String(item.sourceSheet || item.targetSheetName || '').toLowerCase().replace(/[^a-z0-9]/g, '_');
-    if (item.sheetRowNumber && item.sheetRowNumber >= 2 && cleanSheet) {
-      keys.push(`sheet_row:${cleanSheet}::r${item.sheetRowNumber}`);
-    }
 
     let matchIdx: number | undefined = undefined;
     for (const k of keys) {

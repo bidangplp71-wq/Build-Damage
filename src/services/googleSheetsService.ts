@@ -2508,15 +2508,13 @@ export function parseExtractedRowsToAssessments(
       rawId = rawCode;
     }
     const cleanBuilding = buildingName.toLowerCase().replace(/\s*\(baris\s+\d+\)/i, '').trim();
-    const cleanBldgSlug = cleanBuilding.replace(/[^a-z0-9]/g, '').slice(0, 16);
+    const cleanBldgSlug = cleanBuilding.replace(/[^a-z0-9]/g, '').slice(0, 24);
     const canonicalKec = kecInfo.id || kecInfo.name.toLowerCase().replace(/[^a-z0-9]/g, '_');
-    const cleanKec = kecInfo.name.toLowerCase().trim();
     const cleanDesa = desaName.toLowerCase().trim();
-    const cleanSheet = (sourceSheet || `Kec. ${kecInfo.name}`).toLowerCase().replace(/[^a-z0-9]/g, '_');
 
-    // Unique per-row deterministic key and ID incorporating building signature
-    const stableId = rawId || `sheet_${cleanSheet}_r${sheetRowNumber}_${cleanBldgSlug || cleanKec}`;
-    const dedupeKey = rawId || `${cleanSheet}::r${sheetRowNumber}::${cleanBldgSlug || cleanKec}`;
+    // Unique deterministic key by building name & location, preventing duplicate rows for the same building
+    const stableId = rawId || `sheet_${canonicalKec}_${cleanBldgSlug || 'bldg'}`;
+    const dedupeKey = rawId || (rawCode && rawCode.length > 2 && !rawCode.startsWith('REG-TEMP') ? `code_${rawCode.toLowerCase().trim()}` : `${canonicalKec}::${cleanDesa}::${cleanBldgSlug}`);
 
     // Registration code assignment: automatically guarantee 100% uniqueness even if surveyor did not resequence
     let code = rawCode;
@@ -2836,7 +2834,28 @@ export function parseExtractedRowsToAssessments(
     resultsMap.set(dedupeKey, newAssessment);
   });
 
-  return Array.from(resultsMap.values());
+  const rawList = Array.from(resultsMap.values());
+  const finalMap = new Map<string, BuildingAssessment>();
+  for (const item of rawList) {
+    const key = (item.code && item.code.trim().length > 2 && !item.code.startsWith('REG-PUP-2026-000'))
+      ? `code_${item.code.toLowerCase().trim()}`
+      : `${item.kecamatanId || 'kec'}::${(item.buildingName || '').toLowerCase().replace(/[^a-z0-9]/g, '')}`;
+
+    if (finalMap.has(key)) {
+      const existing = finalMap.get(key)!;
+      const mergedPhotos = [...(existing.photos || []), ...(item.photos || [])].filter((p, i, arr) => arr.findIndex(x => (x.url || (x as any).dataUrl) === (p.url || (p as any).dataUrl)) === i);
+      finalMap.set(key, {
+        ...existing,
+        photos: mergedPhotos,
+        totalDamagePercent: Math.max(existing.totalDamagePercent || 0, item.totalDamagePercent || 0),
+        roundedRehabCost: Math.max(existing.roundedRehabCost || 0, item.roundedRehabCost || 0),
+      });
+    } else {
+      finalMap.set(key, item);
+    }
+  }
+
+  return Array.from(finalMap.values());
 }
 
 /**
