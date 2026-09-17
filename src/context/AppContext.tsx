@@ -4207,9 +4207,8 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
     const hasWebhook = Boolean(googleSheetConfig.webhookUrl && googleSheetConfig.webhookUrl.startsWith('http'));
 
     if (hasSpreadsheet || hasWebhook) {
-      // 1. Initial Load: Run only once upon opening the application smoothly
+      // 1. Initial Load: Run once upon opening the application with live animated progress notification
       if (!hasLoadedInitialGoogleSheetRef.current) {
-        hasLoadedInitialGoogleSheetRef.current = true;
         lastSheetSyncTimestampRef.current = Date.now();
         syncFromGoogleSheet(false, false);
         fetchUsersFromSheet();

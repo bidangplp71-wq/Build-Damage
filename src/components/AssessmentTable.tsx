@@ -1044,6 +1044,47 @@ export const AssessmentTable: React.FC = () => {
         })}
       </div>
 
+      {/* Real-time Inline Loading Notification Banner in Table View */}
+      {sheetSyncProgress && sheetSyncProgress.isLoading && (
+        <div className="p-3.5 bg-gradient-to-r from-blue-900 via-indigo-950 to-slate-900 rounded-2xl text-white border border-cyan-500/40 shadow-md animate-in fade-in slide-in-from-top-2 duration-300">
+          <div className="flex items-center justify-between gap-3">
+            <div className="flex items-center gap-2.5 min-w-0">
+              <div className="p-2 rounded-xl bg-cyan-500/20 text-cyan-400 border border-cyan-500/30 shrink-0">
+                <RefreshCw className="w-4 h-4 animate-spin text-cyan-400" />
+              </div>
+              <div className="min-w-0">
+                <div className="flex items-center gap-2">
+                  <span className="text-[10px] font-extrabold uppercase tracking-wider text-cyan-300 bg-cyan-950 px-2 py-0.5 rounded-full border border-cyan-800">
+                    Sinkronisasi Data Berlangsung
+                  </span>
+                  <span className="text-[10px] font-mono text-slate-300">
+                    Step {sheetSyncProgress.currentStep}/{sheetSyncProgress.totalSteps}
+                  </span>
+                </div>
+                <p className="text-xs font-semibold text-white mt-0.5 truncate">
+                  {sheetSyncProgress.statusMessage || `Membaca data: Kec. ${sheetSyncProgress.currentKecamatan || 'Aesesa'}...`}
+                </p>
+              </div>
+            </div>
+            <div className="text-right shrink-0">
+              <span className="text-base font-black font-mono text-cyan-400">
+                {sheetSyncProgress.percent}%
+              </span>
+              <div className="text-[10px] text-slate-400">
+                {sheetSyncProgress.totalLoaded} gedung
+              </div>
+            </div>
+          </div>
+          {/* Animated Progress Bar */}
+          <div className="w-full bg-slate-800 h-1.5 rounded-full overflow-hidden mt-2.5">
+            <div
+              className="bg-gradient-to-r from-cyan-400 via-blue-500 to-emerald-400 h-full transition-all duration-300"
+              style={{ width: `${Math.max(8, sheetSyncProgress.percent)}%` }}
+            />
+          </div>
+        </div>
+      )}
+
       {/* Comprehensive Filter Toolbar */}
       <div className="bg-white p-4 rounded-2xl border border-slate-200 shadow-xs space-y-3">
         <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-3">
