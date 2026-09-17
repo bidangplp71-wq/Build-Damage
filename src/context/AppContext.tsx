@@ -4026,17 +4026,17 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
         fetchUsersFromSheet();
       }
 
-      // 2. Strict 1-Hour Schedule (3,600,000 ms) as specified by user
-      const ONE_HOUR_MS = 60 * 60 * 1000;
+      // 2. Periodic Background Sync (every 60 seconds) so new rows entered in Google Sheets appear automatically
+      const POLL_INTERVAL_MS = 60 * 1000;
       const intervalId = setInterval(() => {
         const now = Date.now();
-        if (now - lastSheetSyncTimestampRef.current >= ONE_HOUR_MS) {
+        if (now - lastSheetSyncTimestampRef.current >= POLL_INTERVAL_MS) {
           lastSheetSyncTimestampRef.current = now;
           clearGoogleSheetsMemoryCache();
           syncFromGoogleSheet(false, true);
           fetchUsersFromSheet();
         }
-      }, ONE_HOUR_MS);
+      }, POLL_INTERVAL_MS);
 
       return () => clearInterval(intervalId);
     }

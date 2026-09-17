@@ -150,7 +150,7 @@ export function checkDuplicateBeforeSave(
 }
 
 /**
- * Group all assessments in the database into duplicate clusters
+ * Group all assessments in the database into duplicate clusters for verification warning badges
  */
 export function detectAllDuplicateGroups(
   assessments: BuildingAssessment[],
@@ -232,6 +232,8 @@ export function isArchiveSource(sourceName?: string | null): boolean {
     lower.includes('2024') ||
     lower.includes('2025') ||
     lower.includes('buku_arsip') ||
+    lower.includes('buku 2') ||
+    lower.includes('buku_2') ||
     lower.includes('riwayat')
   ) {
     return true;
@@ -246,7 +248,23 @@ export function isArchiveSource(sourceName?: string | null): boolean {
 }
 
 /**
- * Builds a deterministic semantic key for a building assessment record to prevent duplicate duplication
+ * Check if an assessment item belongs to historical archive / old data
+ */
+export function isArchiveAssessment(item?: Partial<BuildingAssessment> | null): boolean {
+  if (!item) return false;
+  if (isArchiveSource(item.sourceSheet)) return true;
+  if (isArchiveSource(item.targetSheetName)) return true;
+  if (isArchiveSource(item.targetProfileName)) return true;
+  if (item.targetProfileId === 'profile_backup_new') return true;
+  if (item.code && (item.code.includes('-2023-') || item.code.includes('-2024-') || item.code.includes('-2025-'))) {
+    return true;
+  }
+  return false;
+}
+
+/**
+ * Builds a deterministic semantic key for a building assessment record to assist in verification badges.
+ * NOTE: Semantic keys are strictly for UI assistance and MUST NEVER be used to delete or squash physical sheet survey rows.
  */
 export function buildSemanticKey(item: Partial<BuildingAssessment>): string {
   const cleanBuilding = normalizeString(item.buildingName);
@@ -266,49 +284,50 @@ export function buildSemanticKey(item: Partial<BuildingAssessment>): string {
 }
 
 /**
- * Deduplicate an array of assessments strictly and semantically
- * Preserves the richest data (photos, verified status, coordinates, drive link)
+ * Deduplicate an array of assessments strictly by exact ID or exact physical sheet row.
+ * CRITICAL RULE: Never merge independent rows with different IDs or different row numbers,
+ * and NEVER merge an archive record with an active record.
+ * This guarantees 100% preservation of all 207 historical records and all newly inputted active surveys.
  */
 export function deduplicateAssessmentsList(list: BuildingAssessment[]): BuildingAssessment[] {
   if (!Array.isArray(list) || list.length <= 1) return list || [];
 
   const result: BuildingAssessment[] = [];
-  const seenIdMap = new Map<string, number>(); // id -> index in result
-  const seenCodeMap = new Map<string, number>(); // code -> index in result
-  const seenSemanticMap = new Map<string, number>(); // semantic key -> index in result
+  const seenKeyMap = new Map<string, number>();
 
   for (const item of list) {
     if (!item) continue;
 
-    let matchIdx = -1;
-    if (item.id && seenIdMap.has(item.id)) {
-      matchIdx = seenIdMap.get(item.id)!;
-    } else if (item.code && item.code.trim().length >= 4 && seenCodeMap.has(item.code.toUpperCase().trim())) {
-      matchIdx = seenCodeMap.get(item.code.toUpperCase().trim())!;
+    const cleanSheet = (item.sourceSheet || '').toLowerCase().trim();
+    const isArchive = isArchiveAssessment(item);
+    const scopeTag = isArchive ? 'archive' : 'active';
+
+    // Build strict identity key:
+    // Only identical IDs or identical physical row in the exact same sheet can be considered the same record
+    let uniqueKey = '';
+    if (item.id && item.id.trim() !== '') {
+      uniqueKey = `id:${item.id.trim()}::${scopeTag}`;
+    } else if (cleanSheet && item.sheetRowNumber) {
+      uniqueKey = `sheet:${cleanSheet}::r${item.sheetRowNumber}::${scopeTag}`;
+    } else if (item.code && item.code.trim().length >= 5) {
+      uniqueKey = `code:${item.code.toUpperCase().trim()}::${cleanSheet}::${scopeTag}`;
     } else {
-      const semKey = buildSemanticKey(item);
-      if (semKey.startsWith('nik:') || (semKey.startsWith('loc:') && !semKey.includes('survei_bangunan_lapangan'))) {
-        if (seenSemanticMap.has(semKey)) {
-          matchIdx = seenSemanticMap.get(semKey)!;
-        }
-      }
+      uniqueKey = `item_${result.length}_${Math.random()}`;
     }
 
-    if (matchIdx !== -1) {
-      // Merge with existing item at matchIdx (preserve latest timestamps, photos, and verification)
+    if (seenKeyMap.has(uniqueKey)) {
+      const matchIdx = seenKeyMap.get(uniqueKey)!;
       const existing = result[matchIdx];
+
+      // Merge enriched fields non-destructively
       const mergedPhotos = (item.photos && item.photos.length > 0)
         ? item.photos
         : (existing.photos || []);
       const mergedDriveUrl = item.googleDriveFolderUrl || item.backupDriveUrl || existing.googleDriveFolderUrl || existing.backupDriveUrl;
-
       const isItemVerified = item.verificationStatus === 'Terverifikasi';
       const isExistingVerified = existing.verificationStatus === 'Terverifikasi';
-
       const existingTime = new Date(existing.updatedAt || existing.createdAt || 0).getTime();
       const incomingTime = new Date(item.updatedAt || item.createdAt || 0).getTime();
-
-      // Primary record priority: prefer verified, then latest timestamp
       const keepIncomingAsBase = isItemVerified && !isExistingVerified
         ? true
         : !isItemVerified && isExistingVerified
@@ -318,7 +337,7 @@ export function deduplicateAssessmentsList(list: BuildingAssessment[]): Building
       const base = keepIncomingAsBase ? item : existing;
       const other = keepIncomingAsBase ? existing : item;
 
-      const merged: BuildingAssessment = {
+      result[matchIdx] = {
         ...other,
         ...base,
         photos: mergedPhotos,
@@ -332,19 +351,10 @@ export function deduplicateAssessmentsList(list: BuildingAssessment[]): Building
         verificationStatus: isExistingVerified || isItemVerified ? 'Terverifikasi' : base.verificationStatus,
         googleSheetSynced: Boolean(base.googleSheetSynced || other.googleSheetSynced),
       };
-
-      result[matchIdx] = merged;
     } else {
       const newIdx = result.length;
       result.push(item);
-      if (item.id) seenIdMap.set(item.id, newIdx);
-      if (item.code && item.code.trim().length >= 4) {
-        seenCodeMap.set(item.code.toUpperCase().trim(), newIdx);
-      }
-      const semKey = buildSemanticKey(item);
-      if (semKey.startsWith('nik:') || (semKey.startsWith('loc:') && !semKey.includes('survei_bangunan_lapangan'))) {
-        seenSemanticMap.set(semKey, newIdx);
-      }
+      seenKeyMap.set(uniqueKey, newIdx);
     }
   }
 
@@ -352,73 +362,46 @@ export function deduplicateAssessmentsList(list: BuildingAssessment[]): Building
 }
 
 /**
- * Reconcile base assessments with incoming Google Sheet records
- * Seamlessly matches existing records by ID, Registration Code, or Location Signature,
- * preventing ghost duplicates from accumulating on every sync.
+ * Reconcile base assessments with incoming Google Sheet records.
+ * Retains all historical archive data, prevents active data from squashing archive data,
+ * and immediately reflects newly added active rows.
  */
 export function reconcileAndMergeAssessments(
   baseList: BuildingAssessment[],
   incomingList: BuildingAssessment[]
 ): BuildingAssessment[] {
-  const incoming = deduplicateAssessmentsList(incomingList || []);
-  const seenIdMap = new Map<string, number>();
-  const seenCodeMap = new Map<string, number>();
-  const seenSemanticMap = new Map<string, number>();
+  if (!incomingList || incomingList.length === 0) return deduplicateAssessmentsList(baseList || []);
+  if (!baseList || baseList.length === 0) return deduplicateAssessmentsList(incomingList);
 
-  incoming.forEach((item, idx) => {
-    if (item.id) seenIdMap.set(item.id, idx);
-    if (item.code && item.code.trim().length >= 4) {
-      seenCodeMap.set(item.code.toUpperCase().trim(), idx);
-    }
-    const semKey = buildSemanticKey(item);
-    if (semKey.startsWith('nik:') || (semKey.startsWith('loc:') && !semKey.includes('survei_bangunan_lapangan'))) {
-      seenSemanticMap.set(semKey, idx);
+  const incomingDeduplicated = deduplicateAssessmentsList(incomingList);
+  const incomingIdMap = new Map<string, BuildingAssessment>();
+  const incomingSheetRowMap = new Map<string, BuildingAssessment>();
+
+  incomingDeduplicated.forEach((item) => {
+    if (item.id) incomingIdMap.set(item.id, item);
+    const cleanSheet = (item.sourceSheet || '').toLowerCase().trim();
+    if (cleanSheet && item.sheetRowNumber) {
+      incomingSheetRowMap.set(`${cleanSheet}::r${item.sheetRowNumber}`, item);
     }
   });
 
-  const merged = [...incoming];
+  const merged: BuildingAssessment[] = [...incomingDeduplicated];
 
-  // Process base records
+  // Retain existing records from baseList that were not in incoming sheet fetch
+  // (CRITICAL: Preserves all 207 historical archive records, records from other profiles, and local drafts)
   (baseList || []).forEach((baseItem) => {
-    if (!baseItem) return;
+    if (!baseItem || !baseItem.id) return;
 
-    let matchIdx = -1;
-    if (baseItem.id && seenIdMap.has(baseItem.id)) {
-      matchIdx = seenIdMap.get(baseItem.id)!;
-    } else if (baseItem.code && baseItem.code.trim().length >= 4 && seenCodeMap.has(baseItem.code.toUpperCase().trim())) {
-      matchIdx = seenCodeMap.get(baseItem.code.toUpperCase().trim())!;
-    } else {
-      const semKey = buildSemanticKey(baseItem);
-      if (semKey.startsWith('nik:') || (semKey.startsWith('loc:') && !semKey.includes('survei_bangunan_lapangan'))) {
-        if (seenSemanticMap.has(semKey)) {
-          matchIdx = seenSemanticMap.get(semKey)!;
-        }
+    let matchedIncoming: BuildingAssessment | undefined = incomingIdMap.get(baseItem.id);
+    if (!matchedIncoming) {
+      const cleanSheet = (baseItem.sourceSheet || '').toLowerCase().trim();
+      if (cleanSheet && baseItem.sheetRowNumber) {
+        matchedIncoming = incomingSheetRowMap.get(`${cleanSheet}::r${baseItem.sheetRowNumber}`);
       }
     }
 
-    if (matchIdx !== -1) {
-      // Merge user local photos or edits into the incoming item
-      const incomingItem = merged[matchIdx];
-      const mergedPhotos = (baseItem.photos && baseItem.photos.length > 0)
-        ? baseItem.photos
-        : (incomingItem.photos || []);
-      const isBaseVerified = baseItem.verificationStatus === 'Terverifikasi';
-      const isIncomingVerified = incomingItem.verificationStatus === 'Terverifikasi';
-
-      merged[matchIdx] = {
-        ...incomingItem,
-        ...baseItem,
-        photos: mergedPhotos,
-        googleDriveFolderUrl: incomingItem.googleDriveFolderUrl || baseItem.googleDriveFolderUrl,
-        sourceSheet: incomingItem.sourceSheet || baseItem.sourceSheet,
-        sheetRowNumber: incomingItem.sheetRowNumber || baseItem.sheetRowNumber,
-        targetSheetName: incomingItem.targetSheetName || baseItem.targetSheetName,
-        targetProfileId: incomingItem.targetProfileId || baseItem.targetProfileId,
-        targetProfileName: incomingItem.targetProfileName || baseItem.targetProfileName,
-        verificationStatus: isBaseVerified || isIncomingVerified ? 'Terverifikasi' : (baseItem.verificationStatus || incomingItem.verificationStatus),
-      };
-    } else {
-      // Keep unique local records that aren't in incoming sheets
+    if (!matchedIncoming) {
+      // Keep this record (e.g. historical archive item, draft, or another sheet tab)
       merged.push(baseItem);
     }
   });

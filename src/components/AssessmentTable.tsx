@@ -15,6 +15,7 @@ import {
   getDuplicateIdsMap,
   DuplicateGroup,
   isArchiveSource,
+  isArchiveAssessment,
 } from '../utils/duplicateDetector';
 import {
   Search,
@@ -264,15 +265,22 @@ export const AssessmentTable: React.FC = () => {
   };
 
   // Distinct source sheets and categorization into active vs archive with item counts
-  const { distinctSourceSheets, activeSheets, archiveSheets, sheetCounts } = useMemo(() => {
+  const { distinctSourceSheets, activeSheets, archiveSheets, sheetCounts, totalActiveCount, totalArchiveCount } = useMemo(() => {
     const set = new Set<string>();
     const counts: Record<string, number> = {};
+    let activeCount = 0;
+    let archiveCount = 0;
 
     assessments.forEach((a) => {
       const sheetName = (a.sourceSheet || a.targetSheetName || (a.kecamatanName ? `Kec. ${a.kecamatanName}` : '')).trim();
       if (sheetName) {
         set.add(sheetName);
         counts[sheetName] = (counts[sheetName] || 0) + 1;
+      }
+      if (isArchiveAssessment(a) || isArchiveSource(sheetName)) {
+        archiveCount++;
+      } else {
+        activeCount++;
       }
     });
 
@@ -293,6 +301,8 @@ export const AssessmentTable: React.FC = () => {
       activeSheets: active,
       archiveSheets: archive,
       sheetCounts: counts,
+      totalActiveCount: activeCount,
+      totalArchiveCount: archiveCount,
     };
   }, [assessments]);
 
@@ -363,10 +373,11 @@ export const AssessmentTable: React.FC = () => {
         // Asal Sheet / Arsip Filter
         if (selectedSourceFilter && selectedSourceFilter !== 'ALL') {
           const itemSheet = (item.sourceSheet || item.targetSheetName || (item.kecamatanName ? `Kec. ${item.kecamatanName}` : '')).trim();
+          const isArchive = isArchiveAssessment(item) || isArchiveSource(itemSheet);
           if (selectedSourceFilter === 'ACTIVE_ONLY') {
-            if (isArchiveSource(itemSheet)) return false;
+            if (isArchive) return false;
           } else if (selectedSourceFilter === 'ARCHIVE_ONLY') {
-            if (!isArchiveSource(itemSheet)) return false;
+            if (!isArchive) return false;
           } else {
             if (itemSheet !== selectedSourceFilter) return false;
           }
@@ -1161,8 +1172,8 @@ export const AssessmentTable: React.FC = () => {
               <option value="ALL">Semua Asal Sheet / Arsip ({assessments.length} Data)</option>
 
               <optgroup label="── 📌 KELOMPOK FILTER UTAMA ──">
-                <option value="ACTIVE_ONLY">🟢 Hanya Semua Data Aktif (Bukan Arsip)</option>
-                <option value="ARCHIVE_ONLY">📁 Hanya Semua Data Arsip Lama (Read-Only)</option>
+                <option value="ACTIVE_ONLY">🟢 Semua Data Sheet Aktif ({totalActiveCount} data)</option>
+                <option value="ARCHIVE_ONLY">📁 Semua Data Lama / Arsip ({totalArchiveCount} data)</option>
               </optgroup>
 
               {activeSheets.length > 0 && (

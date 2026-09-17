@@ -1421,16 +1421,19 @@ async function fetchKecamatanRowsOnServer(
   spreadsheetId: string,
   kec: { name: string; aliases: string[] },
   cacheBuster: number
-): Promise<{ success: boolean; rows: Array<{ rowObj: Record<string, any>; sheetRowNumber: number; sourceSheet: string }>; matchedTab?: string }> {
-  const prioritized = Array.from(
+): Promise<{ success: boolean; rows: Array<{ rowObj: Record<string, any>; sheetRowNumber: number; sourceSheet: string }>; matchedTabs: string[] }> {
+  // Probe both the standard active tab ("Kec. <Nama>") and archive tab ("Kec <Nama>")
+  const candidateTabs = Array.from(
     new Set([`Kec. ${kec.name}`, `Kec ${kec.name}`, ...kec.aliases])
   ).filter((a) => a.toLowerCase().startsWith('kec'));
 
+  const collectedRows: Array<{ rowObj: Record<string, any>; sheetRowNumber: number; sourceSheet: string }> = [];
+  const matchedTabs: string[] = [];
+
   const fetchSingleAliasWithRetry = async (alias: string): Promise<{ rows: any[]; matchedTab: string } | null> => {
-    if (!alias.toLowerCase().startsWith('kec')) return null;
     const url = `https://docs.google.com/spreadsheets/d/${spreadsheetId}/gviz/tq?sheet=${encodeURIComponent(alias)}&_t=${cacheBuster}`;
 
-    // Try up to 2 times with exponential backoff on 429
+    // Try up to 2 times with backoff on 429
     for (let attempt = 0; attempt < 2; attempt++) {
       const controller = new AbortController();
       const timeout = setTimeout(() => controller.abort(), 12000);
@@ -1444,7 +1447,6 @@ async function fetchKecamatanRowsOnServer(
         clearTimeout(timeout);
 
         if (resp.status === 429) {
-          // Rate limited: wait 1000ms before retry
           await new Promise((r) => setTimeout(r, 1000 * (attempt + 1)));
           continue;
         }
@@ -1452,7 +1454,7 @@ async function fetchKecamatanRowsOnServer(
         if (!resp.ok) return null;
         const text = await resp.text();
         const parsed = parseServerGvizTextToRows(text, alias);
-        if (parsed.length === 0 || isMasterRekapFallbackServer(parsed, kec.name)) return null;
+        if (parsed.length === 0) return null;
 
         return { rows: parsed, matchedTab: alias };
       } catch {
@@ -1462,17 +1464,17 @@ async function fetchKecamatanRowsOnServer(
     return null;
   };
 
-  // Check aliases sequentially in queue with small pause to avoid rate limiting
-  for (const alias of prioritized) {
+  // Check candidate tabs: if BOTH active ("Kec. X") and archive ("Kec X") exist, collect both!
+  for (const alias of candidateTabs) {
     const res = await fetchSingleAliasWithRetry(alias);
     if (res && res.rows.length > 0) {
-      return { success: true, rows: res.rows, matchedTab: res.matchedTab };
+      collectedRows.push(...res.rows);
+      matchedTabs.push(res.matchedTab);
     }
-    // Small pause between alias probes
-    await new Promise((r) => setTimeout(r, 80));
+    await new Promise((r) => setTimeout(r, 60));
   }
 
-  return { success: false, rows: [] };
+  return { success: collectedRows.length > 0, rows: collectedRows, matchedTabs };
 }
 
 const handleKecamatanRawFetch = async (req: express.Request, res: express.Response) => {
@@ -1487,16 +1489,20 @@ const handleKecamatanRawFetch = async (req: express.Request, res: express.Respon
       return res.status(400).json({ success: false, message: 'ID Spreadsheet Google Sheet tidak valid atau kosong.', rows: [] });
     }
 
-    // In-memory cache hit (15 seconds for snappy navigation)
+    if (forceRefresh) {
+      serverKecamatanCache = null;
+    }
+
+    // In-memory cache hit (5 seconds for high responsiveness during active input)
     if (!forceRefresh && serverKecamatanCache && serverKecamatanCache.spreadsheetId === spreadsheetId) {
       const age = Date.now() - serverKecamatanCache.timestamp;
-      if (age < SERVER_KECAMATAN_CACHE_TTL && serverKecamatanCache.rows.length > 0) {
+      if (age < 5000 && serverKecamatanCache.rows.length > 0) {
         return res.json({
           success: true,
           count: serverKecamatanCache.rows.length,
           rows: serverKecamatanCache.rows,
           cached: true,
-          message: `Memuat instan ${serverKecamatanCache.rows.length} baris dari server cache 7 kecamatan.`,
+          message: `Memuat instan ${serverKecamatanCache.rows.length} baris dari server cache.`,
         });
       }
     }
@@ -1505,83 +1511,81 @@ const handleKecamatanRawFetch = async (req: express.Request, res: express.Respon
     const allRows: Array<{ rowObj: Record<string, any>; sheetRowNumber: number; sourceSheet: string }> = [];
     const scannedSheets: string[] = [];
 
-    // Sequentially fetch the 7 kecamatan sheets with queue delay to prevent 429 rate limiting
+    // Sequentially fetch kecamatan sheets (both active and archive tabs)
     for (const kec of KECAMATAN_SPECS) {
       try {
         const resKec = await fetchKecamatanRowsOnServer(spreadsheetId, kec, cacheBuster);
         if (resKec.success && resKec.rows.length > 0) {
           allRows.push(...resKec.rows);
-          scannedSheets.push(resKec.matchedTab || kec.name);
+          scannedSheets.push(...resKec.matchedTabs);
         }
       } catch (err) {
         console.warn(`Server queue notice for ${kec.name}:`, err);
       }
-      // Pacing interval between kecamatan fetches
-      await new Promise((r) => setTimeout(r, 120));
+      await new Promise((r) => setTimeout(r, 80));
     }
 
-    // Fallback: If 0 rows found from the 7 kecamatan tabs, probe single sheet / custom tabs (e.g. Data Terverifikasi / Sheet1 / gid)
-    if (allRows.length === 0) {
-      const gidMatch = spreadsheetUrl.match(/[#&?]gid=([0-9]+)/);
-      const gid = gidMatch ? gidMatch[1] : null;
+    // Also check if spreadsheetUrl has a specific gid
+    const gidMatch = spreadsheetUrl.match(/[#&?]gid=([0-9]+)/);
+    const gid = gidMatch ? gidMatch[1] : null;
 
-      const fallbackUrls: Array<{ url: string; label: string }> = [];
-      if (gid) {
-        fallbackUrls.push({
-          url: `https://docs.google.com/spreadsheets/d/${spreadsheetId}/gviz/tq?gid=${encodeURIComponent(gid)}&_t=${cacheBuster}`,
-          label: `Sheet (gid=${gid})`,
-        });
-      }
-
-      // Default active sheet
-      fallbackUrls.push({
-        url: `https://docs.google.com/spreadsheets/d/${spreadsheetId}/gviz/tq?_t=${cacheBuster}`,
-        label: 'Sheet Utama',
+    const extraTargetUrls: Array<{ url: string; label: string }> = [];
+    if (gid) {
+      extraTargetUrls.push({
+        url: `https://docs.google.com/spreadsheets/d/${spreadsheetId}/gviz/tq?gid=${encodeURIComponent(gid)}&_t=${cacheBuster}`,
+        label: `Sheet (gid=${gid})`,
       });
+    }
 
-      // Common custom tab names (e.g. Data Terverifikasi, Sheet1)
-      const customTabNames = [
-        'Data_Terverifikasi',
-        'Data Terverifikasi',
-        'Data_Kerusakan',
-        'Data Kerusakan',
-        'Data_Penilaian',
-        'Sheet1',
-        'Halaman 2',
-        'Halaman 3',
-        'Halaman 4',
-        'Halaman 5',
-      ];
-      for (const tab of customTabNames) {
-        fallbackUrls.push({
+    // Common custom/operational tab names
+    const commonOperationalTabs = [
+      'Data_Terverifikasi',
+      'Data Terverifikasi',
+      'Data_Kerusakan',
+      'Data Kerusakan',
+      'Data_Penilaian',
+      'Data Penilaian',
+      'Survei',
+      'Survei Lapangan',
+      'Sheet1',
+    ];
+
+    // If no rows found from kecamatan tabs, probe operational tabs
+    if (allRows.length === 0) {
+      for (const tab of commonOperationalTabs) {
+        extraTargetUrls.push({
           url: `https://docs.google.com/spreadsheets/d/${spreadsheetId}/gviz/tq?sheet=${encodeURIComponent(tab)}&_t=${cacheBuster}`,
           label: tab,
         });
       }
+      extraTargetUrls.push({
+        url: `https://docs.google.com/spreadsheets/d/${spreadsheetId}/gviz/tq?_t=${cacheBuster}`,
+        label: 'Sheet Utama',
+      });
+    }
 
-      for (const target of fallbackUrls) {
-        try {
-          const controller = new AbortController();
-          const timeout = setTimeout(() => controller.abort(), 10000);
-          const resp = await fetch(target.url, {
-            signal: controller.signal,
-            headers: {
-              'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36',
-            },
-          });
-          clearTimeout(timeout);
-          if (resp.ok) {
-            const text = await resp.text();
-            const parsed = parseServerGvizTextToRows(text, target.label);
-            if (parsed.length > 0) {
-              allRows.push(...parsed);
-              scannedSheets.push(target.label);
-              break;
-            }
+    for (const target of extraTargetUrls) {
+      if (scannedSheets.includes(target.label)) continue;
+      try {
+        const controller = new AbortController();
+        const timeout = setTimeout(() => controller.abort(), 10000);
+        const resp = await fetch(target.url, {
+          signal: controller.signal,
+          headers: {
+            'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36',
+          },
+        });
+        clearTimeout(timeout);
+        if (resp.ok) {
+          const text = await resp.text();
+          const parsed = parseServerGvizTextToRows(text, target.label);
+          if (parsed.length > 0) {
+            allRows.push(...parsed);
+            scannedSheets.push(target.label);
           }
-        } catch {}
-        await new Promise((r) => setTimeout(r, 60));
-      }
+        }
+      } catch {}
+      await new Promise((r) => setTimeout(r, 60));
     }
 
     if (allRows.length > 0) {

@@ -2347,14 +2347,16 @@ export function parseExtractedRowsToAssessments(
 
     const rawCode = isRealRegCode(rawCodeCandidate) ? rawCodeCandidate : '';
 
-    // Strictly ignore non-kecamatan sheets (Rekap, Ringkasan, User logs)
+    // Only ignore purely administrative non-assessment metadata tabs
     const normSource = (sourceSheet || '').toLowerCase().trim();
     if (
-      normSource.includes('ringkasan') ||
-      normSource.includes('rekap') ||
-      normSource.includes('pengguna') ||
-      normSource.includes('log') ||
-      normSource.includes('00_')
+      normSource === 'pengguna' ||
+      normSource === 'daftar_pengguna' ||
+      normSource === 'log_pengguna' ||
+      normSource === 'log_aktivitas' ||
+      normSource === 'referensi_wilayah' ||
+      normSource === 'template' ||
+      normSource === 'panduan'
     ) {
       return;
     }
@@ -2368,14 +2370,10 @@ export function parseExtractedRowsToAssessments(
       ]) || ''
     ).trim();
 
-    // Skip summary / subtotal rows
-    const testSummary = `${buildingName} ${rawCodeCandidate}`.toUpperCase();
-    if (
-      testSummary.includes('TOTAL') ||
-      testSummary.includes('JUMLAH') ||
-      testSummary.includes('REKAPITULASI') ||
-      testSummary.includes('RINGKASAN')
-    ) {
+    // Skip only pure summary / subtotal title rows
+    const isPureSummary = /^(total|jumlah|rekapitulasi|ringkasan)(\s+(keseluruhan|total|akhir|data))?$/i.test(buildingName.trim()) ||
+      /^(total|jumlah)$/i.test(rawCodeCandidate.trim());
+    if (isPureSummary) {
       return;
     }
 
@@ -2407,13 +2405,11 @@ export function parseExtractedRowsToAssessments(
       }
     }
 
-    // Prevent "ghost rows": Only skip if row is truly empty OR if it lacks any meaningful identifier (e.g. only has a pre-filled auto-ID formula)
+    // Only skip if row is truly empty (has no cell data at all)
     const hasAnyContent = Object.values(rowObj).some(
       (v) => v !== undefined && v !== null && String(v).trim() !== '' && String(v).trim() !== '-'
     );
-    const hasMeaningfulContent = Boolean(buildingName || desaName || detailedAddress || ownerAgency || namaPemilikRumah || namaPemilikGedung);
-    
-    if (!hasAnyContent || !hasMeaningfulContent) return;
+    if (!hasAnyContent) return;
 
     if (!buildingName) {
       buildingName = `Survei Bangunan Lapangan (Baris ${sheetRowNumber})`;
@@ -3250,22 +3246,22 @@ export async function fetchAssessmentsFromGoogleSheet(
         ? [validKnown, `Kec. ${group.name}`, `Kec ${group.name}`]
         : [`Kec. ${group.name}`, `Kec ${group.name}`, `KEC. ${group.name.toUpperCase()}`];
 
-      const prioritizedAliases = Array.from(
-        new Set([...initialAliases, ...group.aliases])
+      // Probe candidate tabs: both active standard ("Kec. <Nama>") and archive ("Kec <Nama>")
+      const candidateAliases = Array.from(
+        new Set([`Kec. ${group.name}`, `Kec ${group.name}`, ...group.aliases])
       ).filter((a) => a.toLowerCase().startsWith('kec'));
 
       let groupRowsFound = 0;
-      for (const alias of prioritizedAliases) {
+      for (const alias of candidateAliases) {
         const res = await fetchSingleWithRetry(alias);
         if (res && res.rows.length > 0) {
           updatedConfirmedTabs[group.name] = res.matchedAlias;
           allExtractedRows.push(...res.rows);
           successfulFetches++;
-          groupRowsFound = res.rows.length;
-          break;
+          groupRowsFound += res.rows.length;
         }
         // Small pause between alias probes
-        await new Promise((r) => setTimeout(r, 80));
+        await new Promise((r) => setTimeout(r, 60));
       }
 
       // If callback provided, stream progress and current partial dataset immediately
@@ -3341,7 +3337,6 @@ export async function fetchAssessmentsFromGoogleSheet(
               if (parsedRows.length > 0) {
                 allExtractedRows.push(...parsedRows);
                 successfulFetches++;
-                break;
               }
             }
           }
