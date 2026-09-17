@@ -1,6 +1,6 @@
 import React, { useMemo, useState, useEffect } from 'react';
 import { useApp } from '../context/AppContext';
-import { formatRupiah } from '../utils/puprCalculations';
+import { formatRupiah, calculateRehabCosts } from '../utils/puprCalculations';
 import { BuildingCategory, BUILDING_CATEGORY_CONFIGS } from '../types';
 import { detectAllDuplicateGroups } from '../utils/duplicateDetector';
 import {
@@ -64,7 +64,27 @@ export const DashboardAnalytics: React.FC = () => {
   } = useApp();
 
   const totalBuildings = assessments.length;
-  const totalCost = assessments.reduce((acc, curr) => acc + curr.roundedRehabCost, 0);
+
+  // Exclude verified assessments from estimated total rehab budget ("tidak termasuk yang terverifikasi karena yang terverifikasi hitungan sendiri")
+  const unverifiedAssessments = useMemo(() => {
+    return assessments.filter((a) => a.verificationStatus !== 'Terverifikasi');
+  }, [assessments]);
+
+  const totalCost = useMemo(() => {
+    return unverifiedAssessments.reduce((acc, curr) => {
+      let cost = Number(curr.roundedRehabCost || 0);
+      if (cost === 0 && curr.totalFloorAreaM2 && curr.totalDamagePercent) {
+        const calculated = calculateRehabCosts(
+          curr.totalDamagePercent,
+          curr.totalFloorAreaM2,
+          curr.hsbgnPerM2 || 5920000,
+          curr.demolitionPercent || 8
+        );
+        cost = calculated.roundedRehabCost;
+      }
+      return acc + cost;
+    }, 0);
+  }, [unverifiedAssessments]);
 
   // Python Fast Analytics Engine State
   const [isPythonLoading, setIsPythonLoading] = useState(false);
@@ -333,12 +353,12 @@ export const DashboardAnalytics: React.FC = () => {
             <span className="text-2xl font-black text-slate-900 truncate">
               {formatRupiah(totalCost)}
             </span>
-            <span className="text-xs text-slate-500 mt-0.5">HSBGN & Bongkaran 8%</span>
+            <span className="text-xs text-slate-500 mt-0.5">HSBGN & Bongkaran (Non-Terverifikasi)</span>
           </div>
           <div className="mt-3 flex items-center justify-between text-xs text-slate-500 border-t border-slate-100 pt-2.5">
-            <span>Rata-rata:</span>
+            <span>Rata-rata ({unverifiedAssessments.length} unit):</span>
             <strong className="text-slate-800">
-              {totalBuildings > 0 ? formatRupiah(Math.round(totalCost / totalBuildings)) : 'Rp 0'}
+              {unverifiedAssessments.length > 0 ? formatRupiah(Math.round(totalCost / unverifiedAssessments.length)) : 'Rp 0'}
             </strong>
           </div>
         </div>
