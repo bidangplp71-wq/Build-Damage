@@ -1,7 +1,7 @@
 import * as XLSX from 'xlsx';
 import { BuildingAssessment, GoogleSheetConfig, Kecamatan, UserActivityLog, UserAccount } from '../types';
 import { INITIAL_DESA } from '../data/initialData';
-import { formatRupiah, getInitialSubComponents, terbilang } from '../utils/puprCalculations';
+import { formatRupiah, getInitialSubComponents } from '../utils/puprCalculations';
 import { hydrateAssessmentPhotos } from '../utils/imageCompressor';
 import { getPhotoLocally } from '../utils/photoStorage';
 
@@ -208,7 +208,6 @@ export function formatAssessmentForGoogleSheet(item: BuildingAssessment) {
 
   const rawRow: Record<string, any> = {
     'No Registrasi': item.code || item.id,
-    'ID Penilaian': item.id,
     'Nama Bangunan': item.buildingName,
     'Kategori / Fungsi Bangunan': item.buildingCategory || 'Gedung Pemerintah',
     'Jenis Bencana': item.disasterType,
@@ -268,7 +267,6 @@ export function formatAssessmentForGoogleSheet(item: BuildingAssessment) {
     'Link Folder Foto Google Drive': item.googleDriveFolderUrl || '-',
     'Surveyor / Petugas': item.createdByName,
     'Kota Laporan': item.cityLocation,
-    'Jabatan Penandatangan': item.headOfDepartment?.title || 'Kepala Dinas Pekerjaan Umum dan Penataan Ruang',
     'Nama Kepala Dinas': item.headOfDepartment?.name || '-',
     'NIP Kepala Dinas': item.headOfDepartment?.nip || '-',
     'Tim Analisis': item.analysisTeam?.join(', ') || '-',
@@ -333,7 +331,7 @@ export async function directSaveToGoogleSheet(
   const chosenTab = explicitTargetSheetName?.trim() || assessment.targetSheetName?.trim() || assessment.sourceSheet?.trim();
   const kecSheetName = chosenTab
     ? sanitizeSheetName(chosenTab)
-    : sanitizeSheetName(`Kec. ${hydratedAssessment.kecamatanName || 'Aesesa'}`);
+    : sanitizeSheetName(`Kec. ${hydratedAssessment.kecamatanName || 'Lainnya'}`);
   const cleanFolderId = extractDriveFolderId(config.driveFolderId);
 
   // Extract sheet row number if ID contains _r(\d+)
@@ -576,43 +574,11 @@ export async function syncAllToGoogleSheet(
     dataByKecamatan[tabName] = items.map(formatAssessmentForGoogleSheet);
   }
 
-  const spreadsheetId = extractSpreadsheetId(config.spreadsheetUrl) || undefined;
-
-  // 1. Try sending via backend proxy first to avoid CORS and get exact delivery status
-  try {
-    const proxyResp = await fetch('/api/google-sheet/sync-all', {
-      method: 'POST',
-      headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({
-        assessments,
-        config,
-      }),
-    });
-    if (proxyResp.ok) {
-      const proxyData = await proxyResp.json();
-      if (proxyData && proxyData.success) {
-        const kecCount = Object.keys(dataByKecamatan).length;
-        return {
-          success: true,
-          message: proxyData.message || `Berhasil sinkronisasi ${assessments.length} data penilaian ke Google Sheet (Terbagi dalam ${kecCount} Sheet Kecamatan)!`,
-          syncedCount: assessments.length,
-        };
-      } else if (proxyData && proxyData.success === false) {
-        console.warn('Backend sync-all reported error:', proxyData.message);
-      }
-    }
-  } catch (backendErr) {
-    console.warn('Backend /api/google-sheet/sync-all unreachable, trying direct webhook:', backendErr);
-  }
-
-  // 2. Direct browser fetch as fallback
   const payload: GoogleSheetRowPayload = {
     action: 'sync_all',
     sheetName: config.sheetName || 'Rekap_Semua_Kecamatan',
     splitByKecamatan: config.splitByKecamatan !== false,
     includeMasterSummary: config.includeMasterSummarySheet !== false,
-    spreadsheetUrl: config.spreadsheetUrl || '',
-    spreadsheetId,
     data: rows,
     dataByKecamatan,
     timestamp: new Date().toISOString(),
@@ -631,7 +597,7 @@ export async function syncAllToGoogleSheet(
     const kecCount = Object.keys(dataByKecamatan).length;
     return {
       success: true,
-      message: `Berhasil mengirim ${assessments.length} data penilaian ke Google Sheet (Terbagi dalam ${kecCount} Sheet Kecamatan + Sheet Rekap Master)!`,
+      message: `Berhasil sinkronisasi ${assessments.length} data penilaian ke Google Sheet (Terbagi dalam ${kecCount} Sheet Kecamatan + Sheet Rekap Master)!`,
       syncedCount: assessments.length,
     };
   } catch (err: any) {
@@ -682,18 +648,12 @@ function doPost(e) {
     var json = JSON.parse(e.postData.contents);
     var action = json.action || 'insert';
     var splitByKecamatan = json.splitByKecamatan !== false; // Default true (Multi-Sheet per Kecamatan)
-    var includeMasterSummary = json.includeMasterSummary !== false;
     var masterSheetName = json.sheetName || "Data_Penilaian_Kerusakan_PUPR";
     
     var ss;
-    var targetId = json.spreadsheetId;
-    if (!targetId && json.spreadsheetUrl) {
-      var m = json.spreadsheetUrl.match(new RegExp('/spreadsheets/d/([a-zA-Z0-9-_]+)'));
-      if (m && m[1]) { targetId = m[1]; }
-    }
-    if (targetId) {
+    if (json.spreadsheetId) {
       try {
-        ss = SpreadsheetApp.openById(targetId);
+        ss = SpreadsheetApp.openById(json.spreadsheetId);
       } catch (err) {
         ss = SpreadsheetApp.getActiveSpreadsheet();
       }
@@ -867,141 +827,85 @@ function doPost(e) {
     var targetTabName = json.targetSheetName || json.kecamatanSheetName || ("Kec. " + kecamatanName);
     var bldgName = json.buildingName || (rowData && rowData['Nama Bangunan']) || "";
     var sheetRowNumber = json.sheetRowNumber;
-    
-    var lock = LockService.getScriptLock();
-    try {
-      lock.waitLock(30000); // 30 sec wait for concurrent users
+
+    if (action === 'delete') {
+      var deletedFrom = [];
+      // 1. Coba hapus di Sheet Tujuan Kecamatan Terkait
+      var targetKecSheet = findSheetByNameFuzzy(ss, targetTabName);
+      if (targetKecSheet) {
+        var didDel = deleteMatchingRow(targetKecSheet, regCode, prevRegCode, bldgName, sheetRowNumber);
+        if (didDel) deletedFrom.push(targetKecSheet.getName());
+      }
       
-      if (action === 'delete') {
-        var deletedFrom = [];
-        // 1. Coba hapus di Sheet Tujuan Kecamatan Terkait
-        var targetKecSheet = findSheetByNameFuzzy(ss, targetTabName);
-        if (targetKecSheet) {
-          var didDel = deleteMatchingRow(targetKecSheet, regCode, prevRegCode, bldgName, sheetRowNumber);
-          if (didDel) deletedFrom.push(targetKecSheet.getName());
-        }
-        
-        // 2. Jika belum terhapus, cari di seluruh sheet kecamatan lainnya
-        if (deletedFrom.length === 0) {
-          var allSheets = ss.getSheets();
-          for (var s = 0; s < allSheets.length; s++) {
-            var sName = allSheets[s].getName();
-            if (sName !== 'Log_Akses_Pengguna' && sName !== 'Daftar_Pengguna') {
-              if (deleteMatchingRow(allSheets[s], regCode, prevRegCode, bldgName, sheetRowNumber)) {
-                deletedFrom.push(sName);
-                break;
-              }
-            }
-          }
-        }
-
-        // 3. Hapus juga dari Master Rekap (jika ada)
-        var master1 = findSheetByNameFuzzy(ss, "Data_Penilaian_Kerusakan_PUPR");
-        if (master1) deleteMatchingRow(master1, regCode, prevRegCode, bldgName, 0);
-        var master2 = findSheetByNameFuzzy(ss, "REKAP_SEMUA_KECAMATAN");
-        if (master2) deleteMatchingRow(master2, regCode, prevRegCode, bldgName, 0);
-
-        return ContentService.createTextOutput(JSON.stringify({
-          status: "success",
-          message: "Data penilaian berhasil dihapus dari sheet: " + (deletedFrom.join(', ') || targetTabName),
-          deletedFrom: deletedFrom
-        })).setMimeType(ContentService.MimeType.JSON);
-      }
-
-      if (!rowData || Object.keys(rowData).length === 0) {
-        return ContentService.createTextOutput(JSON.stringify({ status: "error", message: "Data baris kosong" }))
-          .setMimeType(ContentService.MimeType.JSON);
-      }
-
-      // Generate Registration Code Server-Side to Prevent Duplicates
-      if (action === 'insert' || regCode === '' || regCode.indexOf('REG-TEMP') === 0 || regCode.indexOf('REG-PREVIEW') === 0) {
-        var targetSheetCode = getOrCreateSheet(ss, targetTabName);
-        var lastRowCode = targetSheetCode.getLastRow();
-        var maxSeq = 0;
-        
-        // Scan for highest sequence number in the target sheet
-        if (lastRowCode > 1) {
-          var dataCode = targetSheetCode.getDataRange().getValues();
-          var currentHeaders = dataCode[0];
-          var colRegIdx = -1;
-          for (var c = 0; c < currentHeaders.length; c++) {
-            var h = String(currentHeaders[c]).toLowerCase().trim();
-            if (h.indexOf('registrasi') !== -1 || h.indexOf('kode') !== -1) {
-              colRegIdx = c;
+      // 2. Jika belum terhapus, cari di seluruh sheet kecamatan lainnya
+      if (deletedFrom.length === 0) {
+        var allSheets = ss.getSheets();
+        for (var s = 0; s < allSheets.length; s++) {
+          var sName = allSheets[s].getName();
+          if (sName !== 'Log_Akses_Pengguna' && sName !== 'Daftar_Pengguna') {
+            if (deleteMatchingRow(allSheets[s], regCode, prevRegCode, bldgName, sheetRowNumber)) {
+              deletedFrom.push(sName);
               break;
             }
           }
-          if (colRegIdx >= 0) {
-            for (var r = 1; r < dataCode.length; r++) {
-              var val = String(dataCode[r][colRegIdx]).trim();
-              var match = val.match(/REG-[A-Z0-9]+-\d{4}-(\d+)/i);
-              if (match) {
-                var seq = parseInt(match[1], 10);
-                if (seq > maxSeq) maxSeq = seq;
-              }
-            }
-          }
         }
-        
-        var nextSeq = maxSeq + 1;
-        var kecPrefix = kecamatanName.toUpperCase().replace(/[^A-Z]/g, '').slice(0, 3) || 'PUP';
-        if (kecamatanName.toUpperCase().indexOf('AESESA SELATAN') !== -1) kecPrefix = 'ASS';
-        else if (kecamatanName.toUpperCase().indexOf('AESESA') !== -1) kecPrefix = 'AES';
-        else if (kecamatanName.toUpperCase().indexOf('BOAWAE') !== -1) kecPrefix = 'BOA';
-        else if (kecamatanName.toUpperCase().indexOf('MAUPONGGO') !== -1) kecPrefix = 'MPO';
-        else if (kecamatanName.toUpperCase().indexOf('NANGARORO') !== -1) kecPrefix = 'NGA';
-        else if (kecamatanName.toUpperCase().indexOf('KEO TENGAH') !== -1) kecPrefix = 'KEO';
-        else if (kecamatanName.toUpperCase().indexOf('WOLOWAE') !== -1) kecPrefix = 'WLW';
-        
-        var padStr = "0000" + nextSeq;
-        regCode = "REG-" + kecPrefix + "-2026-" + padStr.substring(padStr.length - 4);
-        rowData['No Registrasi'] = regCode;
       }
 
-      // SIMPAN DOKUMENTASI FOTO KE GOOGLE DRIVE (Folder per Bangunan)
-      if (json.photos && json.photos.length > 0 && json.savePhotosToDrive !== false) {
-        var driveFolderUrl = savePhotosToGoogleDrive(json.photos, regCode, rowData['Nama Bangunan'], json.driveFolderId);
-        if (driveFolderUrl) {
-          rowData['Link Folder Foto Google Drive'] = driveFolderUrl;
-        }
-      }
-      
-      // A. Tulis langsung ke Sheet Tujuan sesuai pilihan letak data
-      var targetSheet = getOrCreateSheet(ss, targetTabName);
-      saveOrUpdateRow(targetSheet, rowData, regCode, prevRegCode, action, "#1e3a8a", {
-        buildingName: bldgName,
-        sheetRowNumber: sheetRowNumber
-      });
-      
-      // B. Perbarui Master Sheet Rekap Semua jika aktif
-      if (includeMasterSummary) {
-        var primaryMasterSheet = getOrCreateSheet(ss, "Data_Penilaian_Kerusakan_PUPR");
-        saveOrUpdateRow(primaryMasterSheet, rowData, regCode, prevRegCode, action, "#0f172a", {
-          buildingName: bldgName
-        });
+      // 3. Hapus juga dari Master Rekap (jika ada)
+      var master1 = findSheetByNameFuzzy(ss, "Data_Penilaian_Kerusakan_PUPR");
+      if (master1) deleteMatchingRow(master1, regCode, prevRegCode, bldgName, 0);
+      var master2 = findSheetByNameFuzzy(ss, "REKAP_SEMUA_KECAMATAN");
+      if (master2) deleteMatchingRow(master2, regCode, prevRegCode, bldgName, 0);
 
-        if (masterSheetName && masterSheetName !== "Data_Penilaian_Kerusakan_PUPR") {
-          var secondaryMasterSheet = getOrCreateSheet(ss, masterSheetName);
-          saveOrUpdateRow(secondaryMasterSheet, rowData, regCode, prevRegCode, action, "#0f172a", {
-            buildingName: bldgName
-          });
-        }
-      }
-      
       return ContentService.createTextOutput(JSON.stringify({
         status: "success",
-        message: "Data langsung masuk ke Sheet '" + targetSheet.getName() + "' & Arsip Foto Google Drive!",
-        registrationCode: regCode,
-        targetTab: targetSheet.getName(),
-        driveFolderUrl: rowData['Link Folder Foto Google Drive'] || ""
+        message: "Data penilaian berhasil dihapus dari sheet: " + (deletedFrom.join(', ') || targetTabName),
+        deletedFrom: deletedFrom
       })).setMimeType(ContentService.MimeType.JSON);
-      
-    } catch (e) {
-      return ContentService.createTextOutput(JSON.stringify({ status: "error", message: "Error Lock / Process: " + e.message }))
-        .setMimeType(ContentService.MimeType.JSON);
-    } finally {
-      lock.releaseLock();
     }
+
+    if (!rowData || Object.keys(rowData).length === 0) {
+      return ContentService.createTextOutput(JSON.stringify({ status: "error", message: "Data baris kosong" }))
+        .setMimeType(ContentService.MimeType.JSON);
+    }
+
+    // SIMPAN DOKUMENTASI FOTO KE GOOGLE DRIVE (Folder per Bangunan)
+    if (json.photos && json.photos.length > 0 && json.savePhotosToDrive !== false) {
+      var driveFolderUrl = savePhotosToGoogleDrive(json.photos, regCode, rowData['Nama Bangunan'], json.driveFolderId);
+      if (driveFolderUrl) {
+        rowData['Link Folder Foto Google Drive'] = driveFolderUrl;
+      }
+    }
+    
+    // A. Tulis langsung ke Sheet Tujuan sesuai pilihan letak data
+    var targetSheet = getOrCreateSheet(ss, targetTabName);
+    saveOrUpdateRow(targetSheet, rowData, regCode, prevRegCode, action, "#1e3a8a", {
+      buildingName: bldgName,
+      sheetRowNumber: sheetRowNumber
+    });
+    
+    // B. Perbarui Master Sheet Rekap Semua jika aktif
+    if (includeMasterSummary) {
+      var primaryMasterSheet = getOrCreateSheet(ss, "Data_Penilaian_Kerusakan_PUPR");
+      saveOrUpdateRow(primaryMasterSheet, rowData, regCode, prevRegCode, action, "#0f172a", {
+        buildingName: bldgName
+      });
+
+      if (masterSheetName && masterSheetName !== "Data_Penilaian_Kerusakan_PUPR") {
+        var secondaryMasterSheet = getOrCreateSheet(ss, masterSheetName);
+        saveOrUpdateRow(secondaryMasterSheet, rowData, regCode, prevRegCode, action, "#0f172a", {
+          buildingName: bldgName
+        });
+      }
+    }
+    
+    return ContentService.createTextOutput(JSON.stringify({
+      status: "success",
+      message: "Data langsung masuk ke Sheet '" + targetSheet.getName() + "' & Arsip Foto Google Drive!",
+      registrationCode: regCode,
+      targetTab: targetSheet.getName(),
+      driveFolderUrl: rowData['Link Folder Foto Google Drive'] || ""
+    })).setMimeType(ContentService.MimeType.JSON);
     
   } catch (error) {
     return ContentService.createTextOutput(JSON.stringify({
@@ -1042,96 +946,75 @@ function getOrCreateSheet(ss, name) {
   var found = findSheetByNameFuzzy(ss, name);
   if (found) return found;
   var cleanName = (name || 'Sheet').replace(/[^a-zA-Z0-9 _-]/g, '').trim().substring(0, 30) || 'Sheet1';
-  var newSheet = ss.insertSheet(cleanName);
-  
-  // Pangkas baris dan kolom kosong bawaan (1000 baris default dipangkas ke 25 baris)
-  // agar kapasitas spreadsheet hemat dan tidak pernah menyentuh batas Google Sheets
-  try {
-    var maxR = newSheet.getMaxRows();
-    if (maxR > 25) {
-      newSheet.deleteRows(26, maxR - 25);
-    }
-  } catch(e) {}
-  
-  return newSheet;
+  return ss.insertSheet(cleanName);
 }
 
 /**
- * Menghapus baris yang cocok berdasarkan No Registrasi, ID Penilaian, atau nomor baris
+ * Menghapus baris yang cocok berdasarkan No Registrasi, Nama Bangunan, atau nomor baris
  */
-function deleteMatchingRow(sheet, regCode, prevRegCode, buildingName, sheetRowNumber, assessmentId) {
+function deleteMatchingRow(sheet, regCode, prevRegCode, buildingName, sheetRowNumber) {
   if (!sheet || sheet.getLastRow() <= 1) return false;
   var allData = sheet.getDataRange().getValues();
   var currentHeaders = allData[0];
-  var colId = -1;
   var colReg = -1;
   var colName = -1;
 
   for (var c = 0; c < currentHeaders.length; c++) {
     var h = String(currentHeaders[c]).toLowerCase().trim();
-    if (colId === -1 && (h === 'id penilaian' || h === 'id' || h === 'uuid')) colId = c;
-    if (colReg === -1 && (h.indexOf('registrasi') !== -1 || h.indexOf('kode') !== -1)) colReg = c;
-    if (colName === -1 && (h.indexOf('bangunan') !== -1 || h.indexOf('gedung') !== -1)) colName = c;
+    if (colReg === -1 && (h.indexOf('registrasi') !== -1 || h.indexOf('kode') !== -1 || h === 'id')) colReg = c;
+    if (colName === -1 && (h.indexOf('bangunan') !== -1 || h.indexOf('gedung') !== -1 || h.indexOf('pemilik') !== -1 || h === 'nama')) colName = c;
   }
 
   var foundIndex = -1;
-  var idTarget = (assessmentId || '').toString().trim().toLowerCase();
   var regTarget = (regCode || '').toString().trim().toLowerCase();
   var prevRegTarget = (prevRegCode || '').toString().trim().toLowerCase();
   var bldgTarget = (buildingName || '').toString().trim().toLowerCase();
 
-  // Match 0: By Exact assessmentId if present
-  if (idTarget && colId >= 0) {
-    for (var r0 = 1; r0 < allData.length; r0++) {
-      if (String(allData[r0][colId]).trim().toLowerCase() === idTarget) {
-        foundIndex = r0 + 1;
-        break;
-      }
+  // Match 1: By sheetRowNumber if provided and in bounds
+  if (sheetRowNumber && sheetRowNumber >= 2 && sheetRowNumber <= allData.length) {
+    var candRow = allData[sheetRowNumber - 1];
+    var candName = colName >= 0 ? String(candRow[colName]).toLowerCase().trim() : '';
+    var candReg = colReg >= 0 ? String(candRow[colReg]).toLowerCase().trim() : '';
+    if (!bldgTarget || candName.indexOf(bldgTarget) !== -1 || bldgTarget.indexOf(candName) !== -1 || (regTarget && candReg === regTarget)) {
+      foundIndex = sheetRowNumber;
     }
   }
 
-  // Match 1: By exact regCode (only if valid non-generic code)
-  if (foundIndex === -1 && regTarget && regTarget !== '-' && regTarget.length >= 4) {
+  // Match 2: By regCode
+  if (foundIndex === -1 && regTarget && regTarget !== '-' && regTarget.indexOf('assess_') !== 0) {
     for (var r1 = 1; r1 < allData.length; r1++) {
-      var valReg = colReg >= 0 ? String(allData[r1][colReg]).trim().toLowerCase() : '';
-      var valCol0 = String(allData[r1][0]).trim().toLowerCase();
-      if (valReg === regTarget || valCol0 === regTarget) {
+      if ((colReg >= 0 && String(allData[r1][colReg]).trim().toLowerCase() === regTarget) || String(allData[r1][0]).trim().toLowerCase() === regTarget) {
         foundIndex = r1 + 1;
         break;
       }
     }
   }
 
-  // Match 2: By exact prevRegCode
-  if (foundIndex === -1 && prevRegTarget && prevRegTarget !== '-' && prevRegTarget.length >= 4) {
+  // Match 3: By prevRegCode
+  if (foundIndex === -1 && prevRegTarget && prevRegTarget !== '-') {
     for (var r2 = 1; r2 < allData.length; r2++) {
-      var valReg2 = colReg >= 0 ? String(allData[r2][colReg]).trim().toLowerCase() : '';
-      var valCol02 = String(allData[r2][0]).trim().toLowerCase();
-      if (valReg2 === prevRegTarget || valCol02 === prevRegTarget) {
+      if ((colReg >= 0 && String(allData[r2][colReg]).trim().toLowerCase() === prevRegTarget) || String(allData[r2][0]).trim().toLowerCase() === prevRegTarget) {
         foundIndex = r2 + 1;
         break;
       }
     }
   }
 
-  // Match 3: By sheetRowNumber if provided, within bounds, and matching building or code exactly
-  if (foundIndex === -1 && sheetRowNumber && sheetRowNumber >= 2 && sheetRowNumber <= allData.length) {
-    var candRow = allData[sheetRowNumber - 1];
-    var candName = colName >= 0 ? String(candRow[colName]).toLowerCase().trim() : '';
-    var candReg = colReg >= 0 ? String(candRow[colReg]).toLowerCase().trim() : '';
-    if ((bldgTarget && candName === bldgTarget) || (regTarget && candReg === regTarget)) {
-      foundIndex = sheetRowNumber;
-    }
-  }
-
-  // Match 4: By EXACT buildingName (strictly equal match, never substring indexOf)
-  if (foundIndex === -1 && bldgTarget && bldgTarget.length >= 5 && !bldgTarget.startsWith('survei bangunan')) {
+  // Match 4: By buildingName (case-insensitive)
+  if (foundIndex === -1 && bldgTarget && bldgTarget.length > 2) {
     for (var r3 = 1; r3 < allData.length; r3++) {
       var rowBldg = colName >= 0 ? String(allData[r3][colName]).trim().toLowerCase() : '';
-      if (rowBldg && rowBldg === bldgTarget) {
+      if (rowBldg && (rowBldg === bldgTarget || rowBldg.indexOf(bldgTarget) !== -1 || bldgTarget.indexOf(rowBldg) !== -1)) {
         foundIndex = r3 + 1;
         break;
       }
+      for (var cc = 0; cc < allData[r3].length; cc++) {
+        if (String(allData[r3][cc]).trim().toLowerCase() === bldgTarget) {
+          foundIndex = r3 + 1;
+          break;
+        }
+      }
+      if (foundIndex !== -1) break;
     }
   }
 
@@ -1160,7 +1043,6 @@ function saveOrUpdateRow(sheet, rowData, regCode, prevRegCode, action, headerBgC
   if (!sheet || !rowData) return;
   extraParams = extraParams || {};
   var bldgName = (extraParams.buildingName || rowData['Nama Bangunan'] || '').toString().trim();
-  var assessmentId = (extraParams.assessmentId || rowData['ID Penilaian'] || rowData['ID'] || '').toString().trim();
   var sheetRowNumber = extraParams.sheetRowNumber;
   var headers = Object.keys(rowData);
   
@@ -1179,73 +1061,55 @@ function saveOrUpdateRow(sheet, rowData, regCode, prevRegCode, action, headerBgC
   
   if (lastRow > 1) {
     var allData = sheet.getDataRange().getValues();
-    var colId = -1;
     var colReg = -1;
     var colName = -1;
     for (var c = 0; c < currentHeaders.length; c++) {
       var h = String(currentHeaders[c]).toLowerCase().trim();
-      if (colId === -1 && (h === 'id penilaian' || h === 'id' || h === 'uuid')) colId = c;
-      if (colReg === -1 && (h.indexOf('registrasi') !== -1 || h.indexOf('kode') !== -1)) colReg = c;
-      if (colName === -1 && (h.indexOf('bangunan') !== -1 || h.indexOf('gedung') !== -1)) colName = c;
+      if (colReg === -1 && (h.indexOf('registrasi') !== -1 || h.indexOf('kode') !== -1 || h === 'id')) colReg = c;
+      if (colName === -1 && (h.indexOf('bangunan') !== -1 || h.indexOf('gedung') !== -1 || h.indexOf('pemilik') !== -1 || h === 'nama')) colName = c;
     }
 
     var foundIndex = -1;
-    var idTarget = assessmentId.toLowerCase();
     var regTarget = (regCode || '').toString().trim().toLowerCase();
     var prevRegTarget = (prevRegCode || '').toString().trim().toLowerCase();
     var bldgTarget = bldgName.toLowerCase();
 
-    // 1. Check by exact unique ID Penilaian if column exists
-    if (idTarget && colId >= 0) {
-      for (var r0 = 1; r0 < allData.length; r0++) {
-        if (String(allData[r0][colId]).trim().toLowerCase() === idTarget) {
-          foundIndex = r0 + 1;
-          break;
-        }
+    // Match 1: By sheetRowNumber if provided
+    if (sheetRowNumber && sheetRowNumber >= 2 && sheetRowNumber <= allData.length) {
+      var candRow = allData[sheetRowNumber - 1];
+      var candName = colName >= 0 ? String(candRow[colName]).toLowerCase().trim() : '';
+      if (!bldgTarget || candName.indexOf(bldgTarget) !== -1 || bldgTarget.indexOf(candName) !== -1) {
+        foundIndex = sheetRowNumber;
       }
     }
 
-    // 2. Check by exact regCode (only if real valid code)
-    if (foundIndex === -1 && regTarget && regTarget !== '-' && regTarget.length >= 4) {
+    // Match 2: By regCode
+    if (foundIndex === -1 && regTarget && regTarget !== '-' && regTarget.indexOf('assess_') !== 0) {
       for (var r1 = 1; r1 < allData.length; r1++) {
-        var valReg = colReg >= 0 ? String(allData[r1][colReg]).trim().toLowerCase() : '';
-        var valCol0 = String(allData[r1][0]).trim().toLowerCase();
-        if (valReg === regTarget || valCol0 === regTarget) {
+        if ((colReg >= 0 && String(allData[r1][colReg]).trim().toLowerCase() === regTarget) || String(allData[r1][0]).trim().toLowerCase() === regTarget) {
           foundIndex = r1 + 1;
           break;
         }
       }
     }
 
-    // 3. If action is 'update' (not insert), also check prevRegCode, sheetRowNumber, and exact building name
-    if (action === 'update' || action === 'delete') {
-      if (foundIndex === -1 && prevRegTarget && prevRegTarget !== '-' && prevRegTarget.length >= 4) {
-        for (var r2 = 1; r2 < allData.length; r2++) {
-          var valReg2 = colReg >= 0 ? String(allData[r2][colReg]).trim().toLowerCase() : '';
-          var valCol02 = String(allData[r2][0]).trim().toLowerCase();
-          if (valReg2 === prevRegTarget || valCol02 === prevRegTarget) {
-            foundIndex = r2 + 1;
-            break;
-          }
+    // Match 3: By prevRegCode
+    if (foundIndex === -1 && prevRegTarget && prevRegTarget !== '-') {
+      for (var r2 = 1; r2 < allData.length; r2++) {
+        if ((colReg >= 0 && String(allData[r2][colReg]).trim().toLowerCase() === prevRegTarget) || String(allData[r2][0]).trim().toLowerCase() === prevRegTarget) {
+          foundIndex = r2 + 1;
+          break;
         }
       }
+    }
 
-      if (foundIndex === -1 && sheetRowNumber && sheetRowNumber >= 2 && sheetRowNumber <= allData.length) {
-        var candRow = allData[sheetRowNumber - 1];
-        var candName = colName >= 0 ? String(candRow[colName]).toLowerCase().trim() : '';
-        var candReg = colReg >= 0 ? String(candRow[colReg]).toLowerCase().trim() : '';
-        if ((bldgTarget && candName === bldgTarget) || (regTarget && candReg === regTarget)) {
-          foundIndex = sheetRowNumber;
-        }
-      }
-
-      if (foundIndex === -1 && bldgTarget && bldgTarget.length >= 5 && !bldgTarget.startsWith('survei bangunan')) {
-        for (var r3 = 1; r3 < allData.length; r3++) {
-          var rowBldg = colName >= 0 ? String(allData[r3][colName]).trim().toLowerCase() : '';
-          if (rowBldg && rowBldg === bldgTarget) {
-            foundIndex = r3 + 1;
-            break;
-          }
+    // Match 4: By buildingName
+    if (foundIndex === -1 && bldgTarget && bldgTarget.length > 2) {
+      for (var r3 = 1; r3 < allData.length; r3++) {
+        var rowBldg = colName >= 0 ? String(allData[r3][colName]).trim().toLowerCase() : '';
+        if (rowBldg && (rowBldg === bldgTarget || rowBldg.indexOf(bldgTarget) !== -1 || bldgTarget.indexOf(rowBldg) !== -1)) {
+          foundIndex = r3 + 1;
+          break;
         }
       }
     }
@@ -2482,16 +2346,14 @@ export function parseExtractedRowsToAssessments(
 
     const rawCode = isRealRegCode(rawCodeCandidate) ? rawCodeCandidate : '';
 
-    // Only ignore purely administrative non-assessment metadata tabs
+    // Strictly ignore non-kecamatan sheets (Rekap, Ringkasan, User logs)
     const normSource = (sourceSheet || '').toLowerCase().trim();
     if (
-      normSource === 'pengguna' ||
-      normSource === 'daftar_pengguna' ||
-      normSource === 'log_pengguna' ||
-      normSource === 'log_aktivitas' ||
-      normSource === 'referensi_wilayah' ||
-      normSource === 'template' ||
-      normSource === 'panduan'
+      normSource.includes('ringkasan') ||
+      normSource.includes('rekap') ||
+      normSource.includes('pengguna') ||
+      normSource.includes('log') ||
+      normSource.includes('00_')
     ) {
       return;
     }
@@ -2505,10 +2367,14 @@ export function parseExtractedRowsToAssessments(
       ]) || ''
     ).trim();
 
-    // Skip only pure summary / subtotal title rows
-    const isPureSummary = /^(total|jumlah|rekapitulasi|ringkasan)(\s+(keseluruhan|total|akhir|data))?$/i.test(buildingName.trim()) ||
-      /^(total|jumlah)$/i.test(rawCodeCandidate.trim());
-    if (isPureSummary) {
+    // Skip summary / subtotal rows
+    const testSummary = `${buildingName} ${rawCodeCandidate}`.toUpperCase();
+    if (
+      testSummary.includes('TOTAL') ||
+      testSummary.includes('JUMLAH') ||
+      testSummary.includes('REKAPITULASI') ||
+      testSummary.includes('RINGKASAN')
+    ) {
       return;
     }
 
@@ -2540,11 +2406,13 @@ export function parseExtractedRowsToAssessments(
       }
     }
 
-    // Only skip if row is truly empty (has no cell data at all)
+    // Prevent "ghost rows": Only skip if row is truly empty OR if it lacks any meaningful identifier (e.g. only has a pre-filled auto-ID formula)
     const hasAnyContent = Object.values(rowObj).some(
       (v) => v !== undefined && v !== null && String(v).trim() !== '' && String(v).trim() !== '-'
     );
-    if (!hasAnyContent) return;
+    const hasMeaningfulContent = Boolean(buildingName || desaName || detailedAddress || ownerAgency || namaPemilikRumah || namaPemilikGedung);
+    
+    if (!hasAnyContent || !hasMeaningfulContent) return;
 
     if (!buildingName) {
       buildingName = `Survei Bangunan Lapangan (Baris ${sheetRowNumber})`;
@@ -2554,23 +2422,19 @@ export function parseExtractedRowsToAssessments(
 
     const totalFloorAreaM2 = parseNumber(getVal(rowObj, ['Luas Lantai (M2)', 'Luas Lantai', 'Luas (M2)', 'Luas', 'Luas Bangunan'])) || 0;
     const totalDamagePercent = parseNumber(getVal(rowObj, ['Tingkat Kerusakan (%)', 'Tingkat Kerusakan', '% Kerusakan', 'Persentase Kerusakan'])) || 0;
+    const roundedRehabCost = parseNumber(getVal(rowObj, ['Ajuan Biaya Rehab (Rp)', 'Ajuan Biaya', 'Total Biaya', 'Estimasi Biaya', 'RAB'])) || 0;
 
     const nikPemilik = String(getVal(rowObj, ['NIK Pemilik', 'NIK', 'NIK 16 Digit']) || '0');
     const noKkPemilik = String(getVal(rowObj, ['No KK Pemilik', 'No KK', 'Nomor KK', 'No. KK']) || '0');
 
     // Deterministic key per physical row from each kecamatan sheet so 100% of rows are preserved
-    let rawId = String(getVal(rowObj, ['ID Penilaian', 'ID', 'ID Gedung', 'Assessment ID', 'AssessmentId', 'UUID']) || '').trim();
-    if (!rawId && rawCode && (rawCode.startsWith('ass_') || rawCode.startsWith('uuid_') || /^[0-9a-f]{8}-[0-9a-f]{4}/i.test(rawCode))) {
-      rawId = rawCode;
-    }
     const cleanBuilding = buildingName.toLowerCase().replace(/\s*\(baris\s+\d+\)/i, '').trim();
-    const cleanBldgSlug = cleanBuilding.replace(/[^a-z0-9]/g, '').slice(0, 24);
-    const canonicalKec = kecInfo.id || kecInfo.name.toLowerCase().replace(/[^a-z0-9]/g, '_');
+    const cleanKec = kecInfo.name.toLowerCase().trim();
     const cleanDesa = desaName.toLowerCase().trim();
+    const cleanSheet = (sourceSheet || 'sheet').toLowerCase().replace(/[^a-z0-9]/g, '_');
 
-    // Unique deterministic key by building name & location, preventing duplicate rows for the same building
-    const stableId = rawId || `sheet_${canonicalKec}_${cleanBldgSlug || 'bldg'}`;
-    const dedupeKey = rawId || (rawCode && rawCode.length > 2 && !rawCode.startsWith('REG-TEMP') ? `code_${rawCode.toLowerCase().trim()}` : `${canonicalKec}::${cleanDesa}::${cleanBldgSlug}`);
+    // Each row in each kecamatan sheet is an independent building survey record
+    const dedupeKey = `row:${cleanSheet}::r${sheetRowNumber}`;
 
     // Registration code assignment: automatically guarantee 100% uniqueness even if surveyor did not resequence
     let code = rawCode;
@@ -2622,6 +2486,9 @@ export function parseExtractedRowsToAssessments(
       seenCodes.add(code.toUpperCase());
     }
 
+    // Stable deterministic ID unique per physical row in the sheet
+    const stableId = `sheet_${cleanSheet}_r${sheetRowNumber}_${cleanKec.replace(/[^a-z0-9]/g, '_')}`;
+
     const numberOfFloors = parseNumber(getVal(rowObj, ['Jumlah Tingkat', 'Jumlah Lantai', 'Tingkat', 'Lantai'])) || 1;
     const yearBuilt = parseNumber(getVal(rowObj, ['Tahun Dibangun', 'Tahun Pembangunan', 'Tahun'])) || new Date().getFullYear();
     
@@ -2630,33 +2497,11 @@ export function parseExtractedRowsToAssessments(
       damageClassification = totalDamagePercent > 45 ? 'Rusak Berat' : totalDamagePercent > 20 ? 'Rusak Sedang' : 'Rusak Ringan';
     }
 
-    const rawHsbgn = parseNumber(getVal(rowObj, ['HSBGN / M2 (Rp)', 'HSBGN / M2', 'HSBGN'])) || 0;
-    const hsbgnPerM2 = rawHsbgn > 0 ? rawHsbgn : 5920000;
-    let treatmentCostPerM2 = parseNumber(getVal(rowObj, ['Biaya Perawatan / M2 (Rp)', 'Biaya Perawatan'])) || 0;
-    let demolitionCostPerM2 = parseNumber(getVal(rowObj, ['Biaya Bongkaran / M2 (Rp)', 'Biaya Bongkaran'])) || 0;
-    let totalCostPerM2 = parseNumber(getVal(rowObj, ['Total Biaya / M2 (Rp)', 'Total Biaya / M2'])) || 0;
-    let roundedRehabCost = parseNumber(getVal(rowObj, ['Ajuan Biaya Rehab (Rp)', 'Ajuan Biaya', 'Total Biaya', 'Estimasi Biaya', 'RAB'])) || 0;
-
-    // Automatic calculation fallback using official PUPR formula
-    if (treatmentCostPerM2 === 0 && totalDamagePercent > 0) {
-      treatmentCostPerM2 = Math.round((totalDamagePercent / 100) * hsbgnPerM2);
-    }
-    if (demolitionCostPerM2 === 0 && treatmentCostPerM2 > 0) {
-      demolitionCostPerM2 = Math.round(0.08 * treatmentCostPerM2);
-    }
-    if (totalCostPerM2 === 0) {
-      totalCostPerM2 = treatmentCostPerM2 + demolitionCostPerM2;
-    }
-    if (roundedRehabCost === 0) {
-      const effectiveArea = totalFloorAreaM2 > 0 ? totalFloorAreaM2 : 36;
-      const unrounded = effectiveArea * (totalCostPerM2 || (hsbgnPerM2 * (totalDamagePercent / 100) * 1.08));
-      roundedRehabCost = Math.round(unrounded / 100000) * 100000;
-    }
-
-    const rawTerbilang = String(getVal(rowObj, ['Terbilang']) || '');
-    const costTerbilang = (rawTerbilang && rawTerbilang !== '-')
-      ? rawTerbilang
-      : (roundedRehabCost > 0 ? `${terbilang(roundedRehabCost)} Rupiah` : '-');
+    const hsbgnPerM2 = parseNumber(getVal(rowObj, ['HSBGN / M2 (Rp)', 'HSBGN / M2', 'HSBGN'])) || 0;
+    const treatmentCostPerM2 = parseNumber(getVal(rowObj, ['Biaya Perawatan / M2 (Rp)', 'Biaya Perawatan'])) || 0;
+    const demolitionCostPerM2 = parseNumber(getVal(rowObj, ['Biaya Bongkaran / M2 (Rp)', 'Biaya Bongkaran'])) || 0;
+    const totalCostPerM2 = parseNumber(getVal(rowObj, ['Total Biaya / M2 (Rp)', 'Total Biaya / M2'])) || 0;
+    const costTerbilang = String(getVal(rowObj, ['Terbilang']) || '');
 
     const verificationStatus = (getVal(rowObj, ['Status Verifikasi', 'Status']) as any) || 'Menunggu Verifikasi';
     const verifiedByRaw = getVal(rowObj, ['Diverifikasi Oleh', 'Verifikator']);
@@ -2694,11 +2539,9 @@ export function parseExtractedRowsToAssessments(
     }
     const desaId = matchedDesaId || `desa_${desaName.toLowerCase().replace(/\s+/g, '_') || 'umum'}`;
 
-    const headTitle = String(getVal(rowObj, ['Jabatan Penandatangan', 'Jabatan Pejabat', 'Jabatan Kepala Dinas', 'Jabatan']) || 'Kepala Dinas Pekerjaan Umum dan Penataan Ruang');
-    const headSubTitle = String(getVal(rowObj, ['Instansi Penandatangan', 'Sub-Judul Penandatangan', 'Instansi']) || 'Kabupaten Nagekeo');
-    const headName = String(getVal(rowObj, ['Nama Kepala Dinas', 'Nama Pejabat', 'Kepala Dinas', 'Kadis']) || '');
-    const headNip = String(getVal(rowObj, ['NIP Kepala Dinas', 'NIP Pejabat', 'NIP Kadis', 'NIP']) || '');
-    const headRank = String(getVal(rowObj, ['Pangkat Kepala Dinas', 'Pangkat Pejabat', 'Pangkat / Golongan', 'Pangkat']) || '');
+    const headName = String(getVal(rowObj, ['Nama Kepala Dinas', 'Kepala Dinas', 'Kadis']) || '');
+    const headNip = String(getVal(rowObj, ['NIP Kepala Dinas', 'NIP Kadis', 'NIP']) || '');
+    const headRank = String(getVal(rowObj, ['Pangkat Kepala Dinas', 'Pangkat / Golongan', 'Pangkat']) || '');
     
     const rawTeam = String(getVal(rowObj, ['Tim Analisis', 'Tim Evaluasi', 'Tim Surveyor']) || '');
     const analysisTeam = rawTeam ? rawTeam.split(',').map(s => s.trim()).filter(Boolean) : [];
@@ -2864,8 +2707,8 @@ export function parseExtractedRowsToAssessments(
       cityLocation: String(getVal(rowObj, ['Kota Laporan', 'Kota']) || 'Mbay'),
       reportDateStr: 'September 2026',
       headOfDepartment: {
-        title: headTitle,
-        subTitle: headSubTitle,
+        title: 'Kepala Dinas Pekerjaan Umum dan Penataan Ruang',
+        subTitle: 'Kabupaten Nagekeo',
         rank: headRank,
         name: headName,
         nip: headNip,
@@ -2876,7 +2719,6 @@ export function parseExtractedRowsToAssessments(
       verificationNotes,
       targetSheetName: sourceSheet || `Kec. ${kecInfo.name}`,
       sourceSheet: sourceSheet,
-      sheetRowNumber: sheetRowNumber,
       backupDriveUrl,
       googleSheetSynced: true,
       googleSheetSyncedAt: new Date().toISOString(),
@@ -2890,28 +2732,7 @@ export function parseExtractedRowsToAssessments(
     resultsMap.set(dedupeKey, newAssessment);
   });
 
-  const rawList = Array.from(resultsMap.values());
-  const finalMap = new Map<string, BuildingAssessment>();
-  for (const item of rawList) {
-    const key = (item.code && item.code.trim().length > 2 && !item.code.startsWith('REG-PUP-2026-000'))
-      ? `code_${item.code.toLowerCase().trim()}`
-      : `${item.kecamatanId || 'kec'}::${(item.buildingName || '').toLowerCase().replace(/[^a-z0-9]/g, '')}`;
-
-    if (finalMap.has(key)) {
-      const existing = finalMap.get(key)!;
-      const mergedPhotos = [...(existing.photos || []), ...(item.photos || [])].filter((p, i, arr) => arr.findIndex(x => (x.url || (x as any).dataUrl) === (p.url || (p as any).dataUrl)) === i);
-      finalMap.set(key, {
-        ...existing,
-        photos: mergedPhotos,
-        totalDamagePercent: Math.max(existing.totalDamagePercent || 0, item.totalDamagePercent || 0),
-        roundedRehabCost: Math.max(existing.roundedRehabCost || 0, item.roundedRehabCost || 0),
-      });
-    } else {
-      finalMap.set(key, item);
-    }
-  }
-
-  return Array.from(finalMap.values());
+  return Array.from(resultsMap.values());
 }
 
 /**
@@ -3002,7 +2823,7 @@ interface SheetAssessmentsCache {
   timestamp: number;
 }
 let memoryAssessmentsCache: SheetAssessmentsCache | null = null;
-const CACHE_TTL_MS = 5 * 60 * 1000; // 5-minute stable cache to prevent continuous fluctuations across sessions
+const CACHE_TTL_MS = 60 * 60 * 1000; // 1-hour in-memory cache to prevent tab-switching reloads and browser crashes
 
 /**
  * Clears the Google Sheet memory cache when manual sync is requested
@@ -3092,17 +2913,14 @@ export async function fetchAssessmentsFromGoogleSheet(
   const isExcludedRekapSheet = (name: string): boolean => {
     if (!name) return false;
     const clean = name.trim().toUpperCase().replace(/[\s_-]+/g, '_');
-    // Exclude administrative non-assessment metadata tabs and unwanted 'Kec Lainnya' tabs
+    // Only exclude purely administrative non-assessment metadata tabs
     if (
       clean === 'PENGGUNA' ||
       clean === 'DAFTAR_PENGGUNA' ||
       clean === 'LOG_PENGGUNA' ||
       clean === 'LOG_AKTIVITAS' ||
       clean === 'REFERENSI_WILAYAH' ||
-      clean === 'RINGKASAN_EKSEKUTIF' ||
-      clean === 'KEC_LAINNYA' ||
-      clean === 'LAINNYA' ||
-      clean === 'KEC_LAIN'
+      clean === 'RINGKASAN_EKSEKUTIF'
     ) {
       return true;
     }
@@ -3375,27 +3193,6 @@ export async function fetchAssessmentsFromGoogleSheet(
     }
 
     // ==========================================
-    // STEP 1.5: Direct CSV Export Fetch (Reliable bypass for read-only quota & tab throttling)
-    // Ensures all 207 archive records are consistently read in one reliable stream
-    // ==========================================
-    try {
-      const csvExportUrl = `https://docs.google.com/spreadsheets/d/${spreadsheetId}/export?format=csv&_t=${cacheBuster}`;
-      const csvRes = await fetch(csvExportUrl, { signal: AbortSignal.timeout(8000) });
-      if (csvRes.ok) {
-        const csvText = await csvRes.text();
-        if (csvText && !csvText.trim().startsWith('<!DOCTYPE') && !csvText.includes('<html')) {
-          const csvRows = parseCsvTextToRows(csvText, 'Sheet_Arsip_Utama');
-          if (csvRows.length > 0) {
-            allExtractedRows.push(...csvRows);
-            successfulFetches++;
-          }
-        }
-      }
-    } catch (csvErr) {
-      console.warn('CSV export fetch notice:', csvErr);
-    }
-
-    // ==========================================
     // STEP 2: Throttled Queue Fetch across the 7 Kecamatan Sheets ONLY
     // Paced queue with backoff retry to prevent 429 Too Many Requests
     // ==========================================
@@ -3449,23 +3246,22 @@ export async function fetchAssessmentsFromGoogleSheet(
         ? [validKnown, `Kec. ${group.name}`, `Kec ${group.name}`]
         : [`Kec. ${group.name}`, `Kec ${group.name}`, `KEC. ${group.name.toUpperCase()}`];
 
-      // Probe candidate tabs: both active standard ("Kec. <Nama>") and archive ("Kec <Nama>")
-      const candidateAliases = Array.from(
-        new Set([`Kec. ${group.name}`, `Kec ${group.name}`, ...group.aliases])
+      const prioritizedAliases = Array.from(
+        new Set([...initialAliases, ...group.aliases])
       ).filter((a) => a.toLowerCase().startsWith('kec'));
 
       let groupRowsFound = 0;
-      for (const alias of candidateAliases) {
+      for (const alias of prioritizedAliases) {
         const res = await fetchSingleWithRetry(alias);
         if (res && res.rows.length > 0) {
           updatedConfirmedTabs[group.name] = res.matchedAlias;
           allExtractedRows.push(...res.rows);
           successfulFetches++;
-          groupRowsFound += res.rows.length;
-          break; // Stop at the first working tab for this kecamatan, do NOT duplicate with aliases!
+          groupRowsFound = res.rows.length;
+          break;
         }
         // Small pause between alias probes
-        await new Promise((r) => setTimeout(r, 60));
+        await new Promise((r) => setTimeout(r, 80));
       }
 
       // If callback provided, stream progress and current partial dataset immediately
@@ -3541,6 +3337,7 @@ export async function fetchAssessmentsFromGoogleSheet(
               if (parsedRows.length > 0) {
                 allExtractedRows.push(...parsedRows);
                 successfulFetches++;
+                break;
               }
             }
           }

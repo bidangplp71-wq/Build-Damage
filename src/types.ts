@@ -122,7 +122,7 @@ export const ROLE_NAV_CONFIGS: Record<UserRole, RoleNavConfig> = {
   },
   admin_user: {
     defaultTab: 'input_baru',
-    allowedTabs: ['input_baru', 'tambah', 'penilaian',
+    allowedTabs: ['input_baru', 'tambah', 'penilaian', 'google_sheet', 'googlesheets',
       'drive_links', 'hsbgn_settings', 'hsbgn'],
     roleTitle: 'Petugas Surveyor Lapangan PUPR',
     roleSubtitle: 'Fokus Khusus: Pengisian Formulir Penilaian Cepat Kerusakan',
@@ -488,7 +488,6 @@ export interface SpreadsheetProfile {
   createdAt: string;
   lastUsedAt?: string;
   isDefault?: boolean;
-  isActiveForLoad?: boolean; // Toggles whether this sheet's data is loaded during sync
 }
 
 export interface GoogleSheetConfig {

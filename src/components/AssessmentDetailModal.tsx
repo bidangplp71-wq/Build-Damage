@@ -20,7 +20,6 @@ import {
 } from 'lucide-react';
 import { BuildingPhotoGallery } from './BuildingPhotoGallery';
 import { syncAssessmentPhotosToDrive } from '../services/googleSheetsService';
-import { isArchiveSource } from '../utils/duplicateDetector';
 
 interface Props {
   assessment: BuildingAssessment;
@@ -33,17 +32,11 @@ const safeNumber = (val: unknown, fallback = 0): number => {
 };
 
 export const AssessmentDetailModal: React.FC<Props> = ({ assessment, onClose }) => {
-  const { syncAssessmentToSheet, googleSheetConfig, logUserActivity, showToast, currentUser } = useApp();
+  const { syncAssessmentToSheet, googleSheetConfig, logUserActivity, showToast } = useApp();
   const [isSyncing, setIsSyncing] = useState(false);
   const [isUploadingToDrive, setIsUploadingToDrive] = useState(false);
   const [showSignatures, setShowSignatures] = useState(true);
   const [isEditingSignature, setIsEditingSignature] = useState(false);
-  const [customHeadTitle, setCustomHeadTitle] = useState(() => {
-    return assessment.headOfDepartment?.title || 'Kepala Dinas Pekerjaan Umum dan Penataan Ruang';
-  });
-  const [customHeadSubTitle, setCustomHeadSubTitle] = useState(() => {
-    return assessment.headOfDepartment?.subTitle || '';
-  });
   const [customHeadName, setCustomHeadName] = useState(() => {
     const raw = assessment.headOfDepartment?.name || '';
     if (raw === '-' || raw.toLowerCase().includes('bernard')) return '';
@@ -295,18 +288,16 @@ export const AssessmentDetailModal: React.FC<Props> = ({ assessment, onClose }) 
                 </button>
               )}
 
-              {/* Sync to Google Sheet button (Hidden for Surveyor) */}
-              {currentUser.role !== 'admin_user' && (
-                <button
-                  type="button"
-                  onClick={handleSyncToSheet}
-                  disabled={isSyncing}
-                  className="flex items-center gap-1.5 px-3 py-1.5 rounded-xl text-xs font-semibold bg-emerald-50 hover:bg-emerald-100 text-emerald-800 border border-emerald-300 transition-colors cursor-pointer"
-                >
-                  <FileSpreadsheet className={`w-3.5 h-3.5 ${isSyncing ? 'animate-spin' : ''}`} />
-                  <span>{isSyncing ? 'Sinkron...' : 'Kirim Google Sheet'}</span>
-                </button>
-              )}
+              {/* Sync to Google Sheet button */}
+              <button
+                type="button"
+                onClick={handleSyncToSheet}
+                disabled={isSyncing}
+                className="flex items-center gap-1.5 px-3 py-1.5 rounded-xl text-xs font-semibold bg-emerald-50 hover:bg-emerald-100 text-emerald-800 border border-emerald-300 transition-colors cursor-pointer"
+              >
+                <FileSpreadsheet className={`w-3.5 h-3.5 ${isSyncing ? 'animate-spin' : ''}`} />
+                <span>{isSyncing ? 'Sinkron...' : 'Kirim Google Sheet'}</span>
+              </button>
 
               {/* Close button */}
               <button
@@ -393,28 +384,13 @@ export const AssessmentDetailModal: React.FC<Props> = ({ assessment, onClose }) 
                 </div>
                 <div className="grid grid-cols-3">
                   <span className="font-semibold text-slate-600">Asal Tab Sheet</span>
-                  <span className="col-span-2 font-medium text-slate-900 flex flex-wrap items-center gap-1.5">
-                    : {isArchiveSource(assessment.sourceSheet || assessment.targetSheetName) ? (
-                      <span className="bg-amber-100 text-amber-950 border border-amber-300 px-1.5 py-0.5 rounded text-[11px] font-bold inline-flex items-center gap-1 shadow-2xs">
-                        <Folder className="w-3 h-3 text-amber-700" />
-                        <span>{assessment.sourceSheet || assessment.targetSheetName}</span>
-                        <span className="bg-amber-200 text-amber-900 px-1 rounded text-[9px] font-semibold">Data Lama / Arsip (Read-Only)</span>
-                      </span>
-                    ) : (
-                      <span className="bg-emerald-50 text-emerald-950 border border-emerald-300 px-1.5 py-0.5 rounded text-[11px] font-bold inline-flex items-center gap-1">
-                        <FileSpreadsheet className="w-3 h-3 text-emerald-600" />
-                        <span>{assessment.sourceSheet || assessment.targetSheetName || `Kec. ${assessment.kecamatanName}`}</span>
-                        <span className="bg-emerald-100 text-emerald-800 px-1 rounded text-[9px] font-semibold">Sheet Aktif</span>
-                      </span>
-                    )}
+                  <span className="col-span-2 font-medium text-blue-900 flex items-center gap-1">
+                    : <span className="bg-blue-50 text-blue-800 border border-blue-200 px-1.5 py-0.5 rounded text-[11px] font-bold">
+                      {assessment.sourceSheet || `Kec. ${assessment.kecamatanName}`}
+                    </span>
                     {assessment.sheetRowNumber && (
-                      <span className="text-[11px] font-mono text-slate-600 bg-slate-100 px-1 rounded">
-                        Baris #{assessment.sheetRowNumber}
-                      </span>
-                    )}
-                    {assessment.targetSheetName && assessment.targetSheetName !== assessment.sourceSheet && (
-                      <span className="bg-emerald-50 text-emerald-800 border border-emerald-200 px-1.5 py-0.5 rounded text-[10px] font-semibold">
-                        &rarr; Tujuan: {assessment.targetSheetName}
+                      <span className="text-[11px] font-mono text-slate-600">
+                        (Baris #{assessment.sheetRowNumber})
                       </span>
                     )}
                   </span>
@@ -640,12 +616,12 @@ export const AssessmentDetailModal: React.FC<Props> = ({ assessment, onClose }) 
                 {/* Left: Mengetahui / Menyetujui Kepala Dinas PUPR */}
                 <div className="space-y-1">
                   <p className="font-semibold text-slate-700">Mengetahui / Menyetujui,</p>
-                  <p className="font-bold text-slate-950">{customHeadTitle || assessment.headOfDepartment?.title || 'Kepala Dinas Pekerjaan Umum dan Penataan Ruang'}</p>
-                  {(customHeadSubTitle || assessment.headOfDepartment?.subTitle) && (
-                    <p className="font-bold text-slate-950">{customHeadSubTitle || assessment.headOfDepartment?.subTitle}</p>
+                  <p className="font-bold text-slate-950">{assessment.headOfDepartment?.title || 'Kepala Dinas Pekerjaan Umum dan Penataan Ruang'}</p>
+                  {assessment.headOfDepartment?.subTitle && (
+                    <p className="font-bold text-slate-950">{assessment.headOfDepartment.subTitle}</p>
                   )}
                   <div className="h-24 flex items-end">
-                    <div className="w-full max-w-[280px]">
+                    <div className="w-full max-w-[260px]">
                       {customHeadName ? (
                         <>
                           <p className="font-bold underline text-slate-950 uppercase">{customHeadName}</p>
@@ -676,7 +652,7 @@ export const AssessmentDetailModal: React.FC<Props> = ({ assessment, onClose }) 
                           className="text-[10px] flex items-center gap-1 font-bold text-amber-700 hover:text-amber-900 bg-amber-50 hover:bg-amber-100 px-2 py-0.5 rounded border border-amber-200 cursor-pointer"
                         >
                           <PenLine className="w-2.5 h-2.5" />
-                          <span>{customHeadName ? 'Ubah Jabatan & Pejabat' : 'Ketik Jabatan & Pejabat'}</span>
+                          <span>{customHeadName ? 'Ubah Nama Pejabat' : 'Ketik Nama Pejabat'}</span>
                         </button>
                         {customHeadName && (
                           <button
@@ -696,81 +672,34 @@ export const AssessmentDetailModal: React.FC<Props> = ({ assessment, onClose }) 
 
                       {/* Mini editor popup if editing */}
                       {isEditingSignature && (
-                        <div className="no-print mt-2 p-3 bg-white rounded-xl border border-amber-300 shadow-xl space-y-2 text-left text-[11px] z-50">
-                          <p className="font-bold text-slate-800 text-xs">Atur Jabatan & Nama Pejabat Pengesah:</p>
-                          
-                          <div>
-                            <label className="block font-semibold text-slate-600 text-[10px] mb-0.5">Jabatan Penandatangan:</label>
-                            <input
-                              type="text"
-                              value={customHeadTitle}
-                              onChange={(e) => setCustomHeadTitle(e.target.value)}
-                              placeholder="Kepala Dinas / Plt. / Kabid / PPK / Camat"
-                              className="w-full px-2 py-1 border border-slate-300 rounded text-xs font-semibold text-slate-900"
-                            />
-                            <div className="flex flex-wrap gap-1 mt-1">
-                              {['Kepala Dinas Pekerjaan Umum dan Penataan Ruang', 'Plt. Kepala Dinas PUPR', 'Sekretaris Dinas PUPR', 'Kepala Bidang Cipta Karya', 'PPK', 'Camat'].map((titlePreset) => (
-                                <button
-                                  key={titlePreset}
-                                  type="button"
-                                  onClick={() => setCustomHeadTitle(titlePreset)}
-                                  className="text-[9px] px-1.5 py-0.5 bg-slate-100 hover:bg-amber-100 text-slate-700 hover:text-amber-900 rounded border border-slate-200"
-                                >
-                                  {titlePreset}
-                                </button>
-                              ))}
-                            </div>
-                          </div>
-
-                          <div>
-                            <label className="block font-semibold text-slate-600 text-[10px] mb-0.5">Instansi / Sub-Judul (Opsional):</label>
-                            <input
-                              type="text"
-                              value={customHeadSubTitle}
-                              onChange={(e) => setCustomHeadSubTitle(e.target.value)}
-                              placeholder="Pemerintah Daerah / Kab. Nagekeo"
-                              className="w-full px-2 py-1 border border-slate-300 rounded text-xs text-slate-800"
-                            />
-                          </div>
-
-                          <div>
-                            <label className="block font-semibold text-slate-600 text-[10px] mb-0.5">Nama Lengkap & Gelar:</label>
-                            <input
-                              type="text"
-                              value={customHeadName}
-                              onChange={(e) => setCustomHeadName(e.target.value)}
-                              placeholder="Nama Lengkap & Gelar"
-                              className="w-full px-2 py-1 border border-slate-300 rounded text-xs"
-                            />
-                          </div>
-
-                          <div>
-                            <label className="block font-semibold text-slate-600 text-[10px] mb-0.5">NIP:</label>
-                            <input
-                              type="text"
-                              value={customHeadNip}
-                              onChange={(e) => setCustomHeadNip(e.target.value)}
-                              placeholder="NIP (Contoh: 19780101...)"
-                              className="w-full px-2 py-1 border border-slate-300 rounded text-xs font-mono"
-                            />
-                          </div>
-
-                          <div>
-                            <label className="block font-semibold text-slate-600 text-[10px] mb-0.5">Pangkat / Golongan:</label>
-                            <input
-                              type="text"
-                              value={customHeadRank}
-                              onChange={(e) => setCustomHeadRank(e.target.value)}
-                              placeholder="Pangkat / Golongan (Contoh: Pembina Tk. I (IV/b))"
-                              className="w-full px-2 py-1 border border-slate-300 rounded text-xs"
-                            />
-                          </div>
-
-                          <div className="flex justify-end gap-1.5 pt-1 border-t border-slate-100">
+                        <div className="no-print mt-2 p-2.5 bg-white rounded-lg border border-amber-300 shadow-lg space-y-1.5 text-left text-[11px]">
+                          <p className="font-bold text-slate-800">Atur Nama Pejabat Pengesah:</p>
+                          <input
+                            type="text"
+                            value={customHeadName}
+                            onChange={(e) => setCustomHeadName(e.target.value)}
+                            placeholder="Nama Lengkap & Gelar"
+                            className="w-full px-2 py-1 border border-slate-300 rounded text-xs"
+                          />
+                          <input
+                            type="text"
+                            value={customHeadNip}
+                            onChange={(e) => setCustomHeadNip(e.target.value)}
+                            placeholder="NIP (Contoh: 19780101...)"
+                            className="w-full px-2 py-1 border border-slate-300 rounded text-xs font-mono"
+                          />
+                          <input
+                            type="text"
+                            value={customHeadRank}
+                            onChange={(e) => setCustomHeadRank(e.target.value)}
+                            placeholder="Pangkat / Golongan (Contoh: Pembina Tk. I)"
+                            className="w-full px-2 py-1 border border-slate-300 rounded text-xs"
+                          />
+                          <div className="flex justify-end gap-1.5 pt-1">
                             <button
                               type="button"
                               onClick={() => setIsEditingSignature(false)}
-                              className="px-3 py-1 bg-amber-500 hover:bg-amber-600 text-slate-950 font-bold rounded-lg text-xs"
+                              className="px-2 py-0.5 bg-amber-500 text-slate-950 font-bold rounded text-[10px]"
                             >
                               Selesai
                             </button>

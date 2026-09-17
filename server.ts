@@ -210,77 +210,34 @@ app.use('/uploads', express.static(path.join(process.cwd(), 'uploads')));
 // ASSESSMENTS API (Zero-quota Cloud Persistence)
 // ==========================================
 
-// Safe deduplication for server-stored assessments by ID, Registration Code, Location, and Sheet Row
+// Safe deduplication for server-stored assessments strictly by ID to preserve all rows
 function deduplicateServerAssessments(list: any[]): any[] {
   if (!Array.isArray(list) || list.length <= 1) return list || [];
   const result: any[] = [];
-  const keyToIdx = new Map<string, number>();
+  const seenIdMap = new Map<string, number>();
 
   for (const item of list) {
-    if (!item) continue;
+    if (!item || !item.id) continue;
 
-    const keys: string[] = [];
-    if (item.id && String(item.id).trim()) {
-      keys.push(`id:${String(item.id).trim()}`);
-    }
-    const rawCode = String(item.code || '').trim();
-    if (rawCode && rawCode.length >= 3 && !rawCode.startsWith('REG-TEMP') && !rawCode.startsWith('REG-PREVIEW')) {
-      keys.push(`code:${rawCode.toUpperCase()}`);
-    }
-    const cleanBldg = String(item.buildingName || '').toLowerCase().replace(/\s*\(baris\s+\d+\)/i, '').trim();
-    const cleanKec = String(item.kecamatanName || item.kecamatanId || '').toLowerCase().replace(/[^a-z0-9]/g, '_');
-    const cleanDesa = String(item.desaName || '').toLowerCase().trim();
-    if (cleanBldg && cleanBldg.length >= 4 && !cleanBldg.startsWith('survei lapangan') && cleanKec) {
-      keys.push(`loc_bldg:${cleanKec}::${cleanDesa || 'nodesa'}::${cleanBldg}`);
+    let matchIdx = -1;
+    if (seenIdMap.has(item.id)) {
+      matchIdx = seenIdMap.get(item.id)!;
     }
 
-    let matchIdx: number | undefined = undefined;
-    for (const k of keys) {
-      if (keyToIdx.has(k)) {
-        matchIdx = keyToIdx.get(k);
-        break;
-      }
-    }
-
-    if (matchIdx !== undefined) {
+    if (matchIdx !== -1) {
       const existing = result[matchIdx];
-      const areSameBldg = (existing.id && item.id && existing.id === item.id) ||
-        (existing.code && item.code && existing.code === item.code) ||
-        (existing.buildingName && item.buildingName && String(existing.buildingName).toLowerCase().trim() === String(item.buildingName).toLowerCase().trim());
-
-      const mergedPhotos = areSameBldg
-        ? [...(existing.photos || []), ...(item.photos || [])].filter((p, idx, arr) => arr.findIndex(x => (x.url || (x as any).dataUrl) === (p.url || (p as any).dataUrl)) === idx)
-        : (new Date(item.updatedAt || item.createdAt || 0).getTime() >= new Date(existing.updatedAt || existing.createdAt || 0).getTime() ? (item.photos || existing.photos || []) : (existing.photos || item.photos || []));
-
+      const mergedPhotos =
+        item.photos && item.photos.length > 0 ? item.photos : existing.photos || [];
       const existingTime = new Date(existing.updatedAt || existing.createdAt || 0).getTime();
       const incomingTime = new Date(item.updatedAt || item.createdAt || 0).getTime();
-      
-      const stableId = existing.id && !String(existing.id).startsWith('sheet_')
-        ? existing.id
-        : item.id && !String(item.id).startsWith('sheet_')
-        ? item.id
-        : item.id || existing.id;
-
-      const stableCode = existing.code && !String(existing.code).startsWith('REG-TEMP')
-        ? existing.code
-        : item.code && !String(item.code).startsWith('REG-TEMP')
-        ? item.code
-        : item.code || existing.code;
-
       result[matchIdx] =
         incomingTime >= existingTime
-          ? { ...existing, ...item, id: stableId, code: stableCode, photos: mergedPhotos }
-          : { ...item, ...existing, id: stableId, code: stableCode, photos: mergedPhotos };
-
-      for (const k of keys) {
-        keyToIdx.set(k, matchIdx);
-      }
+          ? { ...existing, ...item, photos: mergedPhotos }
+          : { ...item, ...existing, photos: mergedPhotos };
     } else {
       const newIdx = result.length;
       result.push(item);
-      for (const k of keys) {
-        keyToIdx.set(k, newIdx);
-      }
+      seenIdMap.set(item.id, newIdx);
     }
   }
   return result;
@@ -300,15 +257,6 @@ app.get('/api/assessments', (req, res) => {
   }
 });
 
-// Default Google Apps Script Webhook URL
-const DEFAULT_WEBHOOK_URL = 'https://script.google.com/macros/s/AKfycbyAbubspPnACJi6KTODHJbVeAIppC6e72c8nAo__g8uc67GmY-wc1lOZWZkbLtieds/exec';
-
-function extractSpreadsheetId(url?: string): string | null {
-  if (!url) return null;
-  const match = url.match(/\/spreadsheets\/d\/([a-zA-Z0-9-_]+)/);
-  return match ? match[1] : null;
-}
-
 // Helper to forward assessment to Google Apps Script Webhook automatically from server
 async function forwardAssessmentToGoogleSheet(
   assessment: any,
@@ -318,7 +266,7 @@ async function forwardAssessmentToGoogleSheet(
 ) {
   try {
     const config = customConfig || getGoogleSheetConfig();
-    const webhookUrl = (config.webhookUrl && config.webhookUrl.startsWith('http')) ? config.webhookUrl : DEFAULT_WEBHOOK_URL;
+    const webhookUrl = config.webhookUrl;
     if (!webhookUrl || !webhookUrl.startsWith('http')) return { success: false, message: 'URL Webhook belum diatur' };
 
     const ownerName = assessment.namaPemilikRumah || assessment.namaPemilikGedung || assessment.ownerAgency || '-';
@@ -335,7 +283,6 @@ async function forwardAssessmentToGoogleSheet(
 
     const rowData: Record<string, any> = {
       'No Registrasi': assessment.code || assessment.id,
-      'ID Penilaian': assessment.id,
       'Nama Bangunan': assessment.buildingName,
       'Kategori / Fungsi Bangunan': assessment.buildingCategory || 'Gedung Pemerintah',
       'Jenis Bencana': assessment.disasterType || 'Gempa Bumi',
@@ -401,7 +348,6 @@ async function forwardAssessmentToGoogleSheet(
     };
 
     const isExplicit = Boolean(explicitTargetSheetName && explicitTargetSheetName.trim());
-    const spreadsheetId = extractSpreadsheetId(config.spreadsheetUrl) || undefined;
     const payload = {
       action,
       sheetName: explicitTargetSheetName || config.sheetName || 'REKAP_SEMUA_KECAMATAN',
@@ -412,9 +358,7 @@ async function forwardAssessmentToGoogleSheet(
       kecamatanName: assessment.kecamatanName,
       splitByKecamatan: isExplicit ? false : (config.splitByKecamatan !== false),
       includeMasterSummary: isExplicit ? false : (config.includeMasterSummarySheet !== false),
-      spreadsheetUrl: config.spreadsheetUrl || '',
-      spreadsheetId,
-      assessmentId: assessment.id,
+      spreadsheetUrl: config.spreadsheetUrl,
       registrationCode: assessment.code || assessment.id,
       previousRegistrationCode: assessment.code || assessment.id,
       data: rowData,
@@ -443,49 +387,8 @@ async function forwardAssessmentToGoogleSheet(
     }
 
     if (responseJson.status === 'error') {
-      const errMsg = String(responseJson.message || '');
-      console.warn(`[Server -> GoogleSheet] Google Apps Script notice for "${assessment.buildingName}":`, errMsg);
-
-      // If document is too large / out of cells, try ultra-light single-tab fallback
-      if (errMsg.includes('grown too large') || errMsg.includes('cannot be modified')) {
-        try {
-          const lightweightPayload = {
-            action,
-            targetSheetName,
-            splitByKecamatan: false,
-            includeMasterSummary: false,
-            spreadsheetUrl: config.spreadsheetUrl || '',
-            spreadsheetId,
-            registrationCode: assessment.code || assessment.id,
-            buildingName: assessment.buildingName,
-            data: rowData,
-            savePhotosToDrive: false,
-            timestamp: new Date().toISOString(),
-          };
-
-          const fallbackResp = await fetch(webhookUrl, {
-            method: 'POST',
-            headers: { 'Content-Type': 'application/json' },
-            body: JSON.stringify(lightweightPayload),
-          });
-          const fbText = await fallbackResp.text();
-          let fbJson: any = null;
-          try { fbJson = JSON.parse(fbText); } catch { fbJson = { status: fallbackResp.ok ? 'success' : 'error', message: fbText }; }
-          
-          if (fbJson.status === 'success') {
-            console.info(`[Server -> GoogleSheet] Lightweight fallback sync succeeded for "${assessment.buildingName}"`);
-            return { success: true, message: fbJson.message || 'Berhasil disimpan melalui mode hemat kapasitas' };
-          }
-        } catch {}
-
-        return {
-          success: false,
-          isDocumentTooLarge: true,
-          message: 'Google Spreadsheet tujuan penuh / melebihi batas kapasitas Google Sheets ("The document cannot be modified. Perhaps it has grown too large?"). Silakan buka Google Sheet dan hapus baris-baris kosong berlebih di bawah tabel, atau gunakan Buku 2 (Spreadsheet Baru) di menu Pengaturan.',
-        };
-      }
-
-      return { success: false, message: errMsg };
+      console.warn(`[Server -> GoogleSheet] Google Apps Script error for "${assessment.buildingName}":`, responseJson.message);
+      return { success: false, message: responseJson.message };
     }
 
     console.info(`[Server -> GoogleSheet] Synced "${assessment.buildingName}" (action: ${action}, target: ${targetSheetName}, status: ${resp.status})`);
@@ -512,155 +415,6 @@ app.post('/api/google-sheet/sync', async (req, res) => {
     return res.json(result);
   } catch (err: any) {
     return res.status(500).json({ success: false, message: err?.message || 'Internal server error' });
-  }
-});
-
-// POST /api/google-sheet/sync-all - Proxy endpoint to execute bulk Google Sheet sync to all Kecamatan tabs
-app.post('/api/google-sheet/sync-all', async (req, res) => {
-  try {
-    const { assessments, config: clientConfig } = req.body;
-    if (!Array.isArray(assessments)) {
-      return res.status(400).json({ success: false, message: 'Array assessments diperlukan' });
-    }
-
-    const config = clientConfig || getGoogleSheetConfig();
-    const webhookUrl = (config.webhookUrl && config.webhookUrl.startsWith('http')) ? config.webhookUrl : DEFAULT_WEBHOOK_URL;
-
-    if (!webhookUrl) {
-      return res.status(400).json({ success: false, message: 'URL Webhook Google Apps Script belum diatur.' });
-    }
-
-    const spreadsheetId = extractSpreadsheetId(config.spreadsheetUrl) || undefined;
-
-    // Group by kecamatan and format
-    const dataByKecamatan: Record<string, any[]> = {};
-    const rows: any[] = [];
-
-    for (const item of assessments) {
-      if (!item || !item.buildingName) continue;
-      const kecName = item.kecamatanName || 'Lainnya';
-      const tabName = `Kec. ${kecName}`.replace(/[:\\/?*\[\]]/g, '').trim().substring(0, 30);
-
-      const compMap: Record<string, number> = {};
-      if (item.components && Array.isArray(item.components)) {
-        item.components.forEach((c: any) => {
-          if (c && c.id) compMap[c.id] = c.damagePercentInput || 0;
-        });
-      }
-
-      const ownerName = item.namaPemilikRumah || item.namaPemilikGedung || item.ownerAgency || '-';
-      const rowData = {
-        'No Registrasi': item.code || item.id,
-        'Nama Bangunan': item.buildingName,
-        'Kategori / Fungsi Bangunan': item.buildingCategory || 'Gedung Pemerintah',
-        'Jenis Bencana': item.disasterType || 'Gempa Bumi',
-        'Tanggal Bencana': item.disasterDate || '',
-        'Tanggal Penilaian': item.assessmentDate || '',
-        'Pengguna / Pemilik': ownerName,
-        'Nama Pemilik Rumah': item.namaPemilikRumah || '-',
-        'Nama Pemilik Gedung': item.namaPemilikGedung || '-',
-        'NIK Pemilik': item.nikPemilik || '0',
-        'No KK Pemilik': item.noKkPemilik || '0',
-        'Dinas Teknis': item.responsibleDepartment || '',
-        'Kelas Bangunan': item.buildingClass || '',
-        'Kecamatan': item.kecamatanName || '',
-        'Desa / Kelurahan': item.desaName || '',
-        'Alamat Lengkap': item.detailedAddress || '',
-        'Luas Lantai (M2)': item.totalFloorAreaM2 || 0,
-        'Jumlah Tingkat': item.numberOfFloors || 1,
-        'Tahun Dibangun': item.yearBuilt || 2020,
-        'Tingkat Kerusakan (%)': item.totalDamagePercent || 0,
-        'Klasifikasi Kerusakan': item.damageClassification || 'Rusak Ringan',
-        'Pondasi (%)': compMap['pondasi_1'] ?? 0,
-        'Kolom & Balok (%)': compMap['struktur_kolom_balok'] ?? 0,
-        'Struktur Plesteran (%)': compMap['struktur_plesteran'] ?? 0,
-        'Atap Kuda-kuda (%)': compMap['atap_kuda_kuda'] ?? 0,
-        'Atap Gording (%)': compMap['atap_gording'] ?? 0,
-        'Atap Penutup (%)': compMap['atap_penutup'] ?? 0,
-        'Rangka Langit (%)': compMap['langit_rangka'] ?? 0,
-        'Penutup Langit (%)': compMap['langit_penutup'] ?? 0,
-        'Dinding Bata (%)': compMap['dinding_bata'] ?? 0,
-        'Dinding Plesteran (%)': compMap['dinding_plesteran'] ?? 0,
-        'Dinding Kaca (%)': compMap['dinding_kaca'] ?? 0,
-        'Dinding Pintu (%)': compMap['dinding_pintu'] ?? 0,
-        'Dinding Kosen (%)': compMap['dinding_kosen'] ?? 0,
-        'Penutup Lantai (%)': compMap['lantai_penutup'] ?? 0,
-        'Instalasi Listrik (%)': compMap['utilitas_listrik'] ?? 0,
-        'Instalasi Air (%)': compMap['utilitas_air'] ?? 0,
-        'Drainase Limbah (%)': compMap['utilitas_drainase'] ?? 0,
-        'Cat Struktur (%)': compMap['finishing_struktur'] ?? 0,
-        'Cat Langit (%)': compMap['finishing_langit'] ?? 0,
-        'Cat Dinding (%)': compMap['finishing_dinding'] ?? 0,
-        'Cat Kosen Pintu (%)': compMap['finishing_kosen_pintu'] ?? 0,
-        'HSBGN / M2 (Rp)': item.hsbgnPerM2 || 0,
-        'Biaya Perawatan / M2 (Rp)': item.treatmentCostPerM2 || 0,
-        'Biaya Bongkaran / M2 (Rp)': item.demolitionCostPerM2 || 0,
-        'Total Biaya / M2 (Rp)': item.totalCostPerM2 || 0,
-        'Ajuan Biaya Rehab (Rp)': item.roundedRehabCost || 0,
-        'Format Rupiah': 'Rp ' + Number(item.roundedRehabCost || 0).toLocaleString('id-ID'),
-        'Terbilang': item.costTerbilang || '',
-        'Link Folder G-Drive (Backup Foto)': item.backupDriveUrl || '-',
-        'Status Verifikasi': item.verificationStatus || 'Menunggu Verifikasi',
-        'Diverifikasi Oleh': item.verifiedBy || '-',
-        'Tanggal Verifikasi': item.verifiedAt ? new Date(item.verifiedAt).toLocaleDateString('id-ID') : '-',
-        'Catatan Verifikator': item.verificationNotes || '-',
-        'Jumlah Foto Kerusakan': Array.isArray(item.photos) ? item.photos.length : 0,
-        'Link Folder Foto Google Drive': item.googleDriveFolderUrl || '-',
-        'Surveyor / Petugas': item.createdByName || '-',
-        'Kota Laporan': item.cityLocation || '',
-        'Nama Kepala Dinas': item.headOfDepartment?.name || '-',
-        'NIP Kepala Dinas': item.headOfDepartment?.nip || '-',
-        'Tim Analisis': Array.isArray(item.analysisTeam) ? item.analysisTeam.join(', ') : '-',
-        'Terakhir Diperbarui': new Date(item.updatedAt || Date.now()).toLocaleString('id-ID'),
-      };
-
-      rows.push(rowData);
-      if (!dataByKecamatan[tabName]) {
-        dataByKecamatan[tabName] = [];
-      }
-      dataByKecamatan[tabName].push(rowData);
-    }
-
-    const payload = {
-      action: 'sync_all',
-      sheetName: config.sheetName || 'REKAP_SEMUA_KECAMATAN',
-      splitByKecamatan: config.splitByKecamatan !== false,
-      includeMasterSummary: config.includeMasterSummarySheet !== false,
-      spreadsheetUrl: config.spreadsheetUrl || '',
-      spreadsheetId,
-      data: rows,
-      dataByKecamatan,
-      timestamp: new Date().toISOString(),
-    };
-
-    const resp = await fetch(webhookUrl, {
-      method: 'POST',
-      headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify(payload),
-    });
-
-    const responseText = await resp.text();
-    let responseJson: any = null;
-    try {
-      responseJson = JSON.parse(responseText);
-    } catch {
-      responseJson = { status: resp.ok ? 'success' : 'error', message: responseText };
-    }
-
-    if (responseJson.status === 'error') {
-      return res.status(502).json({ success: false, message: responseJson.message || 'Google Apps Script mengembalikan status galat.' });
-    }
-
-    return res.json({
-      success: true,
-      count: rows.length,
-      kecamatanCount: Object.keys(dataByKecamatan).length,
-      message: responseJson.message || `Berhasil menyinkronkan ${rows.length} data ke Google Sheet!`,
-      details: responseJson,
-    });
-  } catch (err: any) {
-    console.error('[Server -> GoogleSheet SyncAll] Error:', err);
-    return res.status(500).json({ success: false, message: err?.message || 'Gagal terhubung ke Google Apps Script Webhook' });
   }
 });
 
@@ -1268,7 +1022,7 @@ function getGoogleSheetConfig() {
       const parsed = JSON.parse(data);
       return {
         spreadsheetUrl: parsed.spreadsheetUrl || process.env.VITE_SPREADSHEET_URL || '',
-        webhookUrl: parsed.webhookUrl || process.env.VITE_WEBHOOK_URL || DEFAULT_WEBHOOK_URL,
+        webhookUrl: parsed.webhookUrl || process.env.VITE_WEBHOOK_URL || '',
         driveFolderId: parsed.driveFolderId || process.env.VITE_DRIVE_FOLDER_ID || 'https://drive.google.com/drive/folders/1xKF8SYvNY97A9-ga0B42z3jQTbcC_Tk5?usp=sharing',
         sheetName: parsed.sheetName || 'REKAP_SEMUA_KECAMATAN',
         splitByKecamatan: parsed.splitByKecamatan !== false,
@@ -1293,7 +1047,7 @@ function getGoogleSheetConfig() {
   }
   return {
     spreadsheetUrl: process.env.VITE_SPREADSHEET_URL || '',
-    webhookUrl: process.env.VITE_WEBHOOK_URL || DEFAULT_WEBHOOK_URL,
+    webhookUrl: process.env.VITE_WEBHOOK_URL || '',
     driveFolderId: process.env.VITE_DRIVE_FOLDER_ID || 'https://drive.google.com/drive/folders/1xKF8SYvNY97A9-ga0B42z3jQTbcC_Tk5?usp=sharing',
     sheetName: 'REKAP_SEMUA_KECAMATAN',
     splitByKecamatan: true,
@@ -1667,19 +1421,16 @@ async function fetchKecamatanRowsOnServer(
   spreadsheetId: string,
   kec: { name: string; aliases: string[] },
   cacheBuster: number
-): Promise<{ success: boolean; rows: Array<{ rowObj: Record<string, any>; sheetRowNumber: number; sourceSheet: string }>; matchedTabs: string[] }> {
-  // Probe both the standard active tab ("Kec. <Nama>") and archive tab ("Kec <Nama>")
-  const candidateTabs = Array.from(
+): Promise<{ success: boolean; rows: Array<{ rowObj: Record<string, any>; sheetRowNumber: number; sourceSheet: string }>; matchedTab?: string }> {
+  const prioritized = Array.from(
     new Set([`Kec. ${kec.name}`, `Kec ${kec.name}`, ...kec.aliases])
   ).filter((a) => a.toLowerCase().startsWith('kec'));
 
-  const collectedRows: Array<{ rowObj: Record<string, any>; sheetRowNumber: number; sourceSheet: string }> = [];
-  const matchedTabs: string[] = [];
-
   const fetchSingleAliasWithRetry = async (alias: string): Promise<{ rows: any[]; matchedTab: string } | null> => {
+    if (!alias.toLowerCase().startsWith('kec')) return null;
     const url = `https://docs.google.com/spreadsheets/d/${spreadsheetId}/gviz/tq?sheet=${encodeURIComponent(alias)}&_t=${cacheBuster}`;
 
-    // Try up to 2 times with backoff on 429
+    // Try up to 2 times with exponential backoff on 429
     for (let attempt = 0; attempt < 2; attempt++) {
       const controller = new AbortController();
       const timeout = setTimeout(() => controller.abort(), 12000);
@@ -1693,6 +1444,7 @@ async function fetchKecamatanRowsOnServer(
         clearTimeout(timeout);
 
         if (resp.status === 429) {
+          // Rate limited: wait 1000ms before retry
           await new Promise((r) => setTimeout(r, 1000 * (attempt + 1)));
           continue;
         }
@@ -1700,7 +1452,7 @@ async function fetchKecamatanRowsOnServer(
         if (!resp.ok) return null;
         const text = await resp.text();
         const parsed = parseServerGvizTextToRows(text, alias);
-        if (parsed.length === 0) return null;
+        if (parsed.length === 0 || isMasterRekapFallbackServer(parsed, kec.name)) return null;
 
         return { rows: parsed, matchedTab: alias };
       } catch {
@@ -1710,18 +1462,17 @@ async function fetchKecamatanRowsOnServer(
     return null;
   };
 
-  // Stop after finding the first valid matching tab for this Kecamatan
-  for (const alias of candidateTabs) {
+  // Check aliases sequentially in queue with small pause to avoid rate limiting
+  for (const alias of prioritized) {
     const res = await fetchSingleAliasWithRetry(alias);
     if (res && res.rows.length > 0) {
-      collectedRows.push(...res.rows);
-      matchedTabs.push(res.matchedTab);
-      break; // Found the active tab for this kecamatan, do NOT duplicate with aliases!
+      return { success: true, rows: res.rows, matchedTab: res.matchedTab };
     }
-    await new Promise((r) => setTimeout(r, 60));
+    // Small pause between alias probes
+    await new Promise((r) => setTimeout(r, 80));
   }
 
-  return { success: collectedRows.length > 0, rows: collectedRows, matchedTabs };
+  return { success: false, rows: [] };
 }
 
 const handleKecamatanRawFetch = async (req: express.Request, res: express.Response) => {
@@ -1736,20 +1487,16 @@ const handleKecamatanRawFetch = async (req: express.Request, res: express.Respon
       return res.status(400).json({ success: false, message: 'ID Spreadsheet Google Sheet tidak valid atau kosong.', rows: [] });
     }
 
-    if (forceRefresh) {
-      serverKecamatanCache = null;
-    }
-
-    // In-memory cache hit (5 seconds for high responsiveness during active input)
+    // In-memory cache hit (15 seconds for snappy navigation)
     if (!forceRefresh && serverKecamatanCache && serverKecamatanCache.spreadsheetId === spreadsheetId) {
       const age = Date.now() - serverKecamatanCache.timestamp;
-      if (age < 5000 && serverKecamatanCache.rows.length > 0) {
+      if (age < SERVER_KECAMATAN_CACHE_TTL && serverKecamatanCache.rows.length > 0) {
         return res.json({
           success: true,
           count: serverKecamatanCache.rows.length,
           rows: serverKecamatanCache.rows,
           cached: true,
-          message: `Memuat instan ${serverKecamatanCache.rows.length} baris dari server cache.`,
+          message: `Memuat instan ${serverKecamatanCache.rows.length} baris dari server cache 7 kecamatan.`,
         });
       }
     }
@@ -1758,79 +1505,83 @@ const handleKecamatanRawFetch = async (req: express.Request, res: express.Respon
     const allRows: Array<{ rowObj: Record<string, any>; sheetRowNumber: number; sourceSheet: string }> = [];
     const scannedSheets: string[] = [];
 
-    // Sequentially fetch kecamatan sheets (both active and archive tabs)
+    // Sequentially fetch the 7 kecamatan sheets with queue delay to prevent 429 rate limiting
     for (const kec of KECAMATAN_SPECS) {
       try {
         const resKec = await fetchKecamatanRowsOnServer(spreadsheetId, kec, cacheBuster);
         if (resKec.success && resKec.rows.length > 0) {
           allRows.push(...resKec.rows);
-          scannedSheets.push(...resKec.matchedTabs);
+          scannedSheets.push(resKec.matchedTab || kec.name);
         }
       } catch (err) {
         console.warn(`Server queue notice for ${kec.name}:`, err);
       }
-      await new Promise((r) => setTimeout(r, 80));
+      // Pacing interval between kecamatan fetches
+      await new Promise((r) => setTimeout(r, 120));
     }
 
-    // Fallback: If no rows found from kecamatan tabs, probe gid or operational tabs
-    const extraTargetUrls: Array<{ url: string; label: string }> = [];
+    // Fallback: If 0 rows found from the 7 kecamatan tabs, probe single sheet / custom tabs (e.g. Data Terverifikasi / Sheet1 / gid)
     if (allRows.length === 0) {
       const gidMatch = spreadsheetUrl.match(/[#&?]gid=([0-9]+)/);
       const gid = gidMatch ? gidMatch[1] : null;
+
+      const fallbackUrls: Array<{ url: string; label: string }> = [];
       if (gid) {
-        extraTargetUrls.push({
+        fallbackUrls.push({
           url: `https://docs.google.com/spreadsheets/d/${spreadsheetId}/gviz/tq?gid=${encodeURIComponent(gid)}&_t=${cacheBuster}`,
           label: `Sheet (gid=${gid})`,
         });
       }
 
-      // Common custom/operational tab names
-      const commonOperationalTabs = [
+      // Default active sheet
+      fallbackUrls.push({
+        url: `https://docs.google.com/spreadsheets/d/${spreadsheetId}/gviz/tq?_t=${cacheBuster}`,
+        label: 'Sheet Utama',
+      });
+
+      // Common custom tab names (e.g. Data Terverifikasi, Sheet1)
+      const customTabNames = [
         'Data_Terverifikasi',
         'Data Terverifikasi',
         'Data_Kerusakan',
         'Data Kerusakan',
         'Data_Penilaian',
-        'Data Penilaian',
-        'Survei',
-        'Survei Lapangan',
         'Sheet1',
+        'Halaman 2',
+        'Halaman 3',
+        'Halaman 4',
+        'Halaman 5',
       ];
-
-      for (const tab of commonOperationalTabs) {
-        extraTargetUrls.push({
+      for (const tab of customTabNames) {
+        fallbackUrls.push({
           url: `https://docs.google.com/spreadsheets/d/${spreadsheetId}/gviz/tq?sheet=${encodeURIComponent(tab)}&_t=${cacheBuster}`,
           label: tab,
         });
       }
-      extraTargetUrls.push({
-        url: `https://docs.google.com/spreadsheets/d/${spreadsheetId}/gviz/tq?_t=${cacheBuster}`,
-        label: 'Sheet Utama',
-      });
-    }
 
-    for (const target of extraTargetUrls) {
-      if (scannedSheets.includes(target.label)) continue;
-      try {
-        const controller = new AbortController();
-        const timeout = setTimeout(() => controller.abort(), 10000);
-        const resp = await fetch(target.url, {
-          signal: controller.signal,
-          headers: {
-            'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36',
-          },
-        });
-        clearTimeout(timeout);
-        if (resp.ok) {
-          const text = await resp.text();
-          const parsed = parseServerGvizTextToRows(text, target.label);
-          if (parsed.length > 0) {
-            allRows.push(...parsed);
-            scannedSheets.push(target.label);
+      for (const target of fallbackUrls) {
+        try {
+          const controller = new AbortController();
+          const timeout = setTimeout(() => controller.abort(), 10000);
+          const resp = await fetch(target.url, {
+            signal: controller.signal,
+            headers: {
+              'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36',
+            },
+          });
+          clearTimeout(timeout);
+          if (resp.ok) {
+            const text = await resp.text();
+            const parsed = parseServerGvizTextToRows(text, target.label);
+            if (parsed.length > 0) {
+              allRows.push(...parsed);
+              scannedSheets.push(target.label);
+              break;
+            }
           }
-        }
-      } catch {}
-      await new Promise((r) => setTimeout(r, 60));
+        } catch {}
+        await new Promise((r) => setTimeout(r, 60));
+      }
     }
 
     if (allRows.length > 0) {

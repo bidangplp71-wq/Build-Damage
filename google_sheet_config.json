@@ -1,6 +1,6 @@
 {
   "spreadsheetUrl": "",
-  "webhookUrl": "https://script.google.com/macros/s/AKfycbyAbubspPnACJi6KTODHJbVeAIppC6e72c8nAo__g8uc67GmY-wc1lOZWZkbLtieds/exec",
+  "webhookUrl": "",
   "sheetName": "REKAP_SEMUA_KECAMATAN",
   "splitByKecamatan": true,
   "includeMasterSummarySheet": true,

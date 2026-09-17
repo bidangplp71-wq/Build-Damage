@@ -1,5 +1,4 @@
 import { BuildingAssessment } from '../types';
-import { terbilang } from './puprCalculations';
 
 export type DuplicateMatchReason = 
   | 'EXACT_NAME_AND_LOCATION'   // Nama gedung sama persis di Desa & Kecamatan yang sama
@@ -151,7 +150,7 @@ export function checkDuplicateBeforeSave(
 }
 
 /**
- * Group all assessments in the database into duplicate clusters for verification warning badges
+ * Group all assessments in the database into duplicate clusters
  */
 export function detectAllDuplicateGroups(
   assessments: BuildingAssessment[],
@@ -215,302 +214,55 @@ export function detectAllDuplicateGroups(
 }
 
 /**
- * Identifies if a sheet/profile name represents an old archive / read-only historical sheet
- */
-export function isArchiveSource(sourceName?: string | null): boolean {
-  if (!sourceName) return false;
-  const trimmed = sourceName.trim();
-  const lower = trimmed.toLowerCase();
-  if (
-    lower.includes('arsip') ||
-    lower.includes('archive') ||
-    lower.includes('data lama') ||
-    lower.includes('datalama') ||
-    lower.includes('data_lama') ||
-    lower.includes('old') ||
-    lower.includes('read only') ||
-    lower.includes('readonly') ||
-    lower.includes('backup') ||
-    lower.includes('buku_arsip') ||
-    lower.includes('buku 2') ||
-    lower.includes('buku_2') ||
-    lower.includes('riwayat_lama')
-  ) {
-    return true;
-  }
-
-  // NOTE: All Kecamatan sheets (e.g. "Kec. Aesesa", "Kec Aesesa", "Kec. Boawae", "Kec Boawae", etc.)
-  // are 100% active operational sheets and must NEVER be flagged as archive.
-  return false;
-}
-
-/**
- * Check if an assessment item belongs to historical archive / old data
- */
-export function isArchiveAssessment(item?: Partial<BuildingAssessment> | null): boolean {
-  if (!item) return false;
-  if (isArchiveSource(item.sourceSheet)) return true;
-  if (isArchiveSource(item.targetSheetName)) return true;
-  if (isArchiveSource(item.targetProfileName)) return true;
-  if (item.targetProfileId === 'profile_backup_new') return true;
-  // Note: Only flag as archive if explicitly marked in source sheet / profile,
-  // never flag active surveys based solely on registration code.
-  return false;
-}
-
-/**
- * Builds a deterministic semantic key for a building assessment record to assist in verification badges.
- * NOTE: Semantic keys are strictly for UI assistance and MUST NEVER be used to delete or squash physical sheet survey rows.
- */
-export function buildSemanticKey(item: Partial<BuildingAssessment>): string {
-  const cleanBuilding = normalizeString(item.buildingName);
-  const cleanKec = (item.kecamatanName || item.kecamatanId || '').toLowerCase().trim();
-  const cleanDesa = (item.desaName || item.desaId || '').toLowerCase().trim();
-  const cleanNik = (item.nikPemilik || '').replace(/[^0-9]/g, '');
-
-  if (cleanNik && cleanNik.length >= 10 && cleanNik !== '0000000000000000') {
-    return `nik:${cleanNik}::${cleanKec}`;
-  }
-
-  if (cleanBuilding && (cleanKec || cleanDesa)) {
-    return `loc:${cleanKec}::${cleanDesa}::${cleanBuilding}`;
-  }
-
-  return item.id || `item_${Math.random()}`;
-}
-
-/**
- * Generates candidate identity keys for an assessment to ensure accurate reconciliation
- * across local storage, server state, and Google Sheet fetch rows.
- * CRITICAL RULE: Never match by generic row number alone! Only match if exact ID matches,
- * or Registration Code + Building Name matches, or exact spreadsheet profile + sheet + row matches.
- */
-export function getAssessmentLookupKeys(item: BuildingAssessment): string[] {
-  const keys: string[] = [];
-
-  // 1. Exact Unique ID
-  if (item.id && item.id.trim()) {
-    keys.push(`id:${item.id.trim()}`);
-  }
-
-  // 2. Registration Code / Code as ID
-  const invalidCodes = new Set([
-    '',
-    '0',
-    '-',
-    '--',
-    '---',
-    'none',
-    'tidak ada',
-    'belum ada',
-    'null',
-    'undefined',
-    'tanpa kode',
-    'tanpa no reg',
-    'reg',
-    'reg-',
-    'reg--',
-    'reg-preview',
-  ]);
-  const rawCode = (item.code || '').trim();
-  const cleanCode = rawCode.toUpperCase();
-  const cleanBuilding = normalizeString(item.buildingName).replace(/\s*\(baris\s+\d+\)/i, '').trim();
-  const cleanKec = (item.kecamatanName || item.kecamatanId || '').toLowerCase().replace(/[^a-z0-9]/g, '_');
-  const cleanDesa = normalizeString(item.desaName);
-
-  if (rawCode && (rawCode.startsWith('ass_') || rawCode.startsWith('uuid_') || /^[0-9a-f]{8}-[0-9a-f]{4}/i.test(rawCode))) {
-    keys.push(`id:${rawCode}`);
-  }
-
-  if (cleanCode && !invalidCodes.has(cleanCode.toLowerCase()) && cleanCode.length >= 3) {
-    keys.push(`code:${cleanCode}`);
-    if (cleanBuilding && cleanBuilding.length >= 3) {
-      keys.push(`code_bldg:${cleanCode}::${cleanBuilding}`);
-    }
-    if (cleanKec && cleanDesa) {
-      keys.push(`code_loc:${cleanCode}::${cleanKec}::${cleanDesa}`);
-    }
-  }
-
-  // 3. Exact Location + Building Name match (for cross-fetch deduplication)
-  if (cleanBuilding && cleanBuilding.length >= 4 && !cleanBuilding.startsWith('survei lapangan') && cleanKec) {
-    keys.push(`loc_bldg:${cleanKec}::${cleanDesa || 'nodesa'}::${cleanBuilding}`);
-  }
-
-  // 4. Exact Physical Sheet Tab + Sheet Row Number (Guarantees 1 row per physical spreadsheet row)
-  const cleanSheet = (item.sourceSheet || item.targetSheetName || '').toLowerCase().replace(/[^a-z0-9]/g, '_');
-  if (item.sheetRowNumber && item.sheetRowNumber >= 2 && cleanSheet) {
-    keys.push(`sheet_row:${cleanSheet}::r${item.sheetRowNumber}`);
-    if (cleanBuilding && cleanBuilding.length >= 3) {
-      const bldgSlug = cleanBuilding.replace(/[^a-z0-9]/g, '').slice(0, 16);
-      keys.push(`sheet_bldg_row:${cleanSheet}::r${item.sheetRowNumber}::${bldgSlug}`);
-    }
-  }
-
-  // 5. Exact NIK + Kecamatan Match
-  const cleanNik = (item.nikPemilik || '').replace(/[^0-9]/g, '');
-  if (cleanNik && cleanNik.length >= 10 && cleanNik !== '0000000000000000' && cleanKec) {
-    keys.push(`nik_loc:${cleanNik}::${cleanKec}`);
-  }
-
-  return keys;
-}
-
-/**
- * Deduplicate an array of assessments strictly by exact ID, Registration Code,
- * Location + Building Name, or physical sheet row.
- * Eliminates duplicate clones and prevents the dataset count from inflating.
+ * Deduplicate an array of assessments strictly by unique ID
+ * Preserves every single physical row from each kecamatan sheet (including similar/duplicate surveys for inspector review)
  */
 export function deduplicateAssessmentsList(list: BuildingAssessment[]): BuildingAssessment[] {
   if (!Array.isArray(list) || list.length <= 1) return list || [];
 
   const result: BuildingAssessment[] = [];
-  const keyToResultIndex = new Map<string, number>();
+  const seenIdMap = new Map<string, number>(); // id -> index in result
 
   for (const item of list) {
-    if (!item) continue;
+    if (!item || !item.id) continue;
 
-    const candidateKeys = getAssessmentLookupKeys(item);
-    let matchedIndex: number | undefined = undefined;
-
-    for (const key of candidateKeys) {
-      if (keyToResultIndex.has(key)) {
-        matchedIndex = keyToResultIndex.get(key);
-        break;
-      }
+    let matchIdx = -1;
+    if (seenIdMap.has(item.id)) {
+      matchIdx = seenIdMap.get(item.id)!;
     }
 
-    if (matchedIndex !== undefined) {
-      const existing = result[matchedIndex];
-
-      // Non-destructive merge of components (preserve detailed user survey data)
-      const existingHasDetailedComps = existing.components && existing.components.some((c) => (c.damagePercentInput || 0) > 0 || c.notes);
-      const incomingHasDetailedComps = item.components && item.components.some((c) => (c.damagePercentInput || 0) > 0 || c.notes);
-      const mergedComponents = incomingHasDetailedComps
-        ? item.components
-        : existingHasDetailedComps
-        ? existing.components
-        : item.components || existing.components;
-
-      const isItemVerified = item.verificationStatus === 'Terverifikasi';
-      const isExistingVerified = existing.verificationStatus === 'Terverifikasi';
-      const existingTime = new Date(existing.updatedAt || existing.createdAt || 0).getTime();
-      const incomingTime = new Date(item.updatedAt || item.createdAt || 0).getTime();
-      const keepIncomingAsBase = isItemVerified && !isExistingVerified
-        ? true
-        : !isItemVerified && isExistingVerified
-        ? false
-        : incomingTime >= existingTime;
-
-      // Strict photo isolation: only merge photos if they represent the exact same building ID, Code, or exact Name.
-      // Never mix photos between different buildings (e.g. school vs market).
-      const areSameBuilding = (existing.id && item.id && existing.id === item.id) ||
-        (existing.code && item.code && existing.code === item.code) ||
-        (existing.buildingName && item.buildingName && existing.buildingName.toLowerCase().trim() === item.buildingName.toLowerCase().trim());
-
-      const existingPhotos = existing.photos || [];
-      const incomingPhotos = item.photos || [];
-      const mergedPhotos: any[] = [];
-
-      if (areSameBuilding) {
-        const photoUrls = new Set<string>();
-        [...existingPhotos, ...incomingPhotos].forEach((p) => {
-          const url = p.url || (p as any).dataUrl || '';
-          if (url && !photoUrls.has(url)) {
-            photoUrls.add(url);
-            mergedPhotos.push(p);
-          } else if (!url && p.id && !mergedPhotos.some((mp) => mp.id === p.id)) {
-            mergedPhotos.push(p);
-          }
-        });
-        if (mergedPhotos.length === 0) {
-          mergedPhotos.push(...(existingPhotos.length > 0 ? existingPhotos : incomingPhotos));
-        }
-      } else {
-        // Different buildings: strictly keep the base item's photos, do not cross-contaminate
-        const basePhotos = keepIncomingAsBase ? incomingPhotos : existingPhotos;
-        mergedPhotos.push(...basePhotos);
-      }
-
+    if (matchIdx !== -1) {
+      // Merge with existing item at matchIdx (preserve latest timestamps and photos)
+      const existing = result[matchIdx];
+      const mergedPhotos = (item.photos && item.photos.length > 0)
+        ? item.photos
+        : (existing.photos || []);
       const mergedDriveUrl = item.googleDriveFolderUrl || item.backupDriveUrl || existing.googleDriveFolderUrl || existing.backupDriveUrl;
 
-      const base = keepIncomingAsBase ? item : existing;
-      const other = keepIncomingAsBase ? existing : item;
+      const existingTime = new Date(existing.updatedAt || existing.createdAt || 0).getTime();
+      const incomingTime = new Date(item.updatedAt || item.createdAt || 0).getTime();
 
-      const resolvedArea = base.totalFloorAreaM2 || other.totalFloorAreaM2 || 0;
-      const resolvedDamage = base.totalDamagePercent || other.totalDamagePercent || 0;
-      const resolvedHsbgn = base.hsbgnPerM2 || other.hsbgnPerM2 || 5920000;
-      const resolvedRehabCost = base.roundedRehabCost || other.roundedRehabCost || (resolvedArea > 0 && resolvedDamage > 0 ? Math.round(resolvedArea * resolvedHsbgn * (resolvedDamage / 100) * 1.08 / 100000) * 100000 : 0);
-
-      // Stable ID preservation: prefer active uuid / ass_ ID over temporary sheet_ ID
-      const stableId = existing.id && !existing.id.startsWith('sheet_')
-        ? existing.id
-        : item.id && !item.id.startsWith('sheet_')
-        ? item.id
-        : base.id || other.id;
-
-      // Stable Code preservation: prefer valid official code
-      const stableCode = base.code && !base.code.startsWith('REG-TEMP') && !base.code.startsWith('ass_')
-        ? base.code
-        : other.code && !other.code.startsWith('REG-TEMP') && !other.code.startsWith('ass_')
-        ? other.code
-        : base.code || other.code;
-
-      // Stable Building Name: prefer meaningful non-generic name
-      const isBaseGeneric = !base.buildingName || base.buildingName.startsWith('Survei Bangunan Lapangan (Baris');
-      const isOtherGeneric = !other.buildingName || other.buildingName.startsWith('Survei Bangunan Lapangan (Baris');
-      const resolvedBuildingName = !isBaseGeneric ? base.buildingName : (!isOtherGeneric ? other.buildingName : base.buildingName || other.buildingName);
-
-      const mergedItem: BuildingAssessment = {
-        ...other,
-        ...base,
-        id: stableId,
-        code: stableCode,
-        buildingName: resolvedBuildingName,
-        totalFloorAreaM2: resolvedArea,
-        totalDamagePercent: resolvedDamage,
-        hsbgnPerM2: resolvedHsbgn,
-        roundedRehabCost: resolvedRehabCost,
-        totalRehabCost: base.totalRehabCost || other.totalRehabCost || resolvedRehabCost,
-        costTerbilang: base.costTerbilang || other.costTerbilang || (resolvedRehabCost > 0 ? `${terbilang(resolvedRehabCost)} Rupiah` : '-'),
-        components: mergedComponents,
+      const merged: BuildingAssessment = incomingTime >= existingTime ? {
+        ...existing,
+        ...item,
         photos: mergedPhotos,
-        createdBy: existing.createdBy || item.createdBy || base.createdBy,
-        createdByName: existing.createdByName || item.createdByName || base.createdByName,
-        createdAt: existing.createdAt || item.createdAt || base.createdAt || new Date().toISOString(),
-        headOfDepartment: (base.headOfDepartment?.name && base.headOfDepartment.name !== '-')
-          ? base.headOfDepartment
-          : (other.headOfDepartment?.name && other.headOfDepartment.name !== '-' ? other.headOfDepartment : (base.headOfDepartment || other.headOfDepartment)),
-        analysisTeam: (base.analysisTeam && base.analysisTeam.length > 0)
-          ? base.analysisTeam
-          : (other.analysisTeam && other.analysisTeam.length > 0 ? other.analysisTeam : []),
-        cityLocation: base.cityLocation || other.cityLocation,
         googleDriveFolderUrl: mergedDriveUrl,
-        backupDriveUrl: base.backupDriveUrl || other.backupDriveUrl,
-        sourceSheet: base.sourceSheet || other.sourceSheet,
-        sheetRowNumber: base.sheetRowNumber || other.sheetRowNumber,
-        targetSheetName: base.targetSheetName || other.targetSheetName,
-        targetProfileId: base.targetProfileId || other.targetProfileId,
-        targetProfileName: base.targetProfileName || other.targetProfileName,
-        verificationStatus: isExistingVerified || isItemVerified ? 'Terverifikasi' : base.verificationStatus,
-        googleSheetSynced: Boolean(base.googleSheetSynced || other.googleSheetSynced),
+        backupDriveUrl: item.backupDriveUrl || existing.backupDriveUrl,
+        googleSheetSynced: Boolean(item.googleSheetSynced || existing.googleSheetSynced),
+      } : {
+        ...item,
+        ...existing,
+        photos: mergedPhotos,
+        googleDriveFolderUrl: mergedDriveUrl,
+        backupDriveUrl: existing.backupDriveUrl || item.backupDriveUrl,
+        googleSheetSynced: Boolean(existing.googleSheetSynced || item.googleSheetSynced),
       };
 
-      result[matchedIndex] = mergedItem;
-
-      // Register all candidate keys to point to matchedIndex
-      for (const key of candidateKeys) {
-        keyToResultIndex.set(key, matchedIndex);
-      }
-      for (const key of getAssessmentLookupKeys(mergedItem)) {
-        keyToResultIndex.set(key, matchedIndex);
-      }
+      result[matchIdx] = merged;
     } else {
       const newIdx = result.length;
       result.push(item);
-      for (const key of candidateKeys) {
-        keyToResultIndex.set(key, newIdx);
-      }
+      seenIdMap.set(item.id, newIdx);
     }
   }
 
@@ -518,22 +270,47 @@ export function deduplicateAssessmentsList(list: BuildingAssessment[]): Building
 }
 
 /**
- * Reconcile base assessments with incoming Google Sheet records.
- * Retains all historical archive data, prevents active data from squashing archive data,
- * and immediately reflects newly added active rows.
+ * Reconcile base assessments with incoming Google Sheet records
+ * Preserves 100% of rows from the 7 kecamatan sheets and appends any local unsynced surveys
  */
 export function reconcileAndMergeAssessments(
   baseList: BuildingAssessment[],
   incomingList: BuildingAssessment[]
 ): BuildingAssessment[] {
-  if (!incomingList || incomingList.length === 0) return deduplicateAssessmentsList(baseList || []);
-  if (!baseList || baseList.length === 0) return deduplicateAssessmentsList(incomingList);
+  // Start with clean incoming records from the 7 kecamatan sheets (100% preserved)
+  const incoming = deduplicateAssessmentsList(incomingList || []);
+  const seenIdMap = new Map<string, number>();
 
-  // Combine both lists and deduplicate strictly by exact ID/row:
-  // - Preserves 100% of all existing records (no data loss if an incoming fetch returns fewer items)
-  // - Preserves all archive records without letting active sheets squash them
-  // - Merges photos, verification status, and timestamps non-destructively
-  return deduplicateAssessmentsList([...baseList, ...incomingList]);
+  incoming.forEach((item, idx) => {
+    seenIdMap.set(item.id, idx);
+  });
+
+  const merged = [...incoming];
+
+  // Process base records
+  (baseList || []).forEach((baseItem) => {
+    if (!baseItem || !baseItem.id) return;
+
+    if (seenIdMap.has(baseItem.id)) {
+      // Merge user local photos or edits into the incoming item
+      const matchIdx = seenIdMap.get(baseItem.id)!;
+      const incomingItem = merged[matchIdx];
+      const mergedPhotos = (baseItem.photos && baseItem.photos.length > 0)
+        ? baseItem.photos
+        : (incomingItem.photos || []);
+      merged[matchIdx] = {
+        ...baseItem,
+        ...incomingItem,
+        photos: mergedPhotos,
+        googleDriveFolderUrl: incomingItem.googleDriveFolderUrl || baseItem.googleDriveFolderUrl,
+      };
+    } else {
+      // Preserve all base records unconditionally (both local drafts and sheet items)
+      merged.push(baseItem);
+    }
+  });
+
+  return deduplicateAssessmentsList(merged);
 }
 
 /**

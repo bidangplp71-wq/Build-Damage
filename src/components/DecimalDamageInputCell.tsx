@@ -25,15 +25,12 @@ export const DecimalDamageInputCell: React.FC<DecimalDamageInputCellProps> = ({
   // Sync when value changes externally (e.g. from dropdown preset or form reset)
   useEffect(() => {
     const safeVal = value ?? 0;
-    setLocalText((prev) => {
-      const currentParsed = parseFloat(prev.replace(',', '.'));
-      // Only synchronize if numerical difference is significant (> 0.0005)
-      if (isNaN(currentParsed) || Math.abs(currentParsed - safeVal) > 0.0005) {
-        return safeVal === 0 ? '0' : String(safeVal);
-      }
-      return prev;
-    });
-  }, [value]);
+    const currentParsed = parseFloat(localText.replace(',', '.'));
+    // Only synchronize if numerical difference is significant (> 0.0001)
+    if (isNaN(currentParsed) || Math.abs(currentParsed - safeVal) > 0.0005) {
+      setLocalText(safeVal === 0 ? '0' : String(safeVal));
+    }
+  }, [value, localText]);
 
   const handleChange = (e: React.ChangeEvent<HTMLInputElement>) => {
     const raw = e.target.value;

@@ -30,7 +30,6 @@ import {
   INITIAL_ASSESSMENTS,
   INITIAL_DUKCAPIL,
   DEFAULT_GOOGLE_SHEET_CONFIG,
-  DEFAULT_PASAR_AEWOE_ASSESSMENT,
 } from '../data/initialData';
 import {
   syncToGoogleSheetWebhook,
@@ -45,7 +44,6 @@ import {
   syncAllUsersToGoogleSheet,
   fetchUsersFromGoogleSheet,
   clearGoogleSheetsMemoryCache,
-  extractSpreadsheetId,
 } from '../services/googleSheetsService';
 import {
   encryptPassword,
@@ -70,11 +68,7 @@ import {
   deduplicateAssessmentsList, 
   reconcileAndMergeAssessments 
 } from '../utils/duplicateDetector';
-import { 
-  generateNextRegistrationCode, 
-  autoFixDuplicateRegistrationCodes,
-  getKecamatanCodePrefix 
-} from '../utils/registrationCodeGenerator';
+import { generateNextRegistrationCode, autoFixDuplicateRegistrationCodes } from '../utils/registrationCodeGenerator';
 import {
   queueAssessmentForSync,
   removeAssessmentFromSyncQueue,
@@ -110,15 +104,11 @@ interface AppContextType {
   addAssessment: (data: BuildingAssessment) => Promise<{ success: boolean; message: string }>;
   updateAssessment: (id: string, data: Partial<BuildingAssessment>) => Promise<{ success: boolean; message: string }>;
   deleteAssessment: (id: string, bypassAuth?: boolean) => { success: boolean; message: string };
-  restoreAndRecoverAllAssessments: () => Promise<{ success: boolean; message: string; recoveredCount: number; totalCount: number }>;
-  restoreDeletedAssessment: (id: string) => Promise<boolean>;
-  getDeletedAssessmentIds: () => string[];
-  purgeAllDuplicates: () => Promise<{ success: boolean; count: number; message: string }>;
-  autoFixDuplicateCodes: () => Promise<{
+  purgeAllDuplicates: () => { success: boolean; count: number; message: string };
+  autoFixDuplicateCodes: () => {
     success: boolean;
     fixedCount: number;
     message: string;
-    sheetSyncStatus?: boolean;
     fixedItems: Array<{
       id: string;
       buildingName: string;
@@ -126,16 +116,7 @@ interface AppContextType {
       newCode: string;
       sourceSheet?: string;
     }>;
-  }>;
-  fixSingleAssessmentRegistrationCode: (
-    id: string,
-    customNewCode?: string
-  ) => Promise<{
-    success: boolean;
-    oldCode: string;
-    newCode: string;
-    message: string;
-  }>;
+  };
   verifyAssessment: (
     id: string,
     status: VerificationStatus,
@@ -313,21 +294,6 @@ function persistDeletedAssessmentIdsBatch(ids: string[]) {
   } catch {}
 }
 
-function clearStoredDeletedAssessmentIds() {
-  try {
-    localStorage.removeItem(STORAGE_KEYS.DELETED_ASSESSMENTS);
-  } catch {}
-}
-
-function removeStoredDeletedAssessmentId(id: string) {
-  if (!id) return;
-  try {
-    const current = getStoredDeletedAssessmentIds();
-    current.delete(id);
-    localStorage.setItem(STORAGE_KEYS.DELETED_ASSESSMENTS, JSON.stringify(Array.from(current)));
-  } catch {}
-}
-
 /**
  * Strip heavy raw base64 photo URLs before sending to Cloud Firestore
  * so the payload stays well below Firestore's 1MB document limit.
@@ -429,56 +395,18 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
     return users[0] || INITIAL_USERS[0];
   });
 
-  // Initialize assessments with persistent deleted IDs filtered out, aggregating all local keys and backups
+  // Initialize assessments with persistent deleted IDs filtered out and deduplicated
   const [assessments, setAssessments] = useState<BuildingAssessment[]>(() => {
     try {
       const deletedIds = getStoredDeletedAssessmentIds();
-      const collected: BuildingAssessment[] = [];
-
-      // 1. Primary current storage key
       const saved = localStorage.getItem(STORAGE_KEYS.ASSESSMENTS);
-      if (saved) {
-        try {
-          const parsed = JSON.parse(saved);
-          if (Array.isArray(parsed)) collected.push(...parsed);
-        } catch {}
-      }
-
-      // 2. Also check legacy & backup keys to prevent any data loss between versions or offline sessions
-      const backupKeys = [
-        'sipandu_pupr_assessments_backup',
-        'sipandu_pupr_assessments_v2',
-        'sipandu_pupr_assessments_v1',
-        'sipandu_pupr_assessments_2026',
-        'sipandu_pupr_assessments',
-        'sipandu_assessments',
-        'sipandu_offline_sync_queue',
-      ];
-      for (const k of backupKeys) {
-        try {
-          const raw = localStorage.getItem(k);
-          if (raw) {
-            const parsed = JSON.parse(raw);
-            if (Array.isArray(parsed)) {
-              for (const it of parsed) {
-                const item = it && it.assessment ? it.assessment : it;
-                if (item && item.id && item.buildingName) collected.push(item);
-              }
-            }
-          }
-        } catch {}
-      }
+      if (!saved) return INITIAL_ASSESSMENTS.filter((a) => !deletedIds.has(a.id));
+      const parsed = JSON.parse(saved);
+      if (!Array.isArray(parsed)) return INITIAL_ASSESSMENTS.filter((a) => !deletedIds.has(a.id));
 
       // Filter out deleted IDs and deduplicate completely
-      const valid = collected.filter((item: BuildingAssessment) => item && item.id && !deletedIds.has(item.id));
-      if (valid.length > 0) {
-        const deduplicated = deduplicateAssessmentsList(valid);
-        try {
-          localStorage.setItem(STORAGE_KEYS.ASSESSMENTS, JSON.stringify(deduplicated));
-        } catch {}
-        return deduplicated;
-      }
-      return INITIAL_ASSESSMENTS.filter((a) => !deletedIds.has(a.id));
+      const valid = parsed.filter((item: BuildingAssessment) => item && item.id && !deletedIds.has(item.id));
+      return deduplicateAssessmentsList(valid);
     } catch {
       return INITIAL_ASSESSMENTS;
     }
@@ -818,112 +746,96 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
   const hasLoadedInitialGoogleSheetRef = useRef<boolean>(false);
   const lastSheetSyncTimestampRef = useRef<number>(0);
   
-  // 1. Load Google Sheet Config dynamically from Firestore (Primary) & Express server (Fallback)
+  // Load Google Sheet Config & Assessments dynamically from Express server on startup
   useEffect(() => {
-    let unsubConfig: (() => void) | undefined;
+    // Load Google Sheet Config dynamically from Firestore (Primary) & Express server (Fallback)
     if (db && !isFirestoreQuotaExceeded) {
-      try {
-        unsubConfig = onSnapshot(doc(db, 'system_configs', 'google_sheet'), (snapshot) => {
-          if (snapshot.exists()) {
-            const data = snapshot.data();
-            if (data && (data.spreadsheetUrl || data.webhookUrl || data.driveFolderId || data.spreadsheetProfiles)) {
-              setGoogleSheetConfig((prev) => {
-                const updated = {
-                  ...prev,
-                  spreadsheetUrl: data.spreadsheetUrl || prev.spreadsheetUrl,
-                  webhookUrl: data.webhookUrl || prev.webhookUrl,
-                  driveFolderId: data.driveFolderId || prev.driveFolderId,
-                  spreadsheetProfiles: data.spreadsheetProfiles || prev.spreadsheetProfiles,
-                  activeProfileId: data.activeProfileId || prev.activeProfileId,
-                };
-                try {
-                  localStorage.setItem(STORAGE_KEYS.GOOGLE_SHEET, JSON.stringify(updated));
-                } catch {}
-                return updated;
-              });
-            }
-          }
-        }, (err) => {
-          console.warn('Firebase config sync failed, using fallback:', err);
-        });
-      } catch (err) {
-        console.warn('Firebase config snapshot error:', err);
-      }
-    }
-
-    // Always fetch server configuration as well to ensure latest webhookUrl & active profile
-    fetch('/api/config')
-      .then((res) => res.json())
-      .then((data) => {
-        if (data.success && data.config) {
-          const { spreadsheetUrl, webhookUrl, driveFolderId, spreadsheetProfiles, activeProfileId } = data.config;
-          if (spreadsheetUrl || webhookUrl || driveFolderId || spreadsheetProfiles) {
+      const unsubConfig = onSnapshot(doc(db, 'system_configs', 'google_sheet'), (snapshot) => {
+        if (snapshot.exists()) {
+          const data = snapshot.data();
+          if (data && (data.spreadsheetUrl || data.webhookUrl || data.driveFolderId || data.spreadsheetProfiles)) {
             setGoogleSheetConfig((prev) => {
               const updated = {
                 ...prev,
-                spreadsheetUrl: spreadsheetUrl || prev.spreadsheetUrl,
-                webhookUrl: webhookUrl || prev.webhookUrl,
-                driveFolderId: driveFolderId || prev.driveFolderId,
-                spreadsheetProfiles: spreadsheetProfiles || prev.spreadsheetProfiles,
-                activeProfileId: activeProfileId || prev.activeProfileId,
+                spreadsheetUrl: data.spreadsheetUrl || prev.spreadsheetUrl,
+                webhookUrl: data.webhookUrl || prev.webhookUrl,
+                driveFolderId: data.driveFolderId || prev.driveFolderId,
+                spreadsheetProfiles: data.spreadsheetProfiles || prev.spreadsheetProfiles,
+                activeProfileId: data.activeProfileId || prev.activeProfileId,
               };
               try {
                 localStorage.setItem(STORAGE_KEYS.GOOGLE_SHEET, JSON.stringify(updated));
               } catch {}
               return updated;
             });
-            // If we fetched a new config, trigger user list sync to make sure login credentials work instantly!
-            fetchUsersFromGoogleSheet({
-              spreadsheetUrl: spreadsheetUrl || '',
-              webhookUrl: webhookUrl || '',
-              sheetName: 'Daftar_Pengguna',
-              logSheetName: 'Log_Akses_Pengguna',
-              autoSync: true,
-              directSaveEnabled: true,
-            }).then((res) => {
-              if (res.success && res.users && res.users.length > 0) {
-                setUsers((prev) => {
-                  const deletedUserIds = getStoredDeletedUserIds();
-                  const userMap = new Map<string, UserAccount>();
-                  INITIAL_USERS.forEach((u) => { if (!deletedUserIds.has(u.id)) userMap.set(u.id, u); });
-                  prev.forEach((u) => { if (u && u.id && !deletedUserIds.has(u.id)) userMap.set(u.id, u); });
-                  res.users.forEach((u) => { if (u && u.id && !deletedUserIds.has(u.id)) userMap.set(u.id, u); });
-                  const merged = Array.from(userMap.values());
-                  try {
-                    localStorage.setItem(STORAGE_KEYS.USERS, JSON.stringify(merged));
-                  } catch {}
-                  return merged;
-                });
-              }
-            }).catch((err) => console.warn('Background user fetch from Sheet failed:', err));
           }
         }
-      })
-      .catch((err) => console.warn('Failed to load server-side google sheet config:', err));
+      }, (err) => {
+        console.warn('Firebase config sync failed, using fallback:', err);
+      });
+      return () => unsubConfig();
+    } else {
+      // Fallback 1. Load server configuration
+      fetch('/api/config')
+        .then((res) => res.json())
+        .then((data) => {
+          if (data.success && data.config) {
+            const { spreadsheetUrl, webhookUrl, driveFolderId, spreadsheetProfiles, activeProfileId } = data.config;
+            if (spreadsheetUrl || webhookUrl || driveFolderId || spreadsheetProfiles) {
+              setGoogleSheetConfig((prev) => {
+                const updated = {
+                  ...prev,
+                  spreadsheetUrl: spreadsheetUrl || prev.spreadsheetUrl,
+                  webhookUrl: webhookUrl || prev.webhookUrl,
+                  driveFolderId: driveFolderId || prev.driveFolderId,
+                  spreadsheetProfiles: spreadsheetProfiles || prev.spreadsheetProfiles,
+                  activeProfileId: activeProfileId || prev.activeProfileId,
+                };
+                try {
+                  localStorage.setItem(STORAGE_KEYS.GOOGLE_SHEET, JSON.stringify(updated));
+                } catch {}
+                return updated;
+              });
+              // If we fetched a new config, trigger user list sync to make sure login credentials work instantly!
+              fetchUsersFromGoogleSheet({
+                spreadsheetUrl: spreadsheetUrl || '',
+                webhookUrl: webhookUrl || '',
+                sheetName: 'Daftar_Pengguna',
+                logSheetName: 'Log_Akses_Pengguna',
+                autoSync: true,
+                directSaveEnabled: true,
+              }).then((res) => {
+                if (res.success && res.users && res.users.length > 0) {
+                  setUsers((prev) => {
+                    const deletedUserIds = getStoredDeletedUserIds();
+                    const userMap = new Map<string, UserAccount>();
+                    INITIAL_USERS.forEach((u) => { if (!deletedUserIds.has(u.id)) userMap.set(u.id, u); });
+                    prev.forEach((u) => { if (u && u.id && !deletedUserIds.has(u.id)) userMap.set(u.id, u); });
+                    res.users.forEach((u) => { if (u && u.id && !deletedUserIds.has(u.id)) userMap.set(u.id, u); });
+                    const merged = Array.from(userMap.values());
+                    try {
+                      localStorage.setItem(STORAGE_KEYS.USERS, JSON.stringify(merged));
+                    } catch {}
+                    return merged;
+                  });
+                }
+              }).catch((err) => console.warn('Background user fetch from Sheet failed:', err));
+            }
+          }
+        })
+        .catch((err) => console.warn('Failed to load server-side google sheet config:', err));
+    }
 
-    return () => {
-      if (unsubConfig) unsubConfig();
-    };
-  }, []);
-
-  // 2. Load assessments from server (/api/assessments) for zero-quota persistence & cross-device sharing
-  useEffect(() => {
+    // 2. Load assessments from server (/api/assessments) for zero-quota persistence & cross-device sharing
     fetch('/api/assessments')
       .then((res) => res.json())
       .then((data) => {
-        if (data.success && Array.isArray(data.assessments)) {
+        if (data.success && Array.isArray(data.assessments) && data.assessments.length > 0) {
           setAssessments((prev) => {
-            const pool = [...data.assessments];
-            const merged = reconcileAndMergeAssessments(prev, pool);
+            const merged = reconcileAndMergeAssessments(prev, data.assessments);
             try {
               localStorage.setItem(STORAGE_KEYS.ASSESSMENTS, JSON.stringify(merged));
             } catch {}
-            // Silently persist back to server so server /data/assessments.json always stays updated
-            fetch('/api/assessments/sync-batch', {
-              method: 'POST',
-              headers: { 'Content-Type': 'application/json' },
-              body: JSON.stringify({ assessments: merged, replace: false }),
-            }).catch(() => {});
             return merged;
           });
         }
@@ -946,19 +858,16 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
       // 1. Flush any pending offline queue submissions
       flushOfflineSyncQueue().catch(() => {});
 
-      // 2. Fetch latest surveys from server smoothly without re-rendering if unchanged
+      // 2. Fetch latest surveys from server
       fetch('/api/assessments')
         .then((res) => res.json())
         .then((data) => {
           if (data.success && Array.isArray(data.assessments) && data.assessments.length > 0) {
             setAssessments((prev) => {
-              if (data.assessments.length === prev.length) {
-                const prevIdSet = new Set(prev.map((p) => p.id));
-                const hasNew = data.assessments.some((a: any) => a.id && !prevIdSet.has(a.id));
-                if (!hasNew) return prev;
-              }
               const merged = reconcileAndMergeAssessments(prev, data.assessments);
-              if (merged.length === prev.length) return prev;
+              if (merged.length === prev.length && JSON.stringify(merged) === JSON.stringify(prev)) {
+                return prev;
+              }
               try {
                 localStorage.setItem(STORAGE_KEYS.ASSESSMENTS, JSON.stringify(merged));
               } catch {}
@@ -968,7 +877,7 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
         })
         .catch(() => {});
 
-      // 3. Poll latest google sheet config from server to ensure Super Admin updates propagate smoothly
+      // 3. Poll latest google sheet config from server to ensure Super Admin updates propagate instantly to all surveyors
       fetch('/api/config')
         .then((res) => res.json())
         .then((data) => {
@@ -976,7 +885,7 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
             const { spreadsheetUrl, webhookUrl, driveFolderId, spreadsheetProfiles, activeProfileId } = data.config;
             if (spreadsheetUrl) {
               setGoogleSheetConfig((prev) => {
-                if (prev.spreadsheetUrl !== spreadsheetUrl || prev.activeProfileId !== activeProfileId) {
+                if (prev.spreadsheetUrl !== spreadsheetUrl || prev.activeProfileId !== activeProfileId || JSON.stringify(prev.spreadsheetProfiles) !== JSON.stringify(spreadsheetProfiles)) {
                   const updated = {
                     ...prev,
                     spreadsheetUrl: spreadsheetUrl || prev.spreadsheetUrl,
@@ -996,7 +905,7 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
           }
         })
         .catch(() => {});
-    }, 60 * 60 * 1000); // 1-Hour refresh cycle: keeps the system lightweight and calm without CPU/network saturation
+    }, 8000);
     return () => {
       clearInterval(interval);
       window.removeEventListener('online', handleOnline);
@@ -1193,7 +1102,7 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
         isInitialLoad.current = false;
       }, 500);
     });
-  }, [db]);
+  }, [isFirestoreQuotaExceeded]);
 
   // Real-time listener for incoming building assessments and deletions from Firebase Firestore
   useEffect(() => {
@@ -1695,14 +1604,11 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
       }
     } catch {}
 
-    if (db && !isFirestoreQuotaExceeded) {
+    if (db) {
       const cleanU = JSON.parse(JSON.stringify(newUser));
       setDoc(doc(db, 'users', cleanU.id), cleanU).catch((err) => {
-        if (isQuotaError(err)) {
-          setIsFirestoreQuotaExceeded(true);
-          pauseFirestoreNetwork().catch(() => {});
-        }
-        console.warn('Firebase setDoc user failed:', err?.message || err);
+        if (isQuotaError(err)) setIsFirestoreQuotaExceeded(true);
+        console.warn('Firebase setDoc user failed:', err);
       });
     }
 
@@ -1753,13 +1659,10 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
     const { plainPassword, ...restData } = userData;
 
     const updatedUserObj = { ...target, ...restData };
-    if (db && !isFirestoreQuotaExceeded) {
+    if (db) {
       const cleanU = JSON.parse(JSON.stringify(updatedUserObj));
       setDoc(doc(db, 'users', id), cleanU, { merge: true }).catch((err) => {
-        if (isQuotaError(err)) {
-          setIsFirestoreQuotaExceeded(true);
-          pauseFirestoreNetwork().catch(() => {});
-        }
+        if (isQuotaError(err)) setIsFirestoreQuotaExceeded(true);
       });
     }
 
@@ -2190,7 +2093,7 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
 
   // Real-time Firestore Active Sessions Listener (works seamlessly on Cloudflare Pages & Static hosting)
   useEffect(() => {
-    if (!db || isFirestoreQuotaExceeded) return;
+    if (!db) return;
 
     const unsubscribe = onSnapshot(
       collection(db, 'active_sessions'),
@@ -2203,7 +2106,7 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
           // Active if heartbeat was within last 3 minutes (180,000 ms)
           if (data && data.lastHeartbeat && now - data.lastHeartbeat < 180000) {
             activeList.push(data);
-          } else if (data && data.sessionId && !isFirestoreQuotaExceeded) {
+          } else if (data && data.sessionId) {
             // Prune stale session silently
             deleteDoc(doc(db, 'active_sessions', data.sessionId)).catch(() => {});
           }
@@ -2263,16 +2166,12 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
         setIsSurveyorQuotaBlocked(isBlocked);
       },
       (err) => {
-        if (isQuotaError(err)) {
-          setIsFirestoreQuotaExceeded(true);
-          pauseFirestoreNetwork().catch(() => {});
-        }
         console.warn('Firestore active_sessions listener notice:', err?.message || err);
       }
     );
 
     return () => unsubscribe();
-  }, [db, isLoggedIn, currentUser?.role, currentUser?.id, isFirestoreQuotaExceeded]);
+  }, [db, isLoggedIn, currentUser?.role, currentUser?.id]);
 
   const refreshActiveSessions = async () => {
     // 1. Try server API
@@ -2398,7 +2297,19 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
         lastHeartbeat: Date.now(),
       };
 
-      // 1. Sync Heartbeat to Server API (Heartbeats run via server to completely prevent Firestore write quota exhaustion)
+      // 1. Sync Heartbeat to Firestore only if quota is available
+      if (db && !isFirestoreQuotaExceeded) {
+        try {
+          await setDoc(doc(db, 'active_sessions', sessionId), heartbeatPayload, { merge: true });
+        } catch (err) {
+          if (isQuotaError(err)) {
+            setIsFirestoreQuotaExceeded(true);
+            pauseFirestoreNetwork().catch(() => {});
+          }
+        }
+      }
+
+      // 2. Sync Heartbeat to Server API
       try {
         const res = await fetch('/api/sessions/heartbeat', {
           method: 'POST',
@@ -2422,7 +2333,7 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
     const handleBeforeUnload = () => {
       try {
         const sessionId = getOrCreateTabSessionId();
-        if (db && !isFirestoreQuotaExceeded) {
+        if (db) {
           deleteDoc(doc(db, 'active_sessions', sessionId)).catch(() => {});
         }
         if (navigator.sendBeacon) {
@@ -2444,12 +2355,12 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
       clearInterval(interval);
       window.removeEventListener('beforeunload', handleBeforeUnload);
     };
-  }, [db, isLoggedIn, currentUser?.id, currentUser?.role, isFirestoreQuotaExceeded]);
+  }, [db, isLoggedIn, currentUser?.id, currentUser?.role]);
 
   const logout = () => {
     try {
       const sessionId = getOrCreateTabSessionId();
-      if (db && !isFirestoreQuotaExceeded) {
+      if (db) {
         deleteDoc(doc(db, 'active_sessions', sessionId)).catch(() => {});
       }
       fetch('/api/sessions/release', {
@@ -2473,11 +2384,6 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
 
   // Session Inactivity Lock State & Methods (15 minutes standard timeout)
   const [isSessionLocked, setIsSessionLocked] = useState(false);
-  const isSessionLockedRef = useRef(false);
-
-  useEffect(() => {
-    isSessionLockedRef.current = isSessionLocked;
-  }, [isSessionLocked]);
 
   const lockSession = () => {
     setIsSessionLocked(true);
@@ -2502,7 +2408,7 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
     let inactivityTimer: NodeJS.Timeout;
 
     const resetTimer = () => {
-      if (isSessionLockedRef.current) return;
+      if (isSessionLocked) return;
       clearTimeout(inactivityTimer);
       inactivityTimer = setTimeout(() => {
         setIsSessionLocked(true);
@@ -2522,7 +2428,7 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
         window.removeEventListener(event, resetTimer);
       });
     };
-  }, [currentUser?.id]);
+  }, [isSessionLocked, currentUser.id]);
 
   const canCurrentUserManagePassword = (targetRole: UserRole) => {
     return canManageUserPassword(currentUser.role, targetRole);
@@ -2620,19 +2526,9 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
       ? data.id.trim()
       : `ass_${Date.now()}_${Math.random().toString(36).substring(2, 9)}`;
 
-    const rawCode = (data.code || '').trim();
-    const finalCode = (rawCode && !rawCode.startsWith('REG-TEMP') && !rawCode.startsWith('REG-PREVIEW') && rawCode.length >= 3)
-      ? rawCode
-      : generateNextRegistrationCode(assessments);
-    const targetKecName = data.kecamatanName || 'Boawae';
-    const finalSheetName = data.targetSheetName || data.sourceSheet || `Kec. ${targetKecName}`;
-
     const assessmentToSave: BuildingAssessment = {
       ...data,
       id: finalId,
-      code: finalCode,
-      targetSheetName: finalSheetName,
-      sourceSheet: data.sourceSheet || finalSheetName,
       createdAt: data.createdAt || new Date().toISOString(),
       updatedAt: new Date().toISOString(),
       googleSheetSynced: hasGSheet,
@@ -2703,14 +2599,11 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
       console.warn('Server assessment save notice (queued in outbox):', e);
     }
 
-    // 6. Save to Firebase Firestore if connected and quota is healthy
-    if (db && !isFirestoreQuotaExceeded) {
+    // 6. Save to Firebase Firestore if connected
+    if (db) {
       const cleanA = prepareAssessmentForFirestore(assessmentToSave);
       setDoc(doc(db, 'assessments', cleanA.id), cleanA, { merge: true }).catch((err) => {
-        if (isQuotaError(err)) {
-          setIsFirestoreQuotaExceeded(true);
-          pauseFirestoreNetwork().catch(() => {});
-        }
+        if (isQuotaError(err)) setIsFirestoreQuotaExceeded(true);
         console.warn('Firebase assessment save notice:', err?.message || err);
       });
     }
@@ -2843,14 +2736,11 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
       })
       .catch((e) => console.warn('Server assessment update notice (queued):', e));
 
-    // 6. Update on Firestore if connected and quota is healthy
-    if (db && !isFirestoreQuotaExceeded) {
+    // 6. Update on Firestore
+    if (db) {
       const cleanA = prepareAssessmentForFirestore(mergedData);
       setDoc(doc(db, 'assessments', id), cleanA, { merge: true }).catch((err) => {
-        if (isQuotaError(err)) {
-          setIsFirestoreQuotaExceeded(true);
-          pauseFirestoreNetwork().catch(() => {});
-        }
+        if (isQuotaError(err)) setIsFirestoreQuotaExceeded(true);
         console.warn('Firebase assessment update notice:', err?.message || err);
       });
     }
@@ -2959,7 +2849,7 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
   };
 
   // Mass cleanup of all duplicate entries: retains the most complete/verified survey in each cluster
-  const purgeAllDuplicates = async (): Promise<{ success: boolean; count: number; message: string }> => {
+  const purgeAllDuplicates = (): { success: boolean; count: number; message: string } => {
     if (currentUser.role !== 'super_admin' && currentUser.role !== 'admin') {
       return {
         success: false,
@@ -2978,7 +2868,6 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
     }
 
     const idsToDelete: string[] = [];
-    const itemsToDelete: BuildingAssessment[] = [];
 
     duplicateGroups.forEach((group) => {
       // Rank items in cluster: prefer verified, then highest photo count, then latest timestamp
@@ -2999,7 +2888,6 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
       // Keep index 0 (primary/master record), mark index 1..n for deletion
       for (let i = 1; i < sorted.length; i++) {
         idsToDelete.push(sorted[i].id);
-        itemsToDelete.push(sorted[i]);
       }
     });
 
@@ -3026,47 +2914,6 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
     setAssessments(updated);
 
     try {
-      localStorage.setItem(STORAGE_KEYS.ASSESSMENTS, JSON.stringify(updated));
-    } catch {}
-
-    clearGoogleSheetsMemoryCache();
-
-    // Update Express server with replace: true
-    fetch('/api/assessments/sync-batch', {
-      method: 'POST',
-      headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ assessments: updated, replace: true }),
-    }).catch(() => {});
-
-    // Sync to Google Sheet if webhook active
-    const activeWebhook = googleSheetConfig.webhookUrl || DEFAULT_GOOGLE_SHEET_CONFIG.webhookUrl;
-    const hasGSheet = Boolean(activeWebhook && activeWebhook.startsWith('http'));
-    const effectiveSheetConfig: GoogleSheetConfig = {
-      ...DEFAULT_GOOGLE_SHEET_CONFIG,
-      ...googleSheetConfig,
-      webhookUrl: activeWebhook,
-      spreadsheetUrl: googleSheetConfig.spreadsheetUrl || DEFAULT_GOOGLE_SHEET_CONFIG.spreadsheetUrl,
-    };
-
-    if (hasGSheet) {
-      try {
-        await syncAllToGoogleSheet(updated, effectiveSheetConfig);
-      } catch (sheetErr) {
-        console.warn('Google Sheet purge sync notice:', sheetErr);
-      }
-      // Also issue direct row deletions for extra reliability
-      for (const item of itemsToDelete) {
-        directSaveToGoogleSheet(
-          item,
-          effectiveSheetConfig,
-          'delete',
-          undefined,
-          item.targetSheetName || item.sourceSheet
-        ).catch(() => {});
-      }
-    }
-
-    try {
       if (typeof BroadcastChannel !== 'undefined') {
         const ch = new BroadcastChannel('sipandu_pupr_sync_channel');
         ch.postMessage({ type: 'PURGE_DUPLICATES', payload: { ids: idsToDelete } });
@@ -3077,7 +2924,7 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
     logUserActivity(
       'DELETE_ASSESSMENT',
       'Penilaian Kerusakan',
-      `Pembersihan Otomatis Data Ganda: Menghapus ${idsToDelete.length} survei duplikat dari database & Google Sheet`,
+      `Pembersihan Otomatis Data Ganda: Menghapus ${idsToDelete.length} survei duplikat`,
       `${duplicateGroups.length} kluster`,
       `Dibersihkan secara tuntas oleh ${currentUser.name}`
     );
@@ -3085,141 +2932,15 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
     return {
       success: true,
       count: idsToDelete.length,
-      message: `Berhasil membersihkan ${idsToDelete.length} data survei ganda dari ${duplicateGroups.length} kluster! Data primer tetap aman & Google Sheet telah diperbarui bersih.`,
+      message: `Berhasil membersihkan ${idsToDelete.length} data survei ganda dari ${duplicateGroups.length} kluster! Data primer paling lengkap tetap aman tersimpan.`,
     };
   };
 
-  const getDeletedAssessmentIds = (): string[] => {
-    return Array.from(getStoredDeletedAssessmentIds());
-  };
-
-  const restoreDeletedAssessment = async (id: string): Promise<boolean> => {
-    if (!id) return false;
-    deletedAssessmentIds.current.delete(id);
-    removeStoredDeletedAssessmentId(id);
-
-    // Check if item exists on Express server and restore it immediately
-    try {
-      const res = await fetch('/api/assessments');
-      const data = await res.json();
-      if (data.success && Array.isArray(data.assessments)) {
-        const found = data.assessments.find((a: any) => a.id === id || a.code === id);
-        if (found) {
-          setAssessments((prev) => {
-            const merged = reconcileAndMergeAssessments(prev, [found]);
-            try {
-              localStorage.setItem(STORAGE_KEYS.ASSESSMENTS, JSON.stringify(merged));
-            } catch {}
-            return merged;
-          });
-          showToast(`Data "${found.buildingName || id}" berhasil dipulihkan ke daftar aktif!`, 'success');
-          return true;
-        }
-      }
-    } catch {}
-
-    // Fallback: sync from Google Sheet with forceRefresh
-    await syncFromGoogleSheet(false, true);
-    showToast(`Data dengan ID/Kode "${id}" telah dibuka dari daftar hapus & disinkronkan.`, 'success');
-    return true;
-  };
-
-  const restoreAndRecoverAllAssessments = async (): Promise<{ success: boolean; message: string; recoveredCount: number; totalCount: number }> => {
-    // 1. Clear all suppressed/deleted IDs so any hidden items are resurrected
-    const deletedCount = getStoredDeletedAssessmentIds().size;
-    clearStoredDeletedAssessmentIds();
-    deletedAssessmentIds.current.clear();
-
-    // 2. Gather candidates from all legacy & backup keys and arbitrary localStorage items
-    const recoveredPool: BuildingAssessment[] = [];
-    try {
-      for (let i = 0; i < localStorage.length; i++) {
-        const key = localStorage.key(i);
-        if (!key) continue;
-        try {
-          const raw = localStorage.getItem(key);
-          if (!raw || raw.length < 20) continue;
-          const parsed = JSON.parse(raw);
-          if (Array.isArray(parsed)) {
-            for (const it of parsed) {
-              const item = it && it.assessment ? it.assessment : (it && it.data ? it.data : it);
-              if (item && item.id && item.buildingName) {
-                recoveredPool.push(item);
-              }
-            }
-          } else if (parsed && typeof parsed === 'object') {
-            const item = parsed.assessment || parsed.data || parsed;
-            if (item && item.id && item.buildingName) {
-              recoveredPool.push(item);
-            }
-          }
-        } catch {}
-      }
-    } catch {}
-
-    // 3. Fetch from Express server /api/assessments
-    try {
-      const srvRes = await fetch('/api/assessments');
-      const srvData = await srvRes.json();
-      if (srvData.success && Array.isArray(srvData.assessments)) {
-        recoveredPool.push(...srvData.assessments);
-      }
-    } catch {}
-
-    // 3b. Fetch from Express server /api/buffer-queue
-    try {
-      const bRes = await fetch('/api/buffer-queue');
-      const bData = await bRes.json();
-      if (bData.success && Array.isArray(bData.items)) {
-        bData.items.forEach((it: any) => {
-          const item = it && it.assessmentData ? it.assessmentData : (it && it.data ? it.data : it);
-          if (item && item.id && item.buildingName) {
-            recoveredPool.push(item);
-          }
-        });
-      }
-    } catch {}
-
-    // 4. Force sync from all Google Sheet tabs (without 1-hour cache limit)
-    try {
-      await syncFromGoogleSheet(false, true);
-    } catch {}
-
-    // 5. Merge all recovered records cleanly without injecting fake default records
-    let finalCount = 0;
-    setAssessments((prev) => {
-      const merged = reconcileAndMergeAssessments(prev, recoveredPool);
-      finalCount = merged.length;
-      try {
-        localStorage.setItem(STORAGE_KEYS.ASSESSMENTS, JSON.stringify(merged));
-        localStorage.setItem('sipandu_pupr_assessments_backup', JSON.stringify(merged));
-        // Persist to server as well so server data/assessments.json is kept complete (additive, replace: false)
-        fetch('/api/assessments/sync-batch', {
-          method: 'POST',
-          headers: { 'Content-Type': 'application/json' },
-          body: JSON.stringify({ assessments: merged, replace: false }),
-        }).catch(() => {});
-      } catch {}
-      return merged;
-    });
-
-    const msg = `Pemulihan data selesai! Seluruh ${finalCount} data penilaian aktif berhasil dipulihkan.`;
-    showToast(msg, 'success');
-    return {
-      success: true,
-      message: msg,
-      recoveredCount: Math.max(1, deletedCount + recoveredPool.length),
-      totalCount: finalCount,
-    };
-  };
-
-  // Automatically detects duplicate/conflicting registration codes across all assessments,
-  // assigns new unique sequential codes, and permanently updates Google Sheets, Firestore, LocalStorage & Server
-  const autoFixDuplicateCodes = async (): Promise<{
+  // Automatically detects duplicate/conflicting registration codes across all assessments and assigns new unique sequential codes
+  const autoFixDuplicateCodes = (): {
     success: boolean;
     fixedCount: number;
     message: string;
-    sheetSyncStatus?: boolean;
     fixedItems: Array<{
       id: string;
       buildingName: string;
@@ -3227,22 +2948,15 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
       newCode: string;
       sourceSheet?: string;
     }>;
-  }> => {
+  } => {
     try {
       const { updatedAssessments, fixedCount, fixedItems } = autoFixDuplicateRegistrationCodes(assessments);
       if (fixedCount > 0) {
-        // 1. Optimistic instant React state update
         setAssessments(updatedAssessments);
-
-        // 2. Instant synchronous LocalStorage write
         try {
           localStorage.setItem(STORAGE_KEYS.ASSESSMENTS, JSON.stringify(updatedAssessments));
         } catch {}
 
-        // 3. Clear Google Sheets memory cache to ensure fresh read
-        clearGoogleSheetsMemoryCache();
-
-        // 4. Cross-tab sync via BroadcastChannel
         if (typeof BroadcastChannel !== 'undefined') {
           try {
             const ch = new BroadcastChannel('sipandu_pupr_sync_channel');
@@ -3251,14 +2965,6 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
           } catch {}
         }
 
-        // 5. Update on Express server with replace: true for clean persistent sync
-        fetch('/api/assessments/sync-batch', {
-          method: 'POST',
-          headers: { 'Content-Type': 'application/json' },
-          body: JSON.stringify({ assessments: updatedAssessments, replace: true }),
-        }).catch(() => {});
-
-        // 6. Update on Firestore for all fixed items
         if (db && !isFirestoreQuotaExceeded) {
           fixedItems.forEach((item) => {
             const full = updatedAssessments.find((a) => a.id === item.id);
@@ -3269,45 +2975,10 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
           });
         }
 
-        // 7. Synchronize to Google Sheets permanently
-        const activeWebhook = googleSheetConfig.webhookUrl || DEFAULT_GOOGLE_SHEET_CONFIG.webhookUrl;
-        const hasGSheet = Boolean(activeWebhook && activeWebhook.startsWith('http'));
-        const effectiveSheetConfig: GoogleSheetConfig = {
-          ...DEFAULT_GOOGLE_SHEET_CONFIG,
-          ...googleSheetConfig,
-          webhookUrl: activeWebhook,
-          spreadsheetUrl: googleSheetConfig.spreadsheetUrl || DEFAULT_GOOGLE_SHEET_CONFIG.spreadsheetUrl,
-        };
-
-        let sheetSyncSuccess = false;
-        if (hasGSheet) {
-          try {
-            // A. Direct comprehensive sync to update all 7 kecamatan tabs in Google Sheets
-            const syncRes = await syncAllToGoogleSheet(updatedAssessments, effectiveSheetConfig);
-            sheetSyncSuccess = syncRes.success;
-
-            // B. Also trigger individual direct row updates for each fixed item to ensure exact row replacement in target sheet
-            for (const fixed of fixedItems) {
-              const full = updatedAssessments.find((a) => a.id === fixed.id);
-              if (full) {
-                directSaveToGoogleSheet(
-                  full,
-                  effectiveSheetConfig,
-                  'update',
-                  fixed.oldCode,
-                  full.targetSheetName || full.sourceSheet
-                ).catch((err) => console.warn('Direct row update notice:', err));
-              }
-            }
-          } catch (sheetErr) {
-            console.warn('Google Sheet auto-fix sync error:', sheetErr);
-          }
-        }
-
         logUserActivity(
           'UPDATE_ASSESSMENT',
           'Penilaian Kerusakan',
-          `Auto-Fix Nomor Registrasi: Menerbitkan ${fixedCount} no. registrasi baru & tersimpan permanen di Google Sheet`,
+          `Auto-Fix Nomor Registrasi: Menghasilkan ${fixedCount} no. registrasi baru untuk mengatasi kode ganda/kosong`,
           `${fixedCount} data bangunan`,
           `Dijalankan otomatis oleh ${currentUser.name}`
         );
@@ -3316,10 +2987,7 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
           success: true,
           fixedCount,
           fixedItems,
-          sheetSyncStatus: sheetSyncSuccess,
-          message: hasGSheet
-            ? `Berhasil memperbaiki ${fixedCount} nomor registrasi ganda dan tersimpan permanen di Google Sheet, Firestore & Database Lokal!`
-            : `Berhasil memperbaiki ${fixedCount} nomor registrasi ganda dan tersimpan di Firestore & Database Lokal!`,
+          message: `Berhasil memperbaiki ${fixedCount} nomor registrasi ganda dan menerbitkan nomor registrasi baru secara otomatis!`,
         };
       }
 
@@ -3337,117 +3005,6 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
         message: 'Gagal memperbaiki nomor registrasi: ' + (err?.message || 'Terjadi kesalahan sistem'),
       };
     }
-  };
-
-  // Fixes a single assessment's registration code and permanently updates Google Sheets, Firestore, LocalStorage & Server
-  const fixSingleAssessmentRegistrationCode = async (
-    id: string,
-    customNewCode?: string
-  ): Promise<{
-    success: boolean;
-    oldCode: string;
-    newCode: string;
-    message: string;
-  }> => {
-    const target = assessments.find((a) => a.id === id);
-    if (!target) {
-      return {
-        success: false,
-        oldCode: '',
-        newCode: '',
-        message: 'Data penilaian tidak ditemukan.',
-      };
-    }
-
-    const oldCode = target.code || target.id;
-    let newCode = customNewCode?.trim();
-
-    if (!newCode) {
-      const year = new Date().getFullYear();
-      const prefix = getKecamatanCodePrefix(target, year);
-      const existingCodes = new Set(assessments.map((a) => (a.code || a.id || '').toUpperCase()));
-      let seq = 1;
-      let candidate = `${prefix}${String(seq).padStart(4, '0')}`;
-      while (existingCodes.has(candidate.toUpperCase())) {
-        seq++;
-        candidate = `${prefix}${String(seq).padStart(4, '0')}`;
-      }
-      newCode = candidate;
-    }
-
-    const activeWebhook = googleSheetConfig.webhookUrl || DEFAULT_GOOGLE_SHEET_CONFIG.webhookUrl;
-    const hasGSheet = Boolean(activeWebhook && activeWebhook.startsWith('http'));
-    const effectiveSheetConfig: GoogleSheetConfig = {
-      ...DEFAULT_GOOGLE_SHEET_CONFIG,
-      ...googleSheetConfig,
-      webhookUrl: activeWebhook,
-      spreadsheetUrl: googleSheetConfig.spreadsheetUrl || DEFAULT_GOOGLE_SHEET_CONFIG.spreadsheetUrl,
-    };
-
-    const updatedAssessment: BuildingAssessment = {
-      ...target,
-      code: newCode,
-      updatedAt: new Date().toISOString(),
-      googleSheetSynced: hasGSheet,
-      googleSheetSyncedAt: hasGSheet ? new Date().toISOString() : target.googleSheetSyncedAt,
-    };
-
-    // 1. Update React state
-    setAssessments((prev) => prev.map((a) => (a.id === id ? updatedAssessment : a)));
-
-    // 2. Update LocalStorage
-    try {
-      const existingRaw = localStorage.getItem(STORAGE_KEYS.ASSESSMENTS);
-      const existingList = existingRaw ? JSON.parse(existingRaw) : [];
-      const updatedList = existingList.map((a: any) => (a.id === id ? updatedAssessment : a));
-      localStorage.setItem(STORAGE_KEYS.ASSESSMENTS, JSON.stringify(updatedList));
-    } catch {}
-
-    // 3. Clear memory cache
-    clearGoogleSheetsMemoryCache();
-
-    // 4. Update on Express server
-    fetch('/api/assessments', {
-      method: 'POST',
-      headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify(updatedAssessment),
-    }).catch(() => {});
-
-    // 5. Update on Firestore
-    if (db && !isFirestoreQuotaExceeded) {
-      const clean = prepareAssessmentForFirestore(updatedAssessment);
-      setDoc(doc(db, 'assessments', id), clean, { merge: true }).catch(() => {});
-    }
-
-    // 6. Direct save to Google Sheet with previous registration code for in-place replacement
-    if (hasGSheet) {
-      try {
-        await directSaveToGoogleSheet(
-          updatedAssessment,
-          effectiveSheetConfig,
-          'update',
-          oldCode,
-          updatedAssessment.targetSheetName || updatedAssessment.sourceSheet
-        );
-      } catch (e) {
-        console.warn('Direct Google Sheet update error for single code fix:', e);
-      }
-    }
-
-    logUserActivity(
-      'UPDATE_ASSESSMENT',
-      'Penilaian Kerusakan',
-      `Perbaikan No. Registrasi Tunggal: "${target.buildingName}" diubah dari ${oldCode} ke ${newCode}`,
-      newCode,
-      `Diperbarui oleh ${currentUser.name}`
-    );
-
-    return {
-      success: true,
-      oldCode,
-      newCode,
-      message: `Nomor registrasi gedung "${target.buildingName}" berhasil diubah menjadi ${newCode} dan langsung tersimpan permanen di Google Sheet!`,
-    };
   };
 
   /**
@@ -3507,14 +3064,9 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
           if (assChanged) {
             hasAnyUpdate = true;
             const updatedAss = { ...ass, photos: updatedPhotos, updatedAt: new Date().toISOString() };
-            if (db && !isFirestoreQuotaExceeded) {
+            if (db) {
               const clean = prepareAssessmentForFirestore(updatedAss);
-              setDoc(doc(db, 'assessments', clean.id), clean, { merge: true }).catch((err) => {
-                if (isQuotaError(err)) {
-                  setIsFirestoreQuotaExceeded(true);
-                  pauseFirestoreNetwork().catch(() => {});
-                }
-              });
+              setDoc(doc(db, 'assessments', clean.id), clean, { merge: true }).catch(() => {});
             }
             return updatedAss;
           }
@@ -3556,14 +3108,9 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
           if (a.id !== assessmentId) return a;
           const newPhotos = (a.photos || []).map((p) => (p.id === photoId ? { ...p, url: publicUrl } : p));
           const updated = { ...a, photos: newPhotos, updatedAt: new Date().toISOString() };
-          if (db && !isFirestoreQuotaExceeded) {
+          if (db) {
             const clean = prepareAssessmentForFirestore(updated);
-            setDoc(doc(db, 'assessments', clean.id), clean, { merge: true }).catch((err) => {
-              if (isQuotaError(err)) {
-                setIsFirestoreQuotaExceeded(true);
-                pauseFirestoreNetwork().catch(() => {});
-              }
-            });
+            setDoc(doc(db, 'assessments', clean.id), clean, { merge: true }).catch(() => {});
           }
           return updated;
         });
@@ -3891,7 +3438,7 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
       const onProgressStream = (prog: { currentKec: string; count: number; totalSoFar: number; step: number; totalSteps: number; partialData: BuildingAssessment[] }) => {
         if (!prog.partialData) return;
         
-        // Update live progress bar details strictly without altering table state mid-flight
+        // Update live progress bar details
         const calculatedPercent = Math.min(99, Math.round((prog.step / prog.totalSteps) * 100));
         setSheetSyncProgress((prev) => {
           const updatedKecs = prev.loadedKecamatans.map((k, idx) => {
@@ -3914,6 +3461,37 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
             loadedKecamatans: updatedKecs,
             statusMessage: `Sheet Kec. ${prog.currentKec} selesai dibaca (+${prog.count} baris). Melanjutkan ke sheet berikutnya...`,
           };
+        });
+
+        setAssessments((prev) => {
+          const prevPhotosMap = new Map<string, any[]>();
+          const prevDriveMap = new Map<string, string>();
+          prev.forEach((p) => {
+            if (p.id) {
+              if (p.photos && p.photos.length > 0) prevPhotosMap.set(p.id, p.photos);
+              if (p.googleDriveFolderUrl) prevDriveMap.set(p.id, p.googleDriveFolderUrl);
+            }
+          });
+
+          const streamedKeys = new Set<string>();
+          const updatedStream = prog.partialData.map((item) => {
+            if (item.id) streamedKeys.add(item.id);
+            if (item.code) streamedKeys.add(item.code);
+            return {
+              ...item,
+              photos: (item.photos && item.photos.length > 0) ? item.photos : (prevPhotosMap.get(item.id) || []),
+              googleDriveFolderUrl: item.googleDriveFolderUrl || prevDriveMap.get(item.id),
+            };
+          });
+
+          // Keep remaining un-fetched items so far so screen always shows maximum available data
+          prev.forEach((p) => {
+            if (p.id && !streamedKeys.has(p.id) && (!p.code || !streamedKeys.has(p.code))) {
+              updatedStream.push(p);
+            }
+          });
+
+          return updatedStream;
         });
       };
 
@@ -3962,8 +3540,42 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
       }
 
       setAssessments((prev) => {
-        // Authoritative reconciliation that matches by ID, Reg Code, and semantic location signature
-        const mergedList = reconcileAndMergeAssessments(prev, sheetItems);
+        // Map any local photos or drive folder links onto the incoming sheet items
+        const prevPhotosMap = new Map<string, any[]>();
+        const prevDriveMap = new Map<string, string>();
+        const prevItemsMap = new Map<string, BuildingAssessment>();
+        prev.forEach((p) => {
+          if (p.id) {
+            prevItemsMap.set(p.id, p);
+            if (p.code) prevItemsMap.set(p.code, p);
+            if (p.photos && p.photos.length > 0) prevPhotosMap.set(p.id, p.photos);
+            if (p.googleDriveFolderUrl) prevDriveMap.set(p.id, p.googleDriveFolderUrl);
+          }
+        });
+
+        // The authoritative dataset from the 7 kecamatan sheets
+        const incomingKeys = new Set<string>();
+        const mergedList = sheetItems.map((item) => {
+          if (item.id) incomingKeys.add(item.id);
+          if (item.code) incomingKeys.add(item.code);
+          const localPhotos = prevPhotosMap.get(item.id);
+          const localDrive = prevDriveMap.get(item.id);
+          return {
+            ...item,
+            photos: (item.photos && item.photos.length > 0) ? item.photos : (localPhotos || []),
+            googleDriveFolderUrl: item.googleDriveFolderUrl || localDrive,
+          };
+        });
+
+        // Fail-safe resilience: If incoming list has fewer items than existing,
+        // keep existing un-fetched records so total count never suddenly drops from 207 to 11/45
+        if (mergedList.length < prev.length) {
+          prev.forEach((p) => {
+            if (p.id && !incomingKeys.has(p.id) && (!p.code || !incomingKeys.has(p.code))) {
+              mergedList.push(p);
+            }
+          });
+        }
 
         try {
           localStorage.setItem(STORAGE_KEYS.ASSESSMENTS, JSON.stringify(mergedList));
@@ -3980,15 +3592,22 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
           } catch {}
         }
 
-        // Persist merged dataset to Express server (additive, non-destructive)
+        // Persist merged dataset to Express server with replace: true to purge ghost duplicate records
         fetch('/api/assessments/sync-batch', {
           method: 'POST',
           headers: { 'Content-Type': 'application/json' },
-          body: JSON.stringify({ assessments: mergedList, replace: false }),
+          body: JSON.stringify({ assessments: mergedList, replace: true }),
         }).catch((err) => console.warn('Server sync-batch notice:', err));
 
-        // Note: Data is saved to server via /api/assessments/sync-batch and local storage;
-        // avoid bulk setDoc loop to Firestore to protect Spark free-tier daily write limit.
+        // Persist synced items directly into Firestore database
+        if (db && !isFirestoreQuotaExceeded && mergedList.length > 0) {
+          mergedList.forEach((item) => {
+            const clean = prepareAssessmentForFirestore(item);
+            setDoc(doc(db, 'assessments', item.id), clean, { merge: true }).catch((err) => {
+              if (isQuotaError(err)) setIsFirestoreQuotaExceeded(true);
+            });
+          });
+        }
 
         return mergedList;
       });
@@ -4031,18 +3650,7 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
           },
         ];
 
-    // Filter to valid profiles and ensure unique spreadsheet targets
-    const seenSheetTargets = new Set<string>();
-    const validProfiles = profilesList.filter((p) => {
-      // Skip profiles that are explicitly disabled for loading
-      if (p.isActiveForLoad === false) return false;
-      
-      if (!p.spreadsheetUrl || !isConfiguredSheetUrl(p.spreadsheetUrl)) return false;
-      const sheetId = extractSpreadsheetId(p.spreadsheetUrl) || p.spreadsheetUrl;
-      if (seenSheetTargets.has(sheetId)) return false;
-      seenSheetTargets.add(sheetId);
-      return true;
-    });
+    const validProfiles = profilesList.filter((p) => p.spreadsheetUrl && isConfiguredSheetUrl(p.spreadsheetUrl));
     if (validProfiles.length === 0) {
       if (googleSheetConfig.spreadsheetUrl && isConfiguredSheetUrl(googleSheetConfig.spreadsheetUrl)) {
         return syncFromGoogleSheet(showToastAlert, forceRefresh);
@@ -4109,9 +3717,40 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
       }
     }
 
-    // Merge allFetchedItems into assessments safely without creating duplicate items
+    // Merge allFetchedItems into assessments safely without dropping existing assessments
     setAssessments((prev) => {
-      const mergedList = reconcileAndMergeAssessments(prev, allFetchedItems);
+      const prevMap = new Map<string, BuildingAssessment>();
+      const prevPhotosMap = new Map<string, any[]>();
+      const prevDriveMap = new Map<string, string>();
+
+      prev.forEach((p) => {
+        if (p.id) {
+          prevMap.set(p.id, p);
+          if (p.photos && p.photos.length > 0) prevPhotosMap.set(p.id, p.photos);
+          if (p.googleDriveFolderUrl) prevDriveMap.set(p.id, p.googleDriveFolderUrl);
+        }
+        if (p.code) prevMap.set(p.code, p);
+      });
+
+      const incomingKeys = new Set<string>();
+      const mergedList = allFetchedItems.map((item) => {
+        if (item.id) incomingKeys.add(item.id);
+        if (item.code) incomingKeys.add(item.code);
+        const existing = (item.id && prevMap.get(item.id)) || (item.code && prevMap.get(item.code));
+        return {
+          ...item,
+          photos: (item.photos && item.photos.length > 0) ? item.photos : (existing?.photos || prevPhotosMap.get(item.id) || []),
+          googleDriveFolderUrl: item.googleDriveFolderUrl || existing?.googleDriveFolderUrl || prevDriveMap.get(item.id),
+          verificationStatus: item.verificationStatus || existing?.verificationStatus || 'Menunggu Verifikasi',
+        };
+      });
+
+      // Keep any un-fetched existing items (such as the 207 historical records) so no data is ever lost
+      prev.forEach((p) => {
+        if (p.id && !incomingKeys.has(p.id) && (!p.code || !incomingKeys.has(p.code))) {
+          mergedList.push(p);
+        }
+      });
 
       try {
         localStorage.setItem(STORAGE_KEYS.ASSESSMENTS, JSON.stringify(mergedList));
@@ -4216,21 +3855,22 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
     const hasWebhook = Boolean(googleSheetConfig.webhookUrl && googleSheetConfig.webhookUrl.startsWith('http'));
 
     if (hasSpreadsheet || hasWebhook) {
-      // 1. Initial Load: Run once upon opening the application with live animated progress notification
+      // 1. Initial Load: Run only once upon opening the application
       if (!hasLoadedInitialGoogleSheetRef.current) {
+        hasLoadedInitialGoogleSheetRef.current = true;
         lastSheetSyncTimestampRef.current = Date.now();
         syncFromGoogleSheet(false, false);
         fetchUsersFromSheet();
       }
 
-      // 2. 1-Hour Scheduled Auto-Refresh (60 menit) per user directive:
-      // Lightweight, prevents constant busy refreshing, preserves system stability
+      // 2. Strict 1-Hour Schedule (3,600,000 ms) as specified by user
       const ONE_HOUR_MS = 60 * 60 * 1000;
       const intervalId = setInterval(() => {
         const now = Date.now();
         if (now - lastSheetSyncTimestampRef.current >= ONE_HOUR_MS) {
           lastSheetSyncTimestampRef.current = now;
-          syncFromGoogleSheet(false, false);
+          clearGoogleSheetsMemoryCache();
+          syncFromGoogleSheet(false, true);
           fetchUsersFromSheet();
         }
       }, ONE_HOUR_MS);
@@ -4549,12 +4189,8 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
         addAssessment,
         updateAssessment,
         deleteAssessment,
-        restoreAndRecoverAllAssessments,
-        restoreDeletedAssessment,
-        getDeletedAssessmentIds,
         purgeAllDuplicates,
         autoFixDuplicateCodes,
-        fixSingleAssessmentRegistrationCode,
         verifyAssessment,
         batchVerifyAssessments,
         syncAssessmentToSheet,

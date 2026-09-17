@@ -205,8 +205,8 @@ export async function hydrateAssessmentPhotos(assessment: BuildingAssessment): P
         return p;
       }
 
-      // If empty or missing, lookup IndexedDB / Server with assessment ID validation
-      const localUrl = await getPhotoLocally(p.id, assessment.id);
+      // If empty or missing, lookup IndexedDB / Server
+      const localUrl = await getPhotoLocally(p.id);
       if (localUrl) {
         return { ...p, url: localUrl };
       }

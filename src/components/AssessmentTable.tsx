@@ -14,8 +14,6 @@ import {
   detectAllDuplicateGroups,
   getDuplicateIdsMap,
   DuplicateGroup,
-  isArchiveSource,
-  isArchiveAssessment,
 } from '../utils/duplicateDetector';
 import {
   Search,
@@ -26,7 +24,6 @@ import {
   Eye,
   FileSpreadsheet,
   CheckCircle,
-  CheckCircle2,
   AlertCircle,
   AlertTriangle,
   Printer,
@@ -51,7 +48,6 @@ import {
   Lock,
   BookOpen,
   ArrowRightLeft,
-  RotateCcw,
 } from 'lucide-react';
 import { PhotoViewerModal } from './PhotoViewerModal';
 import { DuplicateAuditModal } from './DuplicateAuditModal';
@@ -59,7 +55,6 @@ import { DataFulfillmentCard } from './DataFulfillmentCard';
 import { PortfolioRecapModal } from './PortfolioRecapModal';
 import { BufferQueueBanner } from './BufferQueueBanner';
 import { SheetBookSelector } from './SheetBookSelector';
-import { DataRecoveryModal } from './DataRecoveryModal';
 
 export const AssessmentTable: React.FC = () => {
   const {
@@ -92,11 +87,8 @@ export const AssessmentTable: React.FC = () => {
   const [selectedClassification, setSelectedClassification] = useState('');
   const [selectedVerification, setSelectedVerification] = useState('');
   const [selectedProfileFilter, setSelectedProfileFilter] = useState<string>('ALL');
-  const [selectedSourceFilter, setSelectedSourceFilter] = useState<string>('ALL');
   const [selectedRowIds, setSelectedRowIds] = useState<string[]>([]);
   const [isRefreshing, setIsRefreshing] = useState(false);
-  const [sortField, setSortField] = useState<'timestamp' | 'registrationCode'>('timestamp');
-  const [sortDirection, setSortDirection] = useState<'desc' | 'asc'>('desc');
 
   // Portfolio Recap Modal State
   const [showPortfolioModal, setShowPortfolioModal] = useState(false);
@@ -195,9 +187,6 @@ export const AssessmentTable: React.FC = () => {
   // Syncing state per ID
   const [syncingId, setSyncingId] = useState<string | null>(null);
 
-  // Data Recovery Modal state
-  const [showRecoveryModal, setShowRecoveryModal] = useState<boolean>(false);
-
   // Duplicate detection & audit states
   const [showDuplicateAuditModal, setShowDuplicateAuditModal] = useState(false);
   const [showOnlyDuplicates, setShowOnlyDuplicates] = useState(false);
@@ -271,48 +260,6 @@ export const AssessmentTable: React.FC = () => {
     setCurrentPage(1);
   };
 
-  // Distinct source sheets and categorization into active vs archive with item counts
-  const { distinctSourceSheets, activeSheets, archiveSheets, sheetCounts, totalActiveCount, totalArchiveCount } = useMemo(() => {
-    const set = new Set<string>();
-    const counts: Record<string, number> = {};
-    let activeCount = 0;
-    let archiveCount = 0;
-
-    assessments.forEach((a) => {
-      const sheetName = (a.sourceSheet || a.targetSheetName || (a.kecamatanName ? `Kec. ${a.kecamatanName}` : '')).trim();
-      if (sheetName) {
-        set.add(sheetName);
-        counts[sheetName] = (counts[sheetName] || 0) + 1;
-      }
-      if (isArchiveAssessment(a) || isArchiveSource(sheetName)) {
-        archiveCount++;
-      } else {
-        activeCount++;
-      }
-    });
-
-    const sortedAll = Array.from(set).sort((a, b) => a.localeCompare('id'));
-    const active: string[] = [];
-    const archive: string[] = [];
-
-    sortedAll.forEach((sheet) => {
-      if (isArchiveSource(sheet)) {
-        archive.push(sheet);
-      } else {
-        active.push(sheet);
-      }
-    });
-
-    return {
-      distinctSourceSheets: sortedAll,
-      activeSheets: active,
-      archiveSheets: archive,
-      sheetCounts: counts,
-      totalActiveCount: activeCount,
-      totalArchiveCount: archiveCount,
-    };
-  }, [assessments]);
-
   // Filtered Assessments with flexible matching and newest-first sort
   const filteredAssessments = useMemo(() => {
     const selKec = selectedKecamatanId ? kecamatans.find((k) => k.id === selectedKecamatanId) : undefined;
@@ -377,19 +324,6 @@ export const AssessmentTable: React.FC = () => {
           return false;
         }
 
-        // Asal Sheet / Arsip Filter
-        if (selectedSourceFilter && selectedSourceFilter !== 'ALL') {
-          const itemSheet = (item.sourceSheet || item.targetSheetName || (item.kecamatanName ? `Kec. ${item.kecamatanName}` : '')).trim();
-          const isArchive = isArchiveAssessment(item) || isArchiveSource(itemSheet);
-          if (selectedSourceFilter === 'ACTIVE_ONLY') {
-            if (isArchive) return false;
-          } else if (selectedSourceFilter === 'ARCHIVE_ONLY') {
-            if (!isArchive) return false;
-          } else {
-            if (itemSheet !== selectedSourceFilter) return false;
-          }
-        }
-
         // Spreadsheet Profile Filter (Daftar Halaman Buku)
         if (selectedProfileFilter && selectedProfileFilter !== 'ALL') {
           const itemProfileId = item.targetProfileId || (googleSheetConfig.spreadsheetProfiles?.[0]?.id || 'profile_primary_2026');
@@ -401,18 +335,10 @@ export const AssessmentTable: React.FC = () => {
         return true;
       })
       .sort((a, b) => {
-        let cmp = 0;
-        if (sortField === 'registrationCode') {
-          const codeA = (a.code || '').toLowerCase();
-          const codeB = (b.code || '').toLowerCase();
-          cmp = codeA.localeCompare(codeB);
-        } else {
-          // timestamp
-          const tA = new Date(a.updatedAt || a.createdAt || a.assessmentDate || 0).getTime();
-          const tB = new Date(b.updatedAt || b.createdAt || b.assessmentDate || 0).getTime();
-          cmp = tA - tB;
-        }
-        return sortDirection === 'desc' ? -cmp : cmp;
+        // Sort newest first so all incoming data is instantly visible at the top
+        const tA = new Date(a.updatedAt || a.createdAt || a.assessmentDate || 0).getTime();
+        const tB = new Date(b.updatedAt || b.createdAt || b.assessmentDate || 0).getTime();
+        return tB - tA;
       });
   }, [
     assessments,
@@ -423,15 +349,12 @@ export const AssessmentTable: React.FC = () => {
     selectedDisaster,
     selectedClassification,
     selectedVerification,
-    selectedSourceFilter,
     selectedProfileFilter,
     googleSheetConfig.spreadsheetProfiles,
     showOnlyDuplicates,
     duplicateMap,
     kecamatans,
     desas,
-    sortField,
-    sortDirection,
   ]);
 
   // Pagination logic
@@ -491,9 +414,6 @@ export const AssessmentTable: React.FC = () => {
     setSelectedDisaster('');
     setSelectedClassification('');
     setSelectedVerification('');
-    setSelectedSourceFilter('ALL');
-    setSelectedProfileFilter('ALL');
-    setShowOnlyDuplicates(false);
     setCurrentPage(1);
     showToast('Semua filter dikembalikan ke awal', 'info');
   };
@@ -754,21 +674,19 @@ export const AssessmentTable: React.FC = () => {
         </div>
       )}
 
-      {/* MULTI-SPREADSHEET "DAFTAR HALAMAN BUKU" QUICK SWITCHER & CAPACITY MONITOR (Hidden for Surveyor) */}
-      {currentUser.role !== 'admin_user' && currentUser.role !== 'admin_publik' && (
-        <SheetBookSelector
-          variant="compact"
-          selectedViewProfileId={selectedProfileFilter}
-          onSelectViewProfile={(pId) => {
-            setSelectedProfileFilter(pId);
-            setCurrentPage(1);
-          }}
-          selectedAssessmentIds={selectedRowIds}
-          onMovedSuccess={() => {
-            setSelectedRowIds([]);
-          }}
-        />
-      )}
+      {/* MULTI-SPREADSHEET "DAFTAR HALAMAN BUKU" QUICK SWITCHER & CAPACITY MONITOR */}
+      <SheetBookSelector
+        variant="compact"
+        selectedViewProfileId={selectedProfileFilter}
+        onSelectViewProfile={(pId) => {
+          setSelectedProfileFilter(pId);
+          setCurrentPage(1);
+        }}
+        selectedAssessmentIds={selectedRowIds}
+        onMovedSuccess={() => {
+          setSelectedRowIds([]);
+        }}
+      />
 
       {/* PEMENUHAN TARGET DATA QUOTA PROGRESS (COMPACT) */}
       <DataFulfillmentCard compact />
@@ -910,21 +828,6 @@ export const AssessmentTable: React.FC = () => {
             <span>{pageSize >= filteredAssessments.length && pageSize >= 100 ? `Tampil Sekaligus (${filteredAssessments.length})` : 'Tampilkan Sekaligus'}</span>
           </button>
 
-          {/* Pusat Pemulihan Data Kemarin & Sinkronisasi */}
-          <button
-            onClick={() => setShowRecoveryModal(true)}
-            title="Pulihkan data input kemarin, kembalikan data yang raib dari Google Sheet, dan kirim ulang masal"
-            className="flex items-center gap-1.5 px-3 py-2 text-xs font-bold text-blue-900 bg-blue-100 hover:bg-blue-200 rounded-xl border border-blue-300 transition-colors cursor-pointer shadow-2xs"
-          >
-            <RotateCcw className="w-3.5 h-3.5 text-blue-700" />
-            <span>Pulihkan Data Kemarin</span>
-            {assessments.some((a) => !a.googleSheetSynced) && (
-              <span className="ml-0.5 px-1.5 py-0.2 bg-amber-500 text-white rounded-full text-[10px] font-black">
-                {assessments.filter((a) => !a.googleSheetSynced).length}
-              </span>
-            )}
-          </button>
-
           {/* Refresh button */}
           <button
             onClick={handleRefresh}
@@ -934,30 +837,6 @@ export const AssessmentTable: React.FC = () => {
             <RefreshCw className={`w-3.5 h-3.5 ${isRefreshing ? 'animate-spin text-indigo-600' : ''}`} />
             <span>Refresh</span>
           </button>
-
-          {/* Sort Controls */}
-          <div className="flex items-center gap-1 bg-white border border-slate-200 rounded-xl p-1 shadow-2xs">
-            <select
-              value={sortField}
-              onChange={(e) => setSortField(e.target.value as 'timestamp' | 'registrationCode')}
-              className="text-xs font-semibold text-slate-700 bg-transparent outline-none cursor-pointer px-2 py-1"
-              title="Urutkan berdasarkan"
-            >
-              <option value="timestamp">Waktu (WIB)</option>
-              <option value="registrationCode">No. Registrasi</option>
-            </select>
-            <button
-              onClick={() => setSortDirection(prev => prev === 'desc' ? 'asc' : 'desc')}
-              className="p-1.5 hover:bg-slate-100 rounded-lg text-slate-600 transition-colors cursor-pointer"
-              title={sortDirection === 'desc' ? 'Terbaru ke Terlama / Z-A' : 'Terlama ke Terbaru / A-Z'}
-            >
-              {sortDirection === 'desc' ? (
-                <svg xmlns="http://www.w3.org/2000/svg" width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><path d="m3 16 4 4 4-4"/><path d="M7 20V4"/><path d="M11 4h4"/><path d="M11 8h7"/><path d="M11 12h10"/></svg>
-              ) : (
-                <svg xmlns="http://www.w3.org/2000/svg" width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><path d="m3 8 4-4 4 4"/><path d="M7 4v16"/><path d="M11 4h4"/><path d="M11 8h7"/><path d="M11 12h10"/></svg>
-              )}
-            </button>
-          </div>
 
           {/* Export to Excel Multi-Sheet per Kecamatan */}
           <button
@@ -990,8 +869,8 @@ export const AssessmentTable: React.FC = () => {
             <span>Cetak Portofolio Rekap</span>
           </button>
 
-          {/* Direct Google Sheet button (Hidden for Surveyor to prevent tampering) */}
-          {googleSheetConfig.spreadsheetUrl && currentUser.role !== 'admin_user' && (
+          {/* Direct Google Sheet button */}
+          {googleSheetConfig.spreadsheetUrl && (
             <div className="flex items-center gap-1.5 flex-wrap">
               <button
                 onClick={() => syncFromGoogleSheet(true, true)}
@@ -1079,47 +958,6 @@ export const AssessmentTable: React.FC = () => {
           );
         })}
       </div>
-
-      {/* Real-time Inline Loading Notification Banner in Table View */}
-      {sheetSyncProgress && sheetSyncProgress.isLoading && (
-        <div className="p-3.5 bg-gradient-to-r from-blue-900 via-indigo-950 to-slate-900 rounded-2xl text-white border border-cyan-500/40 shadow-md animate-in fade-in slide-in-from-top-2 duration-300">
-          <div className="flex items-center justify-between gap-3">
-            <div className="flex items-center gap-2.5 min-w-0">
-              <div className="p-2 rounded-xl bg-cyan-500/20 text-cyan-400 border border-cyan-500/30 shrink-0">
-                <RefreshCw className="w-4 h-4 animate-spin text-cyan-400" />
-              </div>
-              <div className="min-w-0">
-                <div className="flex items-center gap-2">
-                  <span className="text-[10px] font-extrabold uppercase tracking-wider text-cyan-300 bg-cyan-950 px-2 py-0.5 rounded-full border border-cyan-800">
-                    Sinkronisasi Data Berlangsung
-                  </span>
-                  <span className="text-[10px] font-mono text-slate-300">
-                    Step {sheetSyncProgress.currentStep}/{sheetSyncProgress.totalSteps}
-                  </span>
-                </div>
-                <p className="text-xs font-semibold text-white mt-0.5 truncate">
-                  {sheetSyncProgress.statusMessage || `Membaca data: Kec. ${sheetSyncProgress.currentKecamatan || 'Aesesa'}...`}
-                </p>
-              </div>
-            </div>
-            <div className="text-right shrink-0">
-              <span className="text-base font-black font-mono text-cyan-400">
-                {sheetSyncProgress.percent}%
-              </span>
-              <div className="text-[10px] text-slate-400">
-                {sheetSyncProgress.totalLoaded} gedung
-              </div>
-            </div>
-          </div>
-          {/* Animated Progress Bar */}
-          <div className="w-full bg-slate-800 h-1.5 rounded-full overflow-hidden mt-2.5">
-            <div
-              className="bg-gradient-to-r from-cyan-400 via-blue-500 to-emerald-400 h-full transition-all duration-300"
-              style={{ width: `${Math.max(8, sheetSyncProgress.percent)}%` }}
-            />
-          </div>
-        </div>
-      )}
 
       {/* Comprehensive Filter Toolbar */}
       <div className="bg-white p-4 rounded-2xl border border-slate-200 shadow-xs space-y-3">
@@ -1254,51 +1092,6 @@ export const AssessmentTable: React.FC = () => {
               <option value="Perlu Revisi">Perlu Revisi</option>
               <option value="Ditolak">Ditolak</option>
             </select>
-
-            {/* Filter Asal Sheet / Arsip (Dropdown Bertingkat: Sheet Aktif vs Sheet Data Lama) */}
-            <select
-              id="filter-source-sheet"
-              value={selectedSourceFilter}
-              onChange={(e) => {
-                setSelectedSourceFilter(e.target.value);
-                setCurrentPage(1);
-              }}
-              className="px-2.5 py-1.5 text-xs rounded-lg border border-slate-200 bg-white font-medium text-slate-700 max-w-[260px] truncate cursor-pointer shadow-2xs"
-              title="Pilih Asal Tab Sheet atau Arsip"
-            >
-              <option value="ALL">Semua Asal Sheet / Arsip ({assessments.length} Data)</option>
-
-              <optgroup label="── 📌 KELOMPOK FILTER UTAMA ──">
-                <option value="ACTIVE_ONLY">🟢 Semua Data Sheet Aktif ({totalActiveCount} data)</option>
-                <option value="ARCHIVE_ONLY">📁 Semua Data Lama / Arsip ({totalArchiveCount} data)</option>
-              </optgroup>
-
-              {activeSheets.length > 0 && (
-                <optgroup label="── 🟢 TAB SHEET AKTIF (OPERASIONAL) ──">
-                  {activeSheets.map((sheet) => {
-                    const count = sheetCounts[sheet] || 0;
-                    return (
-                      <option key={sheet} value={sheet}>
-                        🟢 {sheet} [Sheet Aktif] ({count} data)
-                      </option>
-                    );
-                  })}
-                </optgroup>
-              )}
-
-              {archiveSheets.length > 0 && (
-                <optgroup label="── 📁 TAB SHEET DATA LAMA / ARSIP (READ-ONLY) ──">
-                  {archiveSheets.map((sheet) => {
-                    const count = sheetCounts[sheet] || 0;
-                    return (
-                      <option key={sheet} value={sheet}>
-                        📁 {sheet} [Data Lama / Arsip] ({count} data)
-                      </option>
-                    );
-                  })}
-                </optgroup>
-              )}
-            </select>
           </div>
 
           {(searchTerm ||
@@ -1308,12 +1101,10 @@ export const AssessmentTable: React.FC = () => {
             selectedClassification ||
             selectedVerification ||
             selectedCategory ||
-            (selectedSourceFilter && selectedSourceFilter !== 'ALL') ||
-            (selectedProfileFilter && selectedProfileFilter !== 'ALL') ||
             showOnlyDuplicates) && (
             <button
               onClick={handleResetFilter}
-              className="text-xs font-semibold text-rose-600 hover:text-rose-800 transition-colors cursor-pointer"
+              className="text-xs font-semibold text-rose-600 hover:text-rose-800 transition-colors"
             >
               Reset Filter
             </button>
@@ -1611,34 +1402,18 @@ export const AssessmentTable: React.FC = () => {
                         {item.desaName}
                       </div>
                       <div className="mt-1">
-                        {isArchiveSource(item.sourceSheet) ? (
-                          <span
-                            className="inline-flex items-center gap-1 px-1.5 py-0.5 rounded bg-amber-100 text-amber-950 border border-amber-300 text-[10px] font-bold shadow-2xs"
-                            title={`Data dari Arsip Lama (Read-Only): Tab "${item.sourceSheet}"${item.sheetRowNumber ? ` baris #${item.sheetRowNumber}` : ''}`}
-                          >
-                            <Folder className="w-3 h-3 text-amber-700 shrink-0" />
-                            <span className="truncate max-w-[130px]">Arsip: {item.sourceSheet}</span>
-                            <span className="bg-amber-200 text-amber-900 px-1 rounded text-[8px] font-mono">RO</span>
-                            {item.sheetRowNumber && (
-                              <span className="font-mono text-amber-900 bg-amber-200/80 px-1 rounded text-[9px]">
-                                #{item.sheetRowNumber}
-                              </span>
-                            )}
-                          </span>
-                        ) : (
-                          <span
-                            className="inline-flex items-center gap-1 px-1.5 py-0.5 rounded bg-blue-50 text-blue-900 border border-blue-200 text-[10px] font-semibold"
-                            title={`Asal Tab Google Sheet: ${item.sourceSheet || (`Kec. ` + item.kecamatanName)}${item.sheetRowNumber ? ` (Baris ke-${item.sheetRowNumber})` : ''}`}
-                          >
-                            <FileSpreadsheet className="w-3 h-3 text-blue-600 shrink-0" />
-                            <span className="truncate max-w-[130px]">{item.sourceSheet || `Kec. ${item.kecamatanName}`}</span>
-                            {item.sheetRowNumber && (
-                              <span className="font-mono text-blue-700 bg-blue-100/70 px-1 rounded text-[9px]">
-                                #{item.sheetRowNumber}
-                              </span>
-                            )}
-                          </span>
-                        )}
+                        <span
+                          className="inline-flex items-center gap-1 px-1.5 py-0.5 rounded bg-blue-50 text-blue-900 border border-blue-200 text-[10px] font-semibold"
+                          title={`Asal Tab Google Sheet: ${item.sourceSheet || (`Kec. ` + item.kecamatanName)}${item.sheetRowNumber ? ` (Baris ke-${item.sheetRowNumber})` : ''}`}
+                        >
+                          <FileSpreadsheet className="w-3 h-3 text-blue-600 shrink-0" />
+                          <span className="truncate max-w-[130px]">{item.sourceSheet || `Kec. ${item.kecamatanName}`}</span>
+                          {item.sheetRowNumber && (
+                            <span className="font-mono text-blue-700 bg-blue-100/70 px-1 rounded text-[9px]">
+                              #{item.sheetRowNumber}
+                            </span>
+                          )}
+                        </span>
                       </div>
                     </td>
 
@@ -1703,41 +1478,27 @@ export const AssessmentTable: React.FC = () => {
 
                     {/* Google Sheet Storage Status */}
                     <td className="py-3 px-3 text-center">
-                      {currentUser.role === 'admin_user' ? (
-                        <span
-                          title={item.googleSheetSynced ? 'Tersimpan otomatis di Google Sheet' : 'Tersimpan di Cloud Database'}
-                          className={`inline-flex items-center gap-1 px-2 py-0.5 rounded-lg border text-[10px] font-semibold ${
-                            item.googleSheetSynced
-                              ? 'bg-emerald-50 text-emerald-800 border-emerald-200'
-                              : 'bg-slate-50 text-slate-600 border-slate-200'
+                      <button
+                        onClick={() => handleSyncSingle(item)}
+                        disabled={syncingId === item.id}
+                        title={
+                          item.googleSheetSynced
+                            ? 'Tersimpan langsung di tautan Google Sheet. Klik untuk kirim pembaruan ulang.'
+                            : 'Kirim data ini ke Google Sheet sekarang'
+                        }
+                        className={`inline-flex items-center gap-1 px-2 py-1 rounded-lg border text-[10px] font-bold transition-all shadow-2xs ${
+                          item.googleSheetSynced
+                            ? 'bg-emerald-50 text-emerald-800 border-emerald-300 hover:bg-emerald-100'
+                            : 'bg-slate-100 text-slate-600 border-slate-300 hover:bg-slate-200'
+                        }`}
+                      >
+                        <FileSpreadsheet
+                          className={`w-3 h-3 shrink-0 ${
+                            syncingId === item.id ? 'animate-spin text-emerald-600' : 'text-emerald-600'
                           }`}
-                        >
-                          <CheckCircle2 className={`w-3 h-3 ${item.googleSheetSynced ? 'text-emerald-600' : 'text-slate-400'}`} />
-                          <span>{item.googleSheetSynced ? 'Tersimpan' : 'Cloud'}</span>
-                        </span>
-                      ) : (
-                        <button
-                          onClick={() => handleSyncSingle(item)}
-                          disabled={syncingId === item.id}
-                          title={
-                            item.googleSheetSynced
-                              ? 'Tersimpan langsung di tautan Google Sheet. Klik untuk kirim pembaruan ulang.'
-                              : 'Kirim data ini ke Google Sheet sekarang'
-                          }
-                          className={`inline-flex items-center gap-1 px-2 py-1 rounded-lg border text-[10px] font-bold transition-all shadow-2xs ${
-                            item.googleSheetSynced
-                              ? 'bg-emerald-50 text-emerald-800 border-emerald-300 hover:bg-emerald-100'
-                              : 'bg-slate-100 text-slate-600 border-slate-300 hover:bg-slate-200'
-                          }`}
-                        >
-                          <FileSpreadsheet
-                            className={`w-3 h-3 shrink-0 ${
-                              syncingId === item.id ? 'animate-spin text-emerald-600' : 'text-emerald-600'
-                            }`}
-                          />
-                          <span>{item.googleSheetSynced ? 'Tersimpan' : 'Kirim'}</span>
-                        </button>
-                      )}
+                        />
+                        <span>{item.googleSheetSynced ? 'Tersimpan' : 'Kirim'}</span>
+                      </button>
                     </td>
 
                     {/* Actions Column */}
@@ -2677,15 +2438,6 @@ export const AssessmentTable: React.FC = () => {
           assessments={assessments}
           kecamatans={kecamatans}
           desas={desas}
-        />
-      )}
-
-      {/* MODAL PUSAT PEMULIHAN DATA & RIWAYAT INPUT */}
-      {showRecoveryModal && (
-        <DataRecoveryModal
-          isOpen={showRecoveryModal}
-          onClose={() => setShowRecoveryModal(false)}
-          onSelectAssessment={(item) => setSelectedAssessmentForDetail(item)}
         />
       )}
     </div>

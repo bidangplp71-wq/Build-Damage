@@ -1,6 +1,6 @@
 import React, { useMemo, useState, useEffect } from 'react';
 import { useApp } from '../context/AppContext';
-import { formatRupiah, calculateRehabCosts } from '../utils/puprCalculations';
+import { formatRupiah } from '../utils/puprCalculations';
 import { BuildingCategory, BUILDING_CATEGORY_CONFIGS } from '../types';
 import { detectAllDuplicateGroups } from '../utils/duplicateDetector';
 import {
@@ -59,32 +59,11 @@ export const DashboardAnalytics: React.FC = () => {
     setSelectedAssessmentForDetail,
     googleSheetConfig,
     syncAllToSheet,
-    sheetSyncProgress,
     showToast,
   } = useApp();
 
   const totalBuildings = assessments.length;
-
-  // Exclude verified assessments from estimated total rehab budget ("tidak termasuk yang terverifikasi karena yang terverifikasi hitungan sendiri")
-  const unverifiedAssessments = useMemo(() => {
-    return assessments.filter((a) => a.verificationStatus !== 'Terverifikasi');
-  }, [assessments]);
-
-  const totalCost = useMemo(() => {
-    return unverifiedAssessments.reduce((acc, curr) => {
-      let cost = Number(curr.roundedRehabCost || 0);
-      if (cost === 0 && curr.totalFloorAreaM2 && curr.totalDamagePercent) {
-        const calculated = calculateRehabCosts(
-          curr.totalDamagePercent,
-          curr.totalFloorAreaM2,
-          curr.hsbgnPerM2 || 5920000,
-          curr.demolitionPercent || 8
-        );
-        cost = calculated.roundedRehabCost;
-      }
-      return acc + cost;
-    }, 0);
-  }, [unverifiedAssessments]);
+  const totalCost = assessments.reduce((acc, curr) => acc + curr.roundedRehabCost, 0);
 
   // Python Fast Analytics Engine State
   const [isPythonLoading, setIsPythonLoading] = useState(false);
@@ -183,47 +162,6 @@ export const DashboardAnalytics: React.FC = () => {
 
   return (
     <div className="space-y-6">
-      {/* Real-time Inline Loading Notification Banner in Dashboard View */}
-      {sheetSyncProgress && sheetSyncProgress.isLoading && (
-        <div className="p-4 bg-gradient-to-r from-blue-950 via-slate-900 to-indigo-950 rounded-2xl text-white border border-cyan-500/40 shadow-lg animate-in fade-in slide-in-from-top-2 duration-300">
-          <div className="flex items-center justify-between gap-3">
-            <div className="flex items-center gap-3 min-w-0">
-              <div className="p-2.5 rounded-xl bg-cyan-500/20 text-cyan-400 border border-cyan-500/30 shrink-0">
-                <RefreshCw className="w-5 h-5 animate-spin text-cyan-400" />
-              </div>
-              <div className="min-w-0">
-                <div className="flex items-center gap-2">
-                  <span className="text-[10px] font-extrabold uppercase tracking-wider text-cyan-300 bg-cyan-950 px-2.5 py-0.5 rounded-full border border-cyan-800">
-                    Pemuatan Data Sedang Berlangsung
-                  </span>
-                  <span className="text-[11px] font-mono text-slate-300">
-                    Step {sheetSyncProgress.currentStep}/{sheetSyncProgress.totalSteps}
-                  </span>
-                </div>
-                <p className="text-xs sm:text-sm font-bold text-white mt-1 truncate">
-                  {sheetSyncProgress.statusMessage || `Membaca data survei: Kec. ${sheetSyncProgress.currentKecamatan || 'Aesesa'}...`}
-                </p>
-              </div>
-            </div>
-            <div className="text-right shrink-0">
-              <span className="text-lg sm:text-xl font-black font-mono text-cyan-400">
-                {sheetSyncProgress.percent}%
-              </span>
-              <div className="text-[10px] text-slate-400">
-                {sheetSyncProgress.totalLoaded} gedung termuat
-              </div>
-            </div>
-          </div>
-          {/* Animated Progress Bar */}
-          <div className="w-full bg-slate-800 h-2 rounded-full overflow-hidden mt-3">
-            <div
-              className="bg-gradient-to-r from-amber-400 via-cyan-400 to-emerald-400 h-full transition-all duration-300 animate-pulse"
-              style={{ width: `${Math.max(8, sheetSyncProgress.percent)}%` }}
-            />
-          </div>
-        </div>
-      )}
-
       {/* Top Banner & Quick Trigger */}
       <div className="bg-gradient-to-r from-slate-900 via-slate-800 to-indigo-950 rounded-2xl p-6 text-white shadow-xl border border-slate-700/60 relative overflow-hidden">
         <div className="absolute right-0 top-0 w-96 h-96 bg-amber-500/10 rounded-full blur-3xl pointer-events-none -mr-20 -mt-20"></div>
@@ -353,12 +291,12 @@ export const DashboardAnalytics: React.FC = () => {
             <span className="text-2xl font-black text-slate-900 truncate">
               {formatRupiah(totalCost)}
             </span>
-            <span className="text-xs text-slate-500 mt-0.5">HSBGN & Bongkaran (Non-Terverifikasi)</span>
+            <span className="text-xs text-slate-500 mt-0.5">HSBGN & Bongkaran 8%</span>
           </div>
           <div className="mt-3 flex items-center justify-between text-xs text-slate-500 border-t border-slate-100 pt-2.5">
-            <span>Rata-rata ({unverifiedAssessments.length} unit):</span>
+            <span>Rata-rata:</span>
             <strong className="text-slate-800">
-              {unverifiedAssessments.length > 0 ? formatRupiah(Math.round(totalCost / unverifiedAssessments.length)) : 'Rp 0'}
+              {totalBuildings > 0 ? formatRupiah(Math.round(totalCost / totalBuildings)) : 'Rp 0'}
             </strong>
           </div>
         </div>
@@ -414,14 +352,12 @@ export const DashboardAnalytics: React.FC = () => {
           </div>
           <div className="mt-3 flex items-center justify-between text-xs text-slate-500 border-t border-slate-100 pt-2.5">
             <span className="truncate max-w-[130px]">{googleSheetConfig.sheetName}</span>
-            {currentUser.role !== 'admin_user' && (
-              <button
-                onClick={() => setActiveTab('google_sheet')}
-                className="text-emerald-700 font-semibold hover:underline cursor-pointer"
-              >
-                Pengaturan &rarr;
-              </button>
-            )}
+            <button
+              onClick={() => setActiveTab('google_sheet')}
+              className="text-emerald-700 font-semibold hover:underline"
+            >
+              Pengaturan &rarr;
+            </button>
           </div>
         </div>
       </div>
@@ -854,14 +790,12 @@ export const DashboardAnalytics: React.FC = () => {
               >
                 + Pemekaran Desa
               </button>
-              {currentUser.role !== 'admin_user' && (
-                <button
-                  onClick={() => setActiveTab('google_sheet')}
-                  className="p-3 rounded-xl bg-white border border-indigo-100 shadow-xs hover:border-indigo-300 font-semibold text-slate-800 text-left transition-all"
-                >
-                  Sync Google Sheet
-                </button>
-              )}
+              <button
+                onClick={() => setActiveTab('google_sheet')}
+                className="p-3 rounded-xl bg-white border border-indigo-100 shadow-xs hover:border-indigo-300 font-semibold text-slate-800 text-left transition-all"
+              >
+                Sync Google Sheet
+              </button>
               <button
                 onClick={() => setActiveTab('manajemen_user')}
                 className="p-3 rounded-xl bg-white border border-indigo-100 shadow-xs hover:border-indigo-300 font-semibold text-slate-800 text-left transition-all"

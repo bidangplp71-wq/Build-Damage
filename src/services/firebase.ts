@@ -1,13 +1,5 @@
 import { initializeApp, getApps, getApp, FirebaseApp } from 'firebase/app';
-import {
-  getFirestore,
-  Firestore,
-  collection,
-  getDocs,
-  disableNetwork,
-  enableNetwork,
-  setLogLevel,
-} from 'firebase/firestore';
+import { getFirestore, Firestore, collection, getDocs, disableNetwork, enableNetwork } from 'firebase/firestore';
 import { getAuth, Auth } from 'firebase/auth';
 import { getStorage, FirebaseStorage, ref, uploadString, getDownloadURL, deleteObject } from 'firebase/storage';
 import { savePhotoLocally } from '../utils/photoStorage';
@@ -22,11 +14,6 @@ let auth: Auth | null = null;
 let storage: FirebaseStorage | null = null;
 let isFirestoreNetworkPaused = false;
 let isQuotaExceeded = false;
-
-// Silence SDK internal warning logs (such as maximum backoff delay retries)
-try {
-  setLogLevel('silent');
-} catch {}
 
 try {
   if (typeof window !== 'undefined') {
@@ -48,13 +35,11 @@ try {
       storage = getStorage(app);
     }
 
-    // Check if daily quota was exceeded (daily write units reset on 24-hour cycle)
-    const isRecordedExceeded = localStorage.getItem('sipandu_pupr_quota_exceeded') === 'true';
-    const quotaDate = localStorage.getItem('sipandu_pupr_quota_date');
-    const today = new Date().toISOString().slice(0, 10);
-
-    // If recorded exceeded and either no date or matches today, keep offline/paused
-    if (isRecordedExceeded || (quotaDate && quotaDate === today)) {
+    // Check if quota was recently recorded as exceeded
+    const quotaTimestamp = localStorage.getItem('sipandu_pupr_quota_exceeded_ts');
+    const now = Date.now();
+    // 30-minute cooldown before re-testing network if previously exhausted
+    if (quotaTimestamp && now - parseInt(quotaTimestamp, 10) < 30 * 60 * 1000) {
       isQuotaExceeded = true;
       isFirestoreNetworkPaused = true;
       if (db) {
@@ -63,50 +48,36 @@ try {
     } else {
       isFirestoreNetworkPaused = false;
       isQuotaExceeded = false;
+      localStorage.removeItem('sipandu_pupr_quota_exceeded');
+      localStorage.removeItem('sipandu_pupr_quota_exceeded_ts');
       if (db) {
         enableNetwork(db).catch(() => {});
       }
     }
-
-    // Global listener to capture any asynchronous or stream-level Firestore quota errors
-    window.addEventListener('unhandledrejection', (event) => {
-      if (isQuotaError(event.reason)) {
-        event.preventDefault();
-        pauseFirestoreNetwork().catch(() => {});
-      }
-    });
-
-    window.addEventListener('error', (event) => {
-      if (isQuotaError(event.error) || isQuotaError(event.message)) {
-        event.preventDefault();
-        pauseFirestoreNetwork().catch(() => {});
-      }
-    });
   }
 } catch (err) {
   console.warn('Firebase initialization notice:', err);
 }
 
-export { app, db, auth, storage, isQuotaExceeded, isFirestoreNetworkPaused };
+export { app, db, auth, storage, isQuotaExceeded };
 
 /**
  * Pause Firestore network traffic to stop exponential backoff retry loops when quota is exceeded
  */
 export async function pauseFirestoreNetwork(): Promise<void> {
   isQuotaExceeded = true;
-  isFirestoreNetworkPaused = true;
   try {
-    const today = new Date().toISOString().slice(0, 10);
     localStorage.setItem('sipandu_pupr_quota_exceeded', 'true');
     localStorage.setItem('sipandu_pupr_quota_exceeded_ts', String(Date.now()));
-    localStorage.setItem('sipandu_pupr_quota_date', today);
   } catch {}
 
-  if (!db) return;
+  if (!db || isFirestoreNetworkPaused) return;
   try {
+    isFirestoreNetworkPaused = true;
     await disableNetwork(db);
-  } catch {
-    // Ignore if already offline
+    console.info('[Firestore] Network synchronization paused to preserve local offline cache and prevent quota backoff errors.');
+  } catch (err) {
+    // Ignore if already paused
   }
 }
 
@@ -122,8 +93,8 @@ export async function resumeFirestoreNetwork(): Promise<void> {
     try {
       localStorage.removeItem('sipandu_pupr_quota_exceeded');
       localStorage.removeItem('sipandu_pupr_quota_exceeded_ts');
-      localStorage.removeItem('sipandu_pupr_quota_date');
     } catch {}
+    console.info('[Firestore] Network synchronization resumed.');
   } catch (err) {
     console.warn('[Firestore] Could not resume network:', err);
   }
@@ -164,18 +135,14 @@ export function isQuotaError(err: unknown): boolean {
   if (!err) return false;
   const msg = err instanceof Error ? err.message : String(err);
   const code = (err as any)?.code || '';
-  const stack = err instanceof Error && err.stack ? err.stack : '';
   return (
     code === 'resource-exhausted' ||
-    code === 'functions/resource-exhausted' ||
     msg.includes('resource-exhausted') ||
     msg.includes('Quota limit exceeded') ||
     msg.includes('Free daily write units') ||
     msg.includes('Free daily read units') ||
     msg.includes('Quota exceeded') ||
-    msg.includes('maximum backoff delay') ||
-    msg.includes('quota metric') ||
-    stack.includes('resource-exhausted')
+    msg.includes('maximum backoff delay')
   );
 }
 

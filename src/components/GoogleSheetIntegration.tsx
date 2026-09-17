@@ -464,20 +464,6 @@ export const GoogleSheetIntegration: React.FC = () => {
 
   const syncedCount = assessments.filter((a) => a.googleSheetSynced).length;
 
-  if (currentUser.role === 'admin_user') {
-    return (
-      <div className="max-w-2xl mx-auto my-12 p-8 bg-white border border-rose-200 rounded-3xl shadow-lg text-center space-y-4">
-        <div className="w-16 h-16 bg-rose-100 text-rose-600 rounded-2xl flex items-center justify-center mx-auto shadow-sm">
-          <ShieldCheck className="w-8 h-8" />
-        </div>
-        <h2 className="text-xl font-bold text-slate-900">Akses Terbatas: Petugas Surveyor Lapangan</h2>
-        <p className="text-sm text-slate-600 leading-relaxed max-w-lg mx-auto">
-          Akun <strong>Surveyor Lapangan</strong> tidak memiliki izin untuk mengonfigurasi, mengubah, atau membuka integrasi Google Sheet secara langsung. Seluruh data survei yang Anda inputkan akan otomatis tersinkronisasi dan diamankan oleh sistem ke database terpusat.
-        </p>
-      </div>
-    );
-  }
-
   return (
     <div className="space-y-6 max-w-6xl mx-auto pb-12">
       {/* Top Header & Role Switcher */}
