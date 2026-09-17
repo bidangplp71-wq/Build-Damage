@@ -2473,14 +2473,17 @@ export function parseExtractedRowsToAssessments(
     const noKkPemilik = String(getVal(rowObj, ['No KK Pemilik', 'No KK', 'Nomor KK', 'No. KK']) || '0');
 
     // Deterministic key per physical row from each kecamatan sheet so 100% of rows are preserved
+    const rawId = String(getVal(rowObj, ['ID Penilaian', 'ID', 'ID Gedung', 'Assessment ID', 'AssessmentId', 'UUID']) || '').trim();
     const cleanBuilding = buildingName.toLowerCase().replace(/\s*\(baris\s+\d+\)/i, '').trim();
+    const cleanBldgSlug = cleanBuilding.replace(/[^a-z0-9]/g, '').slice(0, 16);
     const canonicalKec = kecInfo.id || kecInfo.name.toLowerCase().replace(/[^a-z0-9]/g, '_');
     const cleanKec = kecInfo.name.toLowerCase().trim();
     const cleanDesa = desaName.toLowerCase().trim();
     const cleanSheet = (sourceSheet || `Kec. ${kecInfo.name}`).toLowerCase().replace(/[^a-z0-9]/g, '_');
 
-    // Each row in each kecamatan sheet is an independent building survey record
-    const dedupeKey = `row:${canonicalKec}::r${sheetRowNumber}`;
+    // Unique per-row deterministic key and ID incorporating building signature
+    const stableId = rawId || `sheet_${cleanSheet}_r${sheetRowNumber}_${cleanBldgSlug || cleanKec}`;
+    const dedupeKey = rawId || `${cleanSheet}::r${sheetRowNumber}::${cleanBldgSlug || cleanKec}`;
 
     // Registration code assignment: automatically guarantee 100% uniqueness even if surveyor did not resequence
     let code = rawCode;
@@ -2531,9 +2534,6 @@ export function parseExtractedRowsToAssessments(
       code = candidate;
       seenCodes.add(code.toUpperCase());
     }
-
-    // Stable deterministic ID unique per physical row in the sheet
-    const stableId = `sheet_${cleanSheet}_r${sheetRowNumber}_${cleanKec.replace(/[^a-z0-9]/g, '_')}`;
 
     const numberOfFloors = parseNumber(getVal(rowObj, ['Jumlah Tingkat', 'Jumlah Lantai', 'Tingkat', 'Lantai'])) || 1;
     const yearBuilt = parseNumber(getVal(rowObj, ['Tahun Dibangun', 'Tahun Pembangunan', 'Tahun'])) || new Date().getFullYear();

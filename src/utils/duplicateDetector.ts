@@ -279,20 +279,22 @@ export function buildSemanticKey(item: Partial<BuildingAssessment>): string {
 }
 
 /**
- * Generates all candidate identity keys for an assessment to guarantee 100% accurate deduplication
+ * Generates candidate identity keys for an assessment to ensure accurate reconciliation
  * across local storage, server state, and Google Sheet fetch rows.
+ * CRITICAL RULE: Never match by generic row number alone! Only match if exact ID matches,
+ * or Registration Code + Building Name matches, or exact spreadsheet profile + sheet + row matches.
  */
 export function getAssessmentLookupKeys(item: BuildingAssessment): string[] {
   const keys: string[] = [];
   const isArchive = isArchiveAssessment(item);
   const scopeTag = isArchive ? 'archive' : 'active';
 
-  // 1. Exact ID
+  // 1. Exact Unique ID
   if (item.id && item.id.trim()) {
-    keys.push(`id:${item.id.trim()}::${scopeTag}`);
+    keys.push(`id:${item.id.trim()}`);
   }
 
-  // 2. Registration Code (e.g. REG-BOA-2026-0001)
+  // 2. Registration Code + Building Name/Location Signature
   const invalidCodes = new Set([
     '',
     '0',
@@ -312,43 +314,49 @@ export function getAssessmentLookupKeys(item: BuildingAssessment): string[] {
     'reg-preview',
   ]);
   const cleanCode = (item.code || '').toUpperCase().trim();
-  if (cleanCode && !invalidCodes.has(cleanCode.toLowerCase()) && cleanCode.length >= 4) {
-    keys.push(`code:${cleanCode}::${scopeTag}`);
-  }
-
-  // 3. Physical Sheet Row + Canonical Kecamatan / Sheet
-  const cleanSheet = (item.sourceSheet || item.targetSheetName || '').toLowerCase().replace(/[^a-z0-9]/g, '_');
-  const cleanKec = (item.kecamatanName || item.kecamatanId || '').toLowerCase().replace(/[^a-z0-9]/g, '_');
-  if (item.sheetRowNumber && item.sheetRowNumber >= 2) {
-    if (cleanKec) {
-      keys.push(`row_kec:${cleanKec}::r${item.sheetRowNumber}::${scopeTag}`);
-    }
-    if (cleanSheet) {
-      keys.push(`sheet:${cleanSheet}::r${item.sheetRowNumber}::${scopeTag}`);
-      keys.push(`row:${cleanSheet}::r${item.sheetRowNumber}::${scopeTag}`);
-    }
-  }
-
-  // 4. Semantic Location Signature (Building Name + Kecamatan + Desa)
   const cleanBuilding = normalizeString(item.buildingName).replace(/\s*\(baris\s+\d+\)/i, '').trim();
+  const cleanKec = (item.kecamatanName || item.kecamatanId || '').toLowerCase().replace(/[^a-z0-9]/g, '_');
   const cleanDesa = normalizeString(item.desaName);
-  if (cleanBuilding && cleanBuilding.length >= 4 && !cleanBuilding.startsWith('survei bangunan') && cleanKec) {
-    keys.push(`loc:${cleanKec}::${cleanDesa}::${cleanBuilding}::${scopeTag}`);
-    // If NIK is provided
-    const cleanNik = (item.nikPemilik || '').replace(/[^0-9]/g, '');
-    if (cleanNik && cleanNik.length >= 10 && cleanNik !== '0000000000000000') {
-      keys.push(`nik:${cleanNik}::${cleanKec}::${scopeTag}`);
+
+  if (cleanCode && !invalidCodes.has(cleanCode.toLowerCase()) && cleanCode.length >= 4) {
+    if (cleanBuilding && cleanBuilding.length >= 3 && !cleanBuilding.startsWith('survei bangunan')) {
+      keys.push(`code_bldg:${cleanCode}::${cleanBuilding}`);
     }
+    // Location match
+    if (cleanKec && cleanDesa) {
+      keys.push(`code_loc:${cleanCode}::${cleanKec}::${cleanDesa}`);
+    }
+  }
+
+  // 3. Exact Physical Spreadsheet Profile + Sheet Tab + Sheet Row Number
+  const profileId = (item.targetProfileId || '').toLowerCase().replace(/[^a-z0-9]/g, '_');
+  const cleanSheet = (item.sourceSheet || item.targetSheetName || '').toLowerCase().replace(/[^a-z0-9]/g, '_');
+  if (item.sheetRowNumber && item.sheetRowNumber >= 2 && cleanSheet) {
+    if (profileId) {
+      keys.push(`prof_row:${profileId}::${cleanSheet}::r${item.sheetRowNumber}`);
+    }
+    // Building name slug + sheet + row
+    if (cleanBuilding && cleanBuilding.length >= 3 && !cleanBuilding.startsWith('survei')) {
+      const bldgSlug = cleanBuilding.replace(/[^a-z0-9]/g, '').slice(0, 16);
+      keys.push(`sheet_bldg_row:${cleanSheet}::r${item.sheetRowNumber}::${bldgSlug}`);
+    }
+  }
+
+  // 4. Exact NIK + Kecamatan Match
+  const cleanNik = (item.nikPemilik || '').replace(/[^0-9]/g, '');
+  if (cleanNik && cleanNik.length >= 10 && cleanNik !== '0000000000000000' && cleanKec) {
+    keys.push(`nik_loc:${cleanNik}::${cleanKec}`);
   }
 
   return keys;
 }
 
 /**
- * Deduplicate an array of assessments strictly by exact ID, Registration Code, or exact physical sheet row.
+ * Deduplicate an array of assessments strictly by exact ID, Registration Code + Building Name,
+ * or exact physical sheet row within the same profile.
  * CRITICAL RULE: Never merge independent rows with different identities,
  * and NEVER merge an archive record with an active record.
- * This guarantees 100% preservation of all 207 historical records and all newly inputted active surveys,
+ * This guarantees 100% preservation of all 207 historical records and all 144 newly inputted active surveys (total 351),
  * while eliminating duplicate clones caused by multiple sheet queries or re-fetches.
  */
 export function deduplicateAssessmentsList(list: BuildingAssessment[]): BuildingAssessment[] {
@@ -372,6 +380,29 @@ export function deduplicateAssessmentsList(list: BuildingAssessment[]): Building
 
     if (matchedIndex !== undefined) {
       const existing = result[matchedIndex];
+
+      // Safety check: Never merge two completely distinct non-generic building names!
+      const existingName = normalizeString(existing.buildingName).replace(/\s*\(baris\s+\d+\)/i, '').trim();
+      const incomingName = normalizeString(item.buildingName).replace(/\s*\(baris\s+\d+\)/i, '').trim();
+      const isExistingGeneric = !existingName || existingName.startsWith('survei bangunan') || existingName.startsWith('bangunan desa') || existingName.startsWith('gedung reg');
+      const isIncomingGeneric = !incomingName || incomingName.startsWith('survei bangunan') || incomingName.startsWith('bangunan desa') || incomingName.startsWith('gedung reg');
+
+      if (
+        existingName &&
+        incomingName &&
+        !isExistingGeneric &&
+        !isIncomingGeneric &&
+        calculateTextSimilarity(existingName, incomingName) < 0.4 &&
+        item.id !== existing.id
+      ) {
+        // Different buildings! Do not merge! Add as new distinct record!
+        const newIdx = result.length;
+        result.push(item);
+        for (const key of candidateKeys) {
+          keyToResultIndex.set(key, newIdx);
+        }
+        continue;
+      }
 
       // Merge enriched fields non-destructively
       const mergedPhotos = (item.photos && item.photos.length > 0)

@@ -226,6 +226,21 @@ function deduplicateServerAssessments(list: any[]): any[] {
 
     if (matchIdx !== -1) {
       const existing = result[matchIdx];
+
+      // Safety check: if building names are distinct non-generic names, keep both
+      const existingName = String(existing.buildingName || '').toLowerCase().trim();
+      const incomingName = String(item.buildingName || '').toLowerCase().trim();
+      const isExistingGeneric = !existingName || existingName.startsWith('survei');
+      const isIncomingGeneric = !incomingName || incomingName.startsWith('survei');
+
+      if (existingName && incomingName && !isExistingGeneric && !isIncomingGeneric && existingName !== incomingName) {
+        // Different buildings, keep both
+        const newIdx = result.length;
+        result.push(item);
+        seenIdMap.set(`${item.id}_${item.buildingName}`, newIdx);
+        continue;
+      }
+
       const mergedPhotos =
         item.photos && item.photos.length > 0 ? item.photos : existing.photos || [];
       const existingTime = new Date(existing.updatedAt || existing.createdAt || 0).getTime();
