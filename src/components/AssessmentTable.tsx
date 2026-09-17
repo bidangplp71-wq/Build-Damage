@@ -14,6 +14,7 @@ import {
   detectAllDuplicateGroups,
   getDuplicateIdsMap,
   DuplicateGroup,
+  isArchiveSource,
 } from '../utils/duplicateDetector';
 import {
   Search,
@@ -88,6 +89,7 @@ export const AssessmentTable: React.FC = () => {
   const [selectedClassification, setSelectedClassification] = useState('');
   const [selectedVerification, setSelectedVerification] = useState('');
   const [selectedProfileFilter, setSelectedProfileFilter] = useState<string>('ALL');
+  const [selectedSourceFilter, setSelectedSourceFilter] = useState<string>('ALL');
   const [selectedRowIds, setSelectedRowIds] = useState<string[]>([]);
   const [isRefreshing, setIsRefreshing] = useState(false);
 
@@ -261,6 +263,19 @@ export const AssessmentTable: React.FC = () => {
     setCurrentPage(1);
   };
 
+  // Distinct source sheets across all assessments
+  const distinctSourceSheets = useMemo(() => {
+    const set = new Set<string>();
+    assessments.forEach((a) => {
+      if (a.sourceSheet && a.sourceSheet.trim()) {
+        set.add(a.sourceSheet.trim());
+      } else if (a.targetSheetName && a.targetSheetName.trim()) {
+        set.add(a.targetSheetName.trim());
+      }
+    });
+    return Array.from(set).sort();
+  }, [assessments]);
+
   // Filtered Assessments with flexible matching and newest-first sort
   const filteredAssessments = useMemo(() => {
     const selKec = selectedKecamatanId ? kecamatans.find((k) => k.id === selectedKecamatanId) : undefined;
@@ -325,6 +340,18 @@ export const AssessmentTable: React.FC = () => {
           return false;
         }
 
+        // Asal Sheet / Arsip Filter
+        if (selectedSourceFilter && selectedSourceFilter !== 'ALL') {
+          if (selectedSourceFilter === 'ACTIVE_ONLY') {
+            if (isArchiveSource(item.sourceSheet)) return false;
+          } else if (selectedSourceFilter === 'ARCHIVE_ONLY') {
+            if (!isArchiveSource(item.sourceSheet)) return false;
+          } else {
+            const sheet = item.sourceSheet || item.targetSheetName || `Kec. ${item.kecamatanName}`;
+            if (sheet !== selectedSourceFilter) return false;
+          }
+        }
+
         // Spreadsheet Profile Filter (Daftar Halaman Buku)
         if (selectedProfileFilter && selectedProfileFilter !== 'ALL') {
           const itemProfileId = item.targetProfileId || (googleSheetConfig.spreadsheetProfiles?.[0]?.id || 'profile_primary_2026');
@@ -350,6 +377,7 @@ export const AssessmentTable: React.FC = () => {
     selectedDisaster,
     selectedClassification,
     selectedVerification,
+    selectedSourceFilter,
     selectedProfileFilter,
     googleSheetConfig.spreadsheetProfiles,
     showOnlyDuplicates,
@@ -415,6 +443,9 @@ export const AssessmentTable: React.FC = () => {
     setSelectedDisaster('');
     setSelectedClassification('');
     setSelectedVerification('');
+    setSelectedSourceFilter('ALL');
+    setSelectedProfileFilter('ALL');
+    setShowOnlyDuplicates(false);
     setCurrentPage(1);
     showToast('Semua filter dikembalikan ke awal', 'info');
   };
@@ -1095,6 +1126,29 @@ export const AssessmentTable: React.FC = () => {
               <option value="Perlu Revisi">Perlu Revisi</option>
               <option value="Ditolak">Ditolak</option>
             </select>
+
+            {/* Filter Asal Sheet / Arsip */}
+            <select
+              value={selectedSourceFilter}
+              onChange={(e) => {
+                setSelectedSourceFilter(e.target.value);
+                setCurrentPage(1);
+              }}
+              className="px-2.5 py-1.5 text-xs rounded-lg border border-slate-200 bg-white font-medium text-slate-700"
+            >
+              <option value="ALL">Semua Asal Sheet / Arsip</option>
+              <option value="ACTIVE_ONLY">🟢 Hanya Data Aktif (Bukan Arsip)</option>
+              <option value="ARCHIVE_ONLY">📁 Hanya Data Arsip Lama (Read-Only)</option>
+              {distinctSourceSheets.length > 0 && (
+                <optgroup label="Spesifik Nama Sheet/Tab">
+                  {distinctSourceSheets.map((sheet) => (
+                    <option key={sheet} value={sheet}>
+                      {isArchiveSource(sheet) ? `📁 [Arsip] ${sheet}` : `📊 ${sheet}`}
+                    </option>
+                  ))}
+                </optgroup>
+              )}
+            </select>
           </div>
 
           {(searchTerm ||
@@ -1104,10 +1158,12 @@ export const AssessmentTable: React.FC = () => {
             selectedClassification ||
             selectedVerification ||
             selectedCategory ||
+            (selectedSourceFilter && selectedSourceFilter !== 'ALL') ||
+            (selectedProfileFilter && selectedProfileFilter !== 'ALL') ||
             showOnlyDuplicates) && (
             <button
               onClick={handleResetFilter}
-              className="text-xs font-semibold text-rose-600 hover:text-rose-800 transition-colors"
+              className="text-xs font-semibold text-rose-600 hover:text-rose-800 transition-colors cursor-pointer"
             >
               Reset Filter
             </button>
@@ -1405,18 +1461,34 @@ export const AssessmentTable: React.FC = () => {
                         {item.desaName}
                       </div>
                       <div className="mt-1">
-                        <span
-                          className="inline-flex items-center gap-1 px-1.5 py-0.5 rounded bg-blue-50 text-blue-900 border border-blue-200 text-[10px] font-semibold"
-                          title={`Asal Tab Google Sheet: ${item.sourceSheet || (`Kec. ` + item.kecamatanName)}${item.sheetRowNumber ? ` (Baris ke-${item.sheetRowNumber})` : ''}`}
-                        >
-                          <FileSpreadsheet className="w-3 h-3 text-blue-600 shrink-0" />
-                          <span className="truncate max-w-[130px]">{item.sourceSheet || `Kec. ${item.kecamatanName}`}</span>
-                          {item.sheetRowNumber && (
-                            <span className="font-mono text-blue-700 bg-blue-100/70 px-1 rounded text-[9px]">
-                              #{item.sheetRowNumber}
-                            </span>
-                          )}
-                        </span>
+                        {isArchiveSource(item.sourceSheet) ? (
+                          <span
+                            className="inline-flex items-center gap-1 px-1.5 py-0.5 rounded bg-amber-100 text-amber-950 border border-amber-300 text-[10px] font-bold shadow-2xs"
+                            title={`Data dari Arsip Lama (Read-Only): Tab "${item.sourceSheet}"${item.sheetRowNumber ? ` baris #${item.sheetRowNumber}` : ''}`}
+                          >
+                            <Folder className="w-3 h-3 text-amber-700 shrink-0" />
+                            <span className="truncate max-w-[130px]">Arsip: {item.sourceSheet}</span>
+                            <span className="bg-amber-200 text-amber-900 px-1 rounded text-[8px] font-mono">RO</span>
+                            {item.sheetRowNumber && (
+                              <span className="font-mono text-amber-900 bg-amber-200/80 px-1 rounded text-[9px]">
+                                #{item.sheetRowNumber}
+                              </span>
+                            )}
+                          </span>
+                        ) : (
+                          <span
+                            className="inline-flex items-center gap-1 px-1.5 py-0.5 rounded bg-blue-50 text-blue-900 border border-blue-200 text-[10px] font-semibold"
+                            title={`Asal Tab Google Sheet: ${item.sourceSheet || (`Kec. ` + item.kecamatanName)}${item.sheetRowNumber ? ` (Baris ke-${item.sheetRowNumber})` : ''}`}
+                          >
+                            <FileSpreadsheet className="w-3 h-3 text-blue-600 shrink-0" />
+                            <span className="truncate max-w-[130px]">{item.sourceSheet || `Kec. ${item.kecamatanName}`}</span>
+                            {item.sheetRowNumber && (
+                              <span className="font-mono text-blue-700 bg-blue-100/70 px-1 rounded text-[9px]">
+                                #{item.sheetRowNumber}
+                              </span>
+                            )}
+                          </span>
+                        )}
                       </div>
                     </td>
 

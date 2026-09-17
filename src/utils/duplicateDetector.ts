@@ -214,55 +214,126 @@ export function detectAllDuplicateGroups(
 }
 
 /**
- * Deduplicate an array of assessments strictly by unique ID
- * Preserves every single physical row from each kecamatan sheet (including similar/duplicate surveys for inspector review)
+ * Identifies if a sheet/profile name represents an old archive / read-only historical sheet
+ */
+export function isArchiveSource(sourceName?: string | null): boolean {
+  if (!sourceName) return false;
+  const lower = sourceName.toLowerCase();
+  return (
+    lower.includes('arsip') ||
+    lower.includes('archive') ||
+    lower.includes('lama') ||
+    lower.includes('old') ||
+    lower.includes('read only') ||
+    lower.includes('readonly') ||
+    lower.includes('backup') ||
+    lower.includes('2023') ||
+    lower.includes('2024') ||
+    lower.includes('2025') ||
+    lower.includes('buku_arsip')
+  );
+}
+
+/**
+ * Builds a deterministic semantic key for a building assessment record to prevent duplicate duplication
+ */
+export function buildSemanticKey(item: Partial<BuildingAssessment>): string {
+  const cleanBuilding = normalizeString(item.buildingName);
+  const cleanKec = (item.kecamatanName || item.kecamatanId || '').toLowerCase().trim();
+  const cleanDesa = (item.desaName || item.desaId || '').toLowerCase().trim();
+  const cleanNik = (item.nikPemilik || '').replace(/[^0-9]/g, '');
+
+  if (cleanNik && cleanNik.length >= 10 && cleanNik !== '0000000000000000') {
+    return `nik:${cleanNik}::${cleanKec}`;
+  }
+
+  if (cleanBuilding && (cleanKec || cleanDesa)) {
+    return `loc:${cleanKec}::${cleanDesa}::${cleanBuilding}`;
+  }
+
+  return item.id || `item_${Math.random()}`;
+}
+
+/**
+ * Deduplicate an array of assessments strictly and semantically
+ * Preserves the richest data (photos, verified status, coordinates, drive link)
  */
 export function deduplicateAssessmentsList(list: BuildingAssessment[]): BuildingAssessment[] {
   if (!Array.isArray(list) || list.length <= 1) return list || [];
 
   const result: BuildingAssessment[] = [];
   const seenIdMap = new Map<string, number>(); // id -> index in result
+  const seenCodeMap = new Map<string, number>(); // code -> index in result
+  const seenSemanticMap = new Map<string, number>(); // semantic key -> index in result
 
   for (const item of list) {
-    if (!item || !item.id) continue;
+    if (!item) continue;
 
     let matchIdx = -1;
-    if (seenIdMap.has(item.id)) {
+    if (item.id && seenIdMap.has(item.id)) {
       matchIdx = seenIdMap.get(item.id)!;
+    } else if (item.code && item.code.trim().length >= 4 && seenCodeMap.has(item.code.toUpperCase().trim())) {
+      matchIdx = seenCodeMap.get(item.code.toUpperCase().trim())!;
+    } else {
+      const semKey = buildSemanticKey(item);
+      if (semKey.startsWith('nik:') || (semKey.startsWith('loc:') && !semKey.includes('survei_bangunan_lapangan'))) {
+        if (seenSemanticMap.has(semKey)) {
+          matchIdx = seenSemanticMap.get(semKey)!;
+        }
+      }
     }
 
     if (matchIdx !== -1) {
-      // Merge with existing item at matchIdx (preserve latest timestamps and photos)
+      // Merge with existing item at matchIdx (preserve latest timestamps, photos, and verification)
       const existing = result[matchIdx];
       const mergedPhotos = (item.photos && item.photos.length > 0)
         ? item.photos
         : (existing.photos || []);
       const mergedDriveUrl = item.googleDriveFolderUrl || item.backupDriveUrl || existing.googleDriveFolderUrl || existing.backupDriveUrl;
 
+      const isItemVerified = item.verificationStatus === 'Terverifikasi';
+      const isExistingVerified = existing.verificationStatus === 'Terverifikasi';
+
       const existingTime = new Date(existing.updatedAt || existing.createdAt || 0).getTime();
       const incomingTime = new Date(item.updatedAt || item.createdAt || 0).getTime();
 
-      const merged: BuildingAssessment = incomingTime >= existingTime ? {
-        ...existing,
-        ...item,
+      // Primary record priority: prefer verified, then latest timestamp
+      const keepIncomingAsBase = isItemVerified && !isExistingVerified
+        ? true
+        : !isItemVerified && isExistingVerified
+        ? false
+        : incomingTime >= existingTime;
+
+      const base = keepIncomingAsBase ? item : existing;
+      const other = keepIncomingAsBase ? existing : item;
+
+      const merged: BuildingAssessment = {
+        ...other,
+        ...base,
         photos: mergedPhotos,
         googleDriveFolderUrl: mergedDriveUrl,
-        backupDriveUrl: item.backupDriveUrl || existing.backupDriveUrl,
-        googleSheetSynced: Boolean(item.googleSheetSynced || existing.googleSheetSynced),
-      } : {
-        ...item,
-        ...existing,
-        photos: mergedPhotos,
-        googleDriveFolderUrl: mergedDriveUrl,
-        backupDriveUrl: existing.backupDriveUrl || item.backupDriveUrl,
-        googleSheetSynced: Boolean(existing.googleSheetSynced || item.googleSheetSynced),
+        backupDriveUrl: base.backupDriveUrl || other.backupDriveUrl,
+        sourceSheet: base.sourceSheet || other.sourceSheet,
+        sheetRowNumber: base.sheetRowNumber || other.sheetRowNumber,
+        targetSheetName: base.targetSheetName || other.targetSheetName,
+        targetProfileId: base.targetProfileId || other.targetProfileId,
+        targetProfileName: base.targetProfileName || other.targetProfileName,
+        verificationStatus: isExistingVerified || isItemVerified ? 'Terverifikasi' : base.verificationStatus,
+        googleSheetSynced: Boolean(base.googleSheetSynced || other.googleSheetSynced),
       };
 
       result[matchIdx] = merged;
     } else {
       const newIdx = result.length;
       result.push(item);
-      seenIdMap.set(item.id, newIdx);
+      if (item.id) seenIdMap.set(item.id, newIdx);
+      if (item.code && item.code.trim().length >= 4) {
+        seenCodeMap.set(item.code.toUpperCase().trim(), newIdx);
+      }
+      const semKey = buildSemanticKey(item);
+      if (semKey.startsWith('nik:') || (semKey.startsWith('loc:') && !semKey.includes('survei_bangunan_lapangan'))) {
+        seenSemanticMap.set(semKey, newIdx);
+      }
     }
   }
 
@@ -271,41 +342,72 @@ export function deduplicateAssessmentsList(list: BuildingAssessment[]): Building
 
 /**
  * Reconcile base assessments with incoming Google Sheet records
- * Preserves 100% of rows from the 7 kecamatan sheets and appends any local unsynced surveys
+ * Seamlessly matches existing records by ID, Registration Code, or Location Signature,
+ * preventing ghost duplicates from accumulating on every sync.
  */
 export function reconcileAndMergeAssessments(
   baseList: BuildingAssessment[],
   incomingList: BuildingAssessment[]
 ): BuildingAssessment[] {
-  // Start with clean incoming records from the 7 kecamatan sheets (100% preserved)
   const incoming = deduplicateAssessmentsList(incomingList || []);
   const seenIdMap = new Map<string, number>();
+  const seenCodeMap = new Map<string, number>();
+  const seenSemanticMap = new Map<string, number>();
 
   incoming.forEach((item, idx) => {
-    seenIdMap.set(item.id, idx);
+    if (item.id) seenIdMap.set(item.id, idx);
+    if (item.code && item.code.trim().length >= 4) {
+      seenCodeMap.set(item.code.toUpperCase().trim(), idx);
+    }
+    const semKey = buildSemanticKey(item);
+    if (semKey.startsWith('nik:') || (semKey.startsWith('loc:') && !semKey.includes('survei_bangunan_lapangan'))) {
+      seenSemanticMap.set(semKey, idx);
+    }
   });
 
   const merged = [...incoming];
 
   // Process base records
   (baseList || []).forEach((baseItem) => {
-    if (!baseItem || !baseItem.id) return;
+    if (!baseItem) return;
 
-    if (seenIdMap.has(baseItem.id)) {
+    let matchIdx = -1;
+    if (baseItem.id && seenIdMap.has(baseItem.id)) {
+      matchIdx = seenIdMap.get(baseItem.id)!;
+    } else if (baseItem.code && baseItem.code.trim().length >= 4 && seenCodeMap.has(baseItem.code.toUpperCase().trim())) {
+      matchIdx = seenCodeMap.get(baseItem.code.toUpperCase().trim())!;
+    } else {
+      const semKey = buildSemanticKey(baseItem);
+      if (semKey.startsWith('nik:') || (semKey.startsWith('loc:') && !semKey.includes('survei_bangunan_lapangan'))) {
+        if (seenSemanticMap.has(semKey)) {
+          matchIdx = seenSemanticMap.get(semKey)!;
+        }
+      }
+    }
+
+    if (matchIdx !== -1) {
       // Merge user local photos or edits into the incoming item
-      const matchIdx = seenIdMap.get(baseItem.id)!;
       const incomingItem = merged[matchIdx];
       const mergedPhotos = (baseItem.photos && baseItem.photos.length > 0)
         ? baseItem.photos
         : (incomingItem.photos || []);
+      const isBaseVerified = baseItem.verificationStatus === 'Terverifikasi';
+      const isIncomingVerified = incomingItem.verificationStatus === 'Terverifikasi';
+
       merged[matchIdx] = {
-        ...baseItem,
         ...incomingItem,
+        ...baseItem,
         photos: mergedPhotos,
         googleDriveFolderUrl: incomingItem.googleDriveFolderUrl || baseItem.googleDriveFolderUrl,
+        sourceSheet: incomingItem.sourceSheet || baseItem.sourceSheet,
+        sheetRowNumber: incomingItem.sheetRowNumber || baseItem.sheetRowNumber,
+        targetSheetName: incomingItem.targetSheetName || baseItem.targetSheetName,
+        targetProfileId: incomingItem.targetProfileId || baseItem.targetProfileId,
+        targetProfileName: incomingItem.targetProfileName || baseItem.targetProfileName,
+        verificationStatus: isBaseVerified || isIncomingVerified ? 'Terverifikasi' : (baseItem.verificationStatus || incomingItem.verificationStatus),
       };
     } else {
-      // Preserve all base records unconditionally (both local drafts and sheet items)
+      // Keep unique local records that aren't in incoming sheets
       merged.push(baseItem);
     }
   });

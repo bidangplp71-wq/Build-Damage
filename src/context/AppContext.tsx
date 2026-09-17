@@ -3768,42 +3768,8 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
       }
 
       setAssessments((prev) => {
-        // Map any local photos or drive folder links onto the incoming sheet items
-        const prevPhotosMap = new Map<string, any[]>();
-        const prevDriveMap = new Map<string, string>();
-        const prevItemsMap = new Map<string, BuildingAssessment>();
-        prev.forEach((p) => {
-          if (p.id) {
-            prevItemsMap.set(p.id, p);
-            if (p.code) prevItemsMap.set(p.code, p);
-            if (p.photos && p.photos.length > 0) prevPhotosMap.set(p.id, p.photos);
-            if (p.googleDriveFolderUrl) prevDriveMap.set(p.id, p.googleDriveFolderUrl);
-          }
-        });
-
-        // The authoritative dataset from the 7 kecamatan sheets
-        const incomingKeys = new Set<string>();
-        const mergedList = sheetItems.map((item) => {
-          if (item.id) incomingKeys.add(item.id);
-          if (item.code) incomingKeys.add(item.code);
-          const localPhotos = prevPhotosMap.get(item.id);
-          const localDrive = prevDriveMap.get(item.id);
-          return {
-            ...item,
-            photos: (item.photos && item.photos.length > 0) ? item.photos : (localPhotos || []),
-            googleDriveFolderUrl: item.googleDriveFolderUrl || localDrive,
-          };
-        });
-
-        // Fail-safe resilience: If incoming list has fewer items than existing,
-        // keep existing un-fetched records so total count never suddenly drops from 207 to 11/45
-        if (mergedList.length < prev.length) {
-          prev.forEach((p) => {
-            if (p.id && !incomingKeys.has(p.id) && (!p.code || !incomingKeys.has(p.code))) {
-              mergedList.push(p);
-            }
-          });
-        }
+        // Authoritative reconciliation that matches by ID, Reg Code, and semantic location signature
+        const mergedList = reconcileAndMergeAssessments(prev, sheetItems);
 
         try {
           localStorage.setItem(STORAGE_KEYS.ASSESSMENTS, JSON.stringify(mergedList));
@@ -3945,40 +3911,9 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
       }
     }
 
-    // Merge allFetchedItems into assessments safely without dropping existing assessments
+    // Merge allFetchedItems into assessments safely without creating duplicate items
     setAssessments((prev) => {
-      const prevMap = new Map<string, BuildingAssessment>();
-      const prevPhotosMap = new Map<string, any[]>();
-      const prevDriveMap = new Map<string, string>();
-
-      prev.forEach((p) => {
-        if (p.id) {
-          prevMap.set(p.id, p);
-          if (p.photos && p.photos.length > 0) prevPhotosMap.set(p.id, p.photos);
-          if (p.googleDriveFolderUrl) prevDriveMap.set(p.id, p.googleDriveFolderUrl);
-        }
-        if (p.code) prevMap.set(p.code, p);
-      });
-
-      const incomingKeys = new Set<string>();
-      const mergedList = allFetchedItems.map((item) => {
-        if (item.id) incomingKeys.add(item.id);
-        if (item.code) incomingKeys.add(item.code);
-        const existing = (item.id && prevMap.get(item.id)) || (item.code && prevMap.get(item.code));
-        return {
-          ...item,
-          photos: (item.photos && item.photos.length > 0) ? item.photos : (existing?.photos || prevPhotosMap.get(item.id) || []),
-          googleDriveFolderUrl: item.googleDriveFolderUrl || existing?.googleDriveFolderUrl || prevDriveMap.get(item.id),
-          verificationStatus: item.verificationStatus || existing?.verificationStatus || 'Menunggu Verifikasi',
-        };
-      });
-
-      // Keep any un-fetched existing items (such as the 207 historical records) so no data is ever lost
-      prev.forEach((p) => {
-        if (p.id && !incomingKeys.has(p.id) && (!p.code || !incomingKeys.has(p.code))) {
-          mergedList.push(p);
-        }
-      });
+      const mergedList = reconcileAndMergeAssessments(prev, allFetchedItems);
 
       try {
         localStorage.setItem(STORAGE_KEYS.ASSESSMENTS, JSON.stringify(mergedList));

@@ -2719,6 +2719,7 @@ export function parseExtractedRowsToAssessments(
       verificationNotes,
       targetSheetName: sourceSheet || `Kec. ${kecInfo.name}`,
       sourceSheet: sourceSheet,
+      sheetRowNumber: sheetRowNumber,
       backupDriveUrl,
       googleSheetSynced: true,
       googleSheetSyncedAt: new Date().toISOString(),
