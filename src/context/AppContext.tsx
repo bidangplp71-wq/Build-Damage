@@ -3766,10 +3766,16 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
         };
       });
 
-      // Keep any un-fetched existing items (such as the 207 historical records) so no data is ever lost
+      // Keep any un-fetched existing items only if they were NOT synced from Google Sheets.
+      // Ghost duplicates from excluded sheets or deleted rows are purged.
+      const ghostIdsToPurge: string[] = [];
       prev.forEach((p) => {
         if (p.id && !incomingKeys.has(p.id) && (!p.code || !incomingKeys.has(p.code))) {
-          mergedList.push(p);
+          if (!p.googleSheetSynced) {
+            mergedList.push(p);
+          } else {
+            ghostIdsToPurge.push(p.id);
+          }
         }
       });
 
@@ -3793,6 +3799,20 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({ assessments: mergedList, replace: true }),
       }).catch((err) => console.warn('Server sync-batch notice:', err));
+
+      // Sync mergedList and Purge ghost duplicates from Firestore
+      if (db && !isFirestoreQuotaExceeded && mergedList.length > 0) {
+        mergedList.forEach((item) => {
+          const clean = prepareAssessmentForFirestore(item);
+          setDoc(doc(db, 'assessments', item.id), clean, { merge: true }).catch((err) => {
+            if (isQuotaError(err)) setIsFirestoreQuotaExceeded(true);
+          });
+        });
+        
+        ghostIdsToPurge.forEach((id) => {
+          deleteDoc(doc(db, 'assessments', id)).catch(() => {});
+        });
+      }
 
       return mergedList;
     });
