@@ -1020,52 +1020,7 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
         console.warn('Firebase users fetch offline/deferred:', err?.message || err);
       }),
 
-      getDocs(collection(db, 'assessments')).then(async (snapshot) => {
-        const storedDeleted = getStoredDeletedAssessmentIds();
-        const map = new Map<string, BuildingAssessment>();
-        if (!snapshot.empty) {
-          snapshot.docs.forEach((docSnap) => {
-            const data = docSnap.data() as BuildingAssessment;
-            if (data && data.id && !storedDeleted.has(data.id) && !storedDeleted.has(docSnap.id)) {
-              const existing = map.get(data.id);
-              if (!existing || new Date(data.updatedAt || data.createdAt || 0).getTime() >= new Date(existing.updatedAt || existing.createdAt || 0).getTime()) {
-                map.set(data.id, data);
-              }
-            }
-          });
-        }
-
-        const uniqueRemote = Array.from(map.values());
-        const hydrated = await Promise.all(uniqueRemote.map(hydrateAssessmentPhotos));
-        setAssessments((prev) => {
-          const mergedMap = new Map<string, BuildingAssessment>();
-          prev.filter((p) => !storedDeleted.has(p.id)).forEach((p) => mergedMap.set(p.id, p));
-          hydrated.forEach((h) => mergedMap.set(h.id, h));
-          const mergedList = Array.from(mergedMap.values());
-
-          try {
-            localStorage.setItem(STORAGE_KEYS.ASSESSMENTS, JSON.stringify(mergedList));
-          } catch (e) {
-            try {
-              const lightweight = mergedList.map((a) => ({
-                ...a,
-                photos: a.photos?.map((p) => ({
-                  ...p,
-                  url: p.url && (p.url.startsWith('http') || p.url.startsWith('/uploads/') || (!p.url.startsWith('data:') && p.url.length <= 400)) ? p.url : '',
-                })) || [],
-              }));
-              localStorage.setItem(STORAGE_KEYS.ASSESSMENTS, JSON.stringify(lightweight));
-            } catch {}
-          }
-          return mergedList;
-        });
-      }).catch((err) => {
-        if (isQuotaError(err)) {
-          setIsFirestoreQuotaExceeded(true);
-          pauseFirestoreNetwork().catch(() => {});
-        }
-        console.warn('Firebase assessments fetch offline/deferred:', err?.message || err);
-      }),
+      
 
       getDoc(doc(db, 'system_configs', 'google_sheet')).then((snap) => {
         if (snap.exists()) {
@@ -1104,151 +1059,7 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
     });
   }, [isFirestoreQuotaExceeded]);
 
-  // Real-time listener for incoming building assessments and deletions from Firebase Firestore
-  useEffect(() => {
-    if (!db || isFirestoreQuotaExceeded) return;
-
-    const knownIds = new Set<string>();
-    assessments.forEach((a) => knownIds.add(a.id));
-    let initialSnapshotSettled = false;
-
-    const unsubscribe = onSnapshot(
-      collection(db, 'assessments'),
-      (snapshot) => {
-        const storedDeleted = getStoredDeletedAssessmentIds();
-
-        if (!initialSnapshotSettled) {
-          const currentRemoteDocs = snapshot.docs
-            .map((d) => d.data() as BuildingAssessment)
-            .filter((d) => d && d.id && !storedDeleted.has(d.id));
-          const currentRemoteIds = new Set(currentRemoteDocs.map((d) => d.id));
-          currentRemoteIds.forEach((id) => knownIds.add(id));
-          initialSnapshotSettled = true;
-
-          // If there are remote documents in Firestore, purge any local items deleted remotely
-          if (snapshot.docs.length > 0) {
-            setAssessments((prev) => {
-              const cleanPrev = prev.filter((a) => !storedDeleted.has(a.id));
-              const localMap = new Map<string, BuildingAssessment>();
-              cleanPrev.forEach((a) => localMap.set(a.id, a));
-              currentRemoteDocs.forEach((r) => {
-                const existing = localMap.get(r.id);
-                if (existing) {
-                  // Safely preserve working photo URLs
-                  const mergedPhotos = r.photos?.map((rp) => {
-                    if (rp.url && (rp.url.startsWith('http') || rp.url.startsWith('/uploads/') || rp.url.startsWith('data:'))) return rp;
-                    const existingP = existing.photos?.find((ep) => ep.id === rp.id);
-                    if (existingP?.url) return { ...rp, url: existingP.url };
-                    return rp;
-                  }) || r.photos || existing.photos;
-                  localMap.set(r.id, { ...existing, ...r, photos: mergedPhotos });
-                } else {
-                  localMap.set(r.id, r);
-                }
-              });
-              const result = Array.from(localMap.values());
-              try {
-                localStorage.setItem(STORAGE_KEYS.ASSESSMENTS, JSON.stringify(result));
-              } catch {}
-              return result;
-            });
-          }
-          return;
-        }
-
-        snapshot.docChanges().forEach((change) => {
-          const docId = change.doc.id;
-          const docData = change.doc.data() as BuildingAssessment;
-
-          if (change.type === 'removed') {
-            const removedId = docId;
-            knownIds.delete(removedId);
-            deletedAssessmentIds.current.add(removedId);
-            persistDeletedAssessmentId(removedId);
-            deletePhotosByAssessmentIdLocally(removedId);
-            setAssessments((prev) => {
-              const next = prev.filter((a) => a.id !== removedId);
-              try {
-                localStorage.setItem(STORAGE_KEYS.ASSESSMENTS, JSON.stringify(next));
-              } catch {}
-              return next;
-            });
-          } else if (change.type === 'modified') {
-            if (docData && docData.id && !storedDeleted.has(docData.id) && !storedDeleted.has(docId)) {
-              setAssessments((prev) => {
-                const next = prev.map((a) => {
-                  if (a.id !== docData.id) return a;
-                  const mergedPhotos = docData.photos?.map((dp) => {
-                    if (dp.url && (dp.url.startsWith('http') || dp.url.startsWith('/uploads/') || dp.url.startsWith('data:'))) return dp;
-                    const existingP = a.photos?.find((ep) => ep.id === dp.id);
-                    if (existingP?.url) return { ...dp, url: existingP.url };
-                    return dp;
-                  }) || docData.photos || a.photos;
-                  return { ...docData, photos: mergedPhotos };
-                });
-                try {
-                  localStorage.setItem(STORAGE_KEYS.ASSESSMENTS, JSON.stringify(next));
-                } catch {}
-                return next;
-              });
-            }
-          } else if (change.type === 'added') {
-            if (
-              docData &&
-              docData.id &&
-              !storedDeleted.has(docData.id) &&
-              !storedDeleted.has(docId) &&
-              !knownIds.has(docData.id) &&
-              !deletedAssessmentIds.current.has(docData.id)
-            ) {
-              knownIds.add(docData.id);
-
-              const newNotif: DataNotification = {
-                id: `notif_${Date.now()}_${Math.random().toString(36).substring(2, 6)}`,
-                title: 'Data Masuk: Penilaian Gedung Baru',
-                message: `Data survei "${docData.buildingName}" (${docData.kecamatanName || 'Kecamatan'}) baru saja masuk ke sistem.`,
-                buildingName: docData.buildingName,
-                kecamatan: docData.kecamatanName,
-                desa: docData.desaName,
-                damageClassification: docData.damageClassification,
-                totalDamagePercent: docData.totalDamagePercent,
-                rehabCost: docData.roundedRehabCost,
-                assessmentId: docData.id,
-                timestamp: new Date().toISOString(),
-                isRead: false,
-                surveyorName: docData.createdByName || 'Surveyor Lapangan',
-              };
-
-              setNotifications((prev) => [newNotif, ...prev]);
-              setLatestIncomingData(newNotif);
-              playNotificationChime();
-              showToast(
-                `🔔 Data Masuk: ${docData.buildingName} - ${docData.damageClassification || 'Tercatat'}`,
-                'info'
-              );
-
-              setAssessments((prev) => {
-                if (prev.some((a) => a.id === docData.id)) return prev;
-                const next = [docData, ...prev];
-                try {
-                  localStorage.setItem(STORAGE_KEYS.ASSESSMENTS, JSON.stringify(next));
-                } catch {}
-                return next;
-              });
-            }
-          }
-        });
-      },
-      (error) => {
-        if (isQuotaError(error)) {
-          setIsFirestoreQuotaExceeded(true);
-        }
-        console.warn('Firestore real-time assessment listener deferred:', error?.message || error);
-      }
-    );
-
-    return () => unsubscribe();
-  }, [db]);
+  
 
   // Real-time listener for users from Firebase Firestore
   useEffect(() => {
@@ -2602,10 +2413,7 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
     // 6. Save to Firebase Firestore if connected
     if (db) {
       const cleanA = prepareAssessmentForFirestore(assessmentToSave);
-      setDoc(doc(db, 'assessments', cleanA.id), cleanA, { merge: true }).catch((err) => {
-        if (isQuotaError(err)) setIsFirestoreQuotaExceeded(true);
-        console.warn('Firebase assessment save notice:', err?.message || err);
-      });
+      
     }
 
     // Real-time notification when new building data enters the system
@@ -2739,10 +2547,7 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
     // 6. Update on Firestore
     if (db) {
       const cleanA = prepareAssessmentForFirestore(mergedData);
-      setDoc(doc(db, 'assessments', id), cleanA, { merge: true }).catch((err) => {
-        if (isQuotaError(err)) setIsFirestoreQuotaExceeded(true);
-        console.warn('Firebase assessment update notice:', err?.message || err);
-      });
+      
     }
 
     logUserActivity(
@@ -2825,10 +2630,7 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
     }).catch(() => {});
 
     if (db && !isFirestoreQuotaExceeded) {
-      deleteDoc(doc(db, 'assessments', id)).catch((err) => {
-        if (isQuotaError(err)) setIsFirestoreQuotaExceeded(true);
-        console.warn('Firebase assessment deletion error:', err?.message || err);
-      });
+      
     }
 
     const updated = assessments.filter((a) => a.id !== id);
@@ -2905,7 +2707,7 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
       deletedAssessmentIds.current.add(id);
       deletePhotosByAssessmentIdLocally(id);
       if (db && !isFirestoreQuotaExceeded) {
-        deleteDoc(doc(db, 'assessments', id)).catch(() => {});
+        
       }
     });
 
@@ -2970,7 +2772,7 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
             const full = updatedAssessments.find((a) => a.id === item.id);
             if (full) {
               const clean = prepareAssessmentForFirestore(full);
-              setDoc(doc(db, 'assessments', clean.id), clean, { merge: true }).catch(() => {});
+              // setDoc(doc(db, 'assessments', clean.id), clean, { merge: true }).catch(() => {});
             }
           });
         }
@@ -3066,7 +2868,7 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
             const updatedAss = { ...ass, photos: updatedPhotos, updatedAt: new Date().toISOString() };
             if (db) {
               const clean = prepareAssessmentForFirestore(updatedAss);
-              setDoc(doc(db, 'assessments', clean.id), clean, { merge: true }).catch(() => {});
+              // setDoc(doc(db, 'assessments', clean.id), clean, { merge: true }).catch(() => {});
             }
             return updatedAss;
           }
@@ -3110,7 +2912,7 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
           const updated = { ...a, photos: newPhotos, updatedAt: new Date().toISOString() };
           if (db) {
             const clean = prepareAssessmentForFirestore(updated);
-            setDoc(doc(db, 'assessments', clean.id), clean, { merge: true }).catch(() => {});
+            // setDoc(doc(db, 'assessments', clean.id), clean, { merge: true }).catch(() => {});
           }
           return updated;
         });
@@ -3181,24 +2983,7 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
       ...(targetProfileId ? { targetProfileId } : {}),
     };
 
-    if (db && !isFirestoreQuotaExceeded) {
-      setDoc(
-        doc(db, 'assessments', id),
-        {
-          verificationStatus: status,
-          verificationNotes: notes,
-          verifiedBy: currentUser.name,
-          verifiedAt: now,
-          updatedAt: now,
-          ...(targetWorksheet ? { targetSheetName: targetWorksheet } : {}),
-          ...(targetProfileId ? { targetProfileId } : {}),
-        },
-        { merge: true }
-      ).catch((err) => {
-        if (isQuotaError(err)) setIsFirestoreQuotaExceeded(true);
-        console.warn('Firebase assessment verification save notice:', err?.message || err);
-      });
-    }
+    
 
     setAssessments((prev) =>
       prev.map((a) => (a.id === id ? updatedAssessment : a))
@@ -3381,6 +3166,14 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
    * Loaded only once on initial app start or on explicit 1-hour schedule / manual click to prevent crashes
    */
   const syncFromGoogleSheet = async (showToastAlert = false, forceRefresh?: boolean): Promise<{ success: boolean; message: string; count?: number }> => {
+    // Clear deleted IDs to start fresh as requested
+    deletedAssessmentIds.current.clear();
+    try { 
+      localStorage.removeItem(STORAGE_KEYS.DELETED_ASSESSMENTS); 
+      localStorage.removeItem(STORAGE_KEYS.ASSESSMENTS); 
+    } catch {}
+    setAssessments([]); // Clear React state before sync
+
     // If multiple worksheet profiles are configured, synchronize across all sheets so data from all 5 sheets is read
     if (googleSheetConfig.spreadsheetProfiles && googleSheetConfig.spreadsheetProfiles.length > 1) {
       return syncAllProfiles({ forceRefresh, showToastAlert });
@@ -3577,15 +3370,15 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
           };
         });
 
-        // Fail-safe resilience: If incoming list has fewer items than existing,
-        // keep existing un-fetched records so total count never suddenly drops from 207 to 11/45
-        if (mergedList.length < prev.length) {
-          prev.forEach((p) => {
-            if (p.id && !incomingKeys.has(p.id) && (!p.code || !incomingKeys.has(p.code))) {
+        // Keep any un-fetched existing items only if they were NOT synced from Google Sheets.
+        // Ghost duplicates from excluded sheets or deleted rows are purged.
+        prev.forEach((p) => {
+          if (p.id && !incomingKeys.has(p.id) && (!p.code || !incomingKeys.has(p.code))) {
+            if (!p.googleSheetSynced) {
               mergedList.push(p);
             }
-          });
-        }
+          }
+        });
 
         try {
           localStorage.setItem(STORAGE_KEYS.ASSESSMENTS, JSON.stringify(mergedList));
@@ -3609,15 +3402,7 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
           body: JSON.stringify({ assessments: mergedList, replace: true }),
         }).catch((err) => console.warn('Server sync-batch notice:', err));
 
-        // Persist synced items directly into Firestore database
-        if (db && !isFirestoreQuotaExceeded && mergedList.length > 0) {
-          mergedList.forEach((item) => {
-            const clean = prepareAssessmentForFirestore(item);
-            setDoc(doc(db, 'assessments', item.id), clean, { merge: true }).catch((err) => {
-              if (isQuotaError(err)) setIsFirestoreQuotaExceeded(true);
-            });
-          });
-        }
+
 
         return mergedList;
       });
@@ -3645,20 +3430,18 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
    * and merging them safely without losing any data.
    */
   const syncAllProfiles = async (options?: { forceRefresh?: boolean; showToastAlert?: boolean }): Promise<{ success: boolean; message: string; count?: number; countPerProfile?: Record<string, number> }> => {
+    // Clear deleted IDs to start fresh as requested
+    deletedAssessmentIds.current.clear();
+    try { 
+      localStorage.removeItem(STORAGE_KEYS.DELETED_ASSESSMENTS); 
+      localStorage.removeItem(STORAGE_KEYS.ASSESSMENTS); 
+    } catch {}
+    setAssessments([]); // Clear React state before sync
+
     const forceRefresh = options?.forceRefresh ?? false;
     const showToastAlert = options?.showToastAlert ?? true;
 
-    const profilesList = (googleSheetConfig.spreadsheetProfiles && googleSheetConfig.spreadsheetProfiles.length > 0)
-      ? googleSheetConfig.spreadsheetProfiles
-      : [
-          {
-            id: 'profile_primary_2026',
-            pageNumber: 1,
-            name: 'Buku 1: Spreadsheet Utama SIM-PKBG 2026 (Nagekeo)',
-            spreadsheetUrl: googleSheetConfig.spreadsheetUrl || '',
-            isDefault: true,
-          },
-        ];
+    const profilesList = googleSheetConfig.spreadsheetProfiles || [];
 
     const validProfiles = profilesList.filter((p) => p.spreadsheetUrl && isConfiguredSheetUrl(p.spreadsheetUrl));
     if (validProfiles.length === 0) {
@@ -3804,13 +3587,11 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
       if (db && !isFirestoreQuotaExceeded && mergedList.length > 0) {
         mergedList.forEach((item) => {
           const clean = prepareAssessmentForFirestore(item);
-          setDoc(doc(db, 'assessments', item.id), clean, { merge: true }).catch((err) => {
-            if (isQuotaError(err)) setIsFirestoreQuotaExceeded(true);
-          });
+          
         });
         
         ghostIdsToPurge.forEach((id) => {
-          deleteDoc(doc(db, 'assessments', id)).catch(() => {});
+          
         });
       }
 

@@ -1,0 +1,52 @@
+--- src/context/AppContext.tsx
++++ src/context/AppContext.tsx
+@@ -1022,48 +1022,6 @@
+         console.warn('Firebase users fetch offline/deferred:', err?.message || err);
+       }),
+-      getDocs(collection(db, 'assessments')).then(async (snapshot) => {
+-        const storedDeleted = getStoredDeletedAssessmentIds();
+-        const map = new Map<string, BuildingAssessment>();
+-        if (!snapshot.empty) {
+-          snapshot.docs.forEach((docSnap) => {
+-            const data = docSnap.data() as BuildingAssessment;
+-            if (data && data.id && !storedDeleted.has(data.id) && !storedDeleted.has(docSnap.id)) {
+-              const existing = map.get(data.id);
+-              if (!existing || new Date(data.updatedAt || data.createdAt || 0).getTime() >= new Date(existing.updatedAt || existing.createdAt || 0).getTime()) {
+-                map.set(data.id, data);
+-              }
+-            }
+-          });
+-        }
+-
+-        const uniqueRemote = Array.from(map.values());
+-        const hydrated = await Promise.all(uniqueRemote.map(hydrateAssessmentPhotos));
+-        setAssessments((prev) => {
+-          const mergedMap = new Map<string, BuildingAssessment>();
+-          prev.filter((p) => !storedDeleted.has(p.id)).forEach((p) => mergedMap.set(p.id, p));
+-          hydrated.forEach((h) => mergedMap.set(h.id, h));
+-          const mergedList = Array.from(mergedMap.values());
+-
+-          try {
+-            localStorage.setItem(STORAGE_KEYS.ASSESSMENTS, JSON.stringify(mergedList));
+-          } catch (e) {
+-            try {
+-              const lightweight = mergedList.map((a) => ({
+-                ...a,
+-                photos: a.photos?.map((p) => ({
+-                  ...p,
+-                  url: p.url && (p.url.startsWith('http') || p.url.startsWith('/uploads/') || (!p.url.startsWith('data:') && p.url.length <= 400)) ? p.url : '',
+-                })) || [],
+-              }));
+-              localStorage.setItem(STORAGE_KEYS.ASSESSMENTS, JSON.stringify(lightweight));
+-            } catch {}
+-          }
+-          return mergedList;
+-        });
+-      }).catch((err) => {
+-        if (isQuotaError(err)) {
+-          setIsFirestoreQuotaExceeded(true);
+-          pauseFirestoreNetwork().catch(() => {});
+-        }
+-        console.warn('Firebase assessments fetch offline/deferred:', err?.message || err);
+-      }),
+       getDoc(doc(db, 'system_configs', 'google_sheet')).then((snap) => {
