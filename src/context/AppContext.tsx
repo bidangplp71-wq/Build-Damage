@@ -3555,11 +3555,21 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
 
         // The authoritative dataset from the 7 kecamatan sheets
         const incomingKeys = new Set<string>();
-        const mergedList = sheetItems.map((item) => {
-          if (item.id) incomingKeys.add(item.id);
-          if (item.code) incomingKeys.add(item.code);
-          const localPhotos = prevPhotosMap.get(item.id);
-          const localDrive = prevDriveMap.get(item.id);
+        const deduplicatedSheetItems: BuildingAssessment[] = [];
+        
+        sheetItems.forEach((item) => {
+          if (!item.id || !item.code) return;
+          if (incomingKeys.has(item.id) || incomingKeys.has(item.code)) {
+            return;
+          }
+          incomingKeys.add(item.id);
+          incomingKeys.add(item.code);
+          deduplicatedSheetItems.push(item);
+        });
+
+        const mergedList = deduplicatedSheetItems.map((item) => {
+          const localPhotos = prevPhotosMap.get(item.id!);
+          const localDrive = prevDriveMap.get(item.id!);
           return {
             ...item,
             photos: (item.photos && item.photos.length > 0) ? item.photos : (localPhotos || []),
@@ -3733,14 +3743,25 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
       });
 
       const incomingKeys = new Set<string>();
-      const mergedList = allFetchedItems.map((item) => {
-        if (item.id) incomingKeys.add(item.id);
-        if (item.code) incomingKeys.add(item.code);
+      const deduplicatedFetchedItems: BuildingAssessment[] = [];
+      
+      // Deduplicate fetched items first (prioritize the first encountered valid item)
+      allFetchedItems.forEach((item) => {
+        if (!item.id || !item.code) return;
+        if (incomingKeys.has(item.id) || incomingKeys.has(item.code)) {
+          return; // Skip duplicates within the fetched payload
+        }
+        incomingKeys.add(item.id);
+        incomingKeys.add(item.code);
+        deduplicatedFetchedItems.push(item);
+      });
+
+      const mergedList = deduplicatedFetchedItems.map((item) => {
         const existing = (item.id && prevMap.get(item.id)) || (item.code && prevMap.get(item.code));
         return {
           ...item,
-          photos: (item.photos && item.photos.length > 0) ? item.photos : (existing?.photos || prevPhotosMap.get(item.id) || []),
-          googleDriveFolderUrl: item.googleDriveFolderUrl || existing?.googleDriveFolderUrl || prevDriveMap.get(item.id),
+          photos: (item.photos && item.photos.length > 0) ? item.photos : (existing?.photos || prevPhotosMap.get(item.id!) || []),
+          googleDriveFolderUrl: item.googleDriveFolderUrl || existing?.googleDriveFolderUrl || prevDriveMap.get(item.id!),
           verificationStatus: item.verificationStatus || existing?.verificationStatus || 'Menunggu Verifikasi',
         };
       });

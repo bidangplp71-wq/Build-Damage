@@ -2913,6 +2913,14 @@ export async function fetchAssessmentsFromGoogleSheet(
   const isExcludedRekapSheet = (name: string): boolean => {
     if (!name) return false;
     const clean = name.trim().toUpperCase().replace(/[\s_-]+/g, '_');
+    
+    // Use the defined exclusion list
+    for (const keyword of EXCLUDED_REKAP_SHEET_KEYWORDS) {
+      if (clean === keyword || clean.includes(keyword)) {
+        return true;
+      }
+    }
+    
     // Only exclude purely administrative non-assessment metadata tabs
     if (
       clean === 'PENGGUNA' ||
