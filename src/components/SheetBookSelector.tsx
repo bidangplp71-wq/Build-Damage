@@ -93,6 +93,7 @@ export const SheetBookSelector: React.FC<SheetBookSelectorProps> = ({
   const [newDriveFolder, setNewDriveFolder] = useState(googleSheetConfig.driveFolderId || '');
   const [newDesc, setNewDesc] = useState('');
   const [newMaxCapacity, setNewMaxCapacity] = useState<number>(2000);
+  const [makeActiveAsPrimary, setMakeActiveAsPrimary] = useState<boolean>(false);
 
   // Modal state for Move Data
   const [showMoveModal, setShowMoveModal] = useState(false);

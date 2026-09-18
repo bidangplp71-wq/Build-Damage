@@ -358,6 +358,7 @@ export const GoogleSheetIntegration: React.FC = () => {
   const [newProfileWebhook, setNewProfileWebhook] = useState(googleSheetConfig.webhookUrl || '');
   const [newProfileDriveFolder, setNewProfileDriveFolder] = useState(googleSheetConfig.driveFolderId || '');
   const [newProfileDesc, setNewProfileDesc] = useState('');
+  const [newProfileMakeActive, setNewProfileMakeActive] = useState(false);
 
   // Sheet optimization state
   const [isOptimizing, setIsOptimizing] = useState(false);
@@ -1384,6 +1385,25 @@ export const GoogleSheetIntegration: React.FC = () => {
                   />
                 </div>
 
+                <div className="p-3 bg-indigo-50/80 border border-indigo-200 rounded-xl text-xs text-indigo-950 space-y-1.5">
+                  <label className="flex items-start gap-2.5 cursor-pointer font-bold select-none">
+                    <input
+                      type="checkbox"
+                      checked={newProfileMakeActive}
+                      onChange={(e) => setNewProfileMakeActive(e.target.checked)}
+                      className="mt-0.5 w-4 h-4 text-indigo-600 rounded border-slate-300 focus:ring-indigo-500 cursor-pointer"
+                    />
+                    <div>
+                      <span className="text-indigo-950 font-extrabold text-xs block">
+                        Tetapkan sebagai Sheet Utama Pengiriman Data
+                      </span>
+                      <span className="block font-normal text-slate-600 text-[11px] mt-0.5 leading-snug">
+                        Default: <b>TIDAK DICENTANG</b>. Jika tidak dicentang, sheet baru ini hanya akan menjadi <b>Sheet Rekap / Baca Data</b> tanpa mengubah Sheet Utama yang sudah Anda stel sebelumnya.
+                      </span>
+                    </div>
+                  </label>
+                </div>
+
                 <div className="flex items-center justify-end gap-2 pt-2 border-t border-blue-200">
                   <button
                     type="button"
@@ -1396,7 +1416,7 @@ export const GoogleSheetIntegration: React.FC = () => {
                     type="submit"
                     className="px-4 py-2 bg-blue-600 hover:bg-blue-700 text-white rounded-xl font-bold shadow-xs cursor-pointer"
                   >
-                    Simpan & Aktifkan Spreadsheet
+                    Simpan Profile Sheet
                   </button>
                 </div>
               </form>
@@ -1426,10 +1446,14 @@ export const GoogleSheetIntegration: React.FC = () => {
                         <div>
                           <div className="flex flex-wrap items-center gap-2">
                             <h4 className="font-bold text-slate-950 text-sm">{profile.name}</h4>
-                            {isActive && (
-                              <span className="inline-flex items-center gap-1 px-2 py-0.5 rounded-full bg-emerald-100 text-emerald-800 border border-emerald-300 text-[10px] font-black uppercase tracking-wider">
-                                <CheckCircle2 className="w-3 h-3 text-emerald-600" />
-                                <span>Aktif Digunakan</span>
+                            {isActive ? (
+                              <span className="inline-flex items-center gap-1 px-2.5 py-0.5 rounded-full bg-emerald-600 text-white shadow-2xs text-[10px] font-black uppercase tracking-wider">
+                                <CheckCircle2 className="w-3 h-3 text-emerald-200" />
+                                <span>📍 Sheet Utama Pengiriman</span>
+                              </span>
+                            ) : (
+                              <span className="inline-flex items-center gap-1 px-2 py-0.5 rounded-full bg-indigo-50 text-indigo-700 border border-indigo-200 text-[10px] font-bold">
+                                📊 Sheet Rekap / Baca Data
                               </span>
                             )}
                             {profile.isDefault && (
