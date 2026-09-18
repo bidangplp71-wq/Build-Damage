@@ -394,7 +394,11 @@ async function forwardAssessmentToGoogleSheet(
     }
 
     console.info(`[Server -> GoogleSheet] Synced "${assessment.buildingName}" (action: ${action}, target: ${targetSheetName}, status: ${resp.status})`);
-    return { success: true, message: responseJson.message || 'Sinkronisasi Google Sheet berhasil' };
+    return { 
+      success: true, 
+      message: responseJson.message || 'Sinkronisasi Google Sheet berhasil',
+      registrationCode: responseJson.registrationCode || undefined 
+    };
   } catch (err: any) {
     console.warn('[Server -> GoogleSheet] Auto-sync notice:', err?.message || err);
     return { success: false, message: err?.message || 'Gagal terhubung ke Google Apps Script Webhook' };

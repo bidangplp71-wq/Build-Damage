@@ -51,7 +51,7 @@ import { PortfolioRecapModal } from './PortfolioRecapModal';
 
 export const DashboardAnalytics: React.FC = () => {
   const {
-    assessments,
+    assessments: allAssessments,
     kecamatans,
     desas,
     currentUser,
@@ -61,6 +61,13 @@ export const DashboardAnalytics: React.FC = () => {
     syncAllToSheet,
     showToast,
   } = useApp();
+
+  const [selectedProfileId, setSelectedProfileId] = useState<string>('ALL');
+
+  const assessments = useMemo(() => {
+    if (selectedProfileId === 'ALL') return allAssessments;
+    return allAssessments.filter(a => a.targetProfileId === selectedProfileId);
+  }, [allAssessments, selectedProfileId]);
 
   const totalBuildings = assessments.length;
   const totalCost = assessments.reduce((acc, curr) => acc + curr.roundedRehabCost, 0);
@@ -162,6 +169,34 @@ export const DashboardAnalytics: React.FC = () => {
 
   return (
     <div className="space-y-6">
+      {/* Worksheet Filter Control */}
+      {googleSheetConfig.spreadsheetProfiles && googleSheetConfig.spreadsheetProfiles.length > 0 && (
+        <div className="bg-white rounded-2xl p-4 sm:p-5 border border-slate-200 shadow-sm flex flex-col sm:flex-row sm:items-center justify-between gap-4">
+          <div className="flex items-start gap-3">
+            <div className="p-2 bg-amber-50 text-amber-600 rounded-lg shrink-0">
+              <FileSpreadsheet className="w-5 h-5" />
+            </div>
+            <div>
+              <h3 className="text-sm font-bold text-slate-800">Tampilan Data Berdasarkan Worksheet</h3>
+              <p className="text-[11px] text-slate-500 mt-0.5">Filter semua grafik dan statistik di bawah ini sesuai Worksheet (Kecamatan/Verifikasi) yang dipilih.</p>
+            </div>
+          </div>
+          <div className="w-full sm:w-auto shrink-0">
+            <select
+              value={selectedProfileId}
+              onChange={(e) => setSelectedProfileId(e.target.value)}
+              className="w-full sm:w-72 px-3 py-2.5 bg-slate-50 border border-slate-200 rounded-xl text-sm font-semibold text-slate-800 focus:outline-none focus:ring-2 focus:ring-amber-500 focus:border-amber-500 cursor-pointer shadow-xs"
+            >
+              <option value="ALL">Semua Worksheet (Gabungan)</option>
+              {googleSheetConfig.spreadsheetProfiles.map((p) => (
+                <option key={p.id} value={p.id}>
+                  {p.name}
+                </option>
+              ))}
+            </select>
+          </div>
+        </div>
+      )}
       {/* Top Banner & Quick Trigger */}
       <div className="bg-gradient-to-r from-slate-900 via-slate-800 to-indigo-950 rounded-2xl p-6 text-white shadow-xl border border-slate-700/60 relative overflow-hidden">
         <div className="absolute right-0 top-0 w-96 h-96 bg-amber-500/10 rounded-full blur-3xl pointer-events-none -mr-20 -mt-20"></div>

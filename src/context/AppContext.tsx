@@ -2386,15 +2386,26 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
         undefined,
         assessmentToSave.targetSheetName || assessmentToSave.sourceSheet
       )
-        .then((res) => {
+        .then((res: any) => {
           if (res.success) {
-            setAssessments((prev) =>
-              prev.map((a) =>
-                a.id === assessmentToSave.id
-                  ? { ...a, googleSheetSynced: true, googleSheetSyncedAt: new Date().toISOString() }
-                  : a
-              )
-            );
+            setAssessments((prev) => {
+              const newList = prev.map((a) => {
+                if (a.id === assessmentToSave.id) {
+                  return { 
+                    ...a, 
+                    googleSheetSynced: true, 
+                    googleSheetSyncedAt: new Date().toISOString(),
+                    // Override code/id if Apps Script returned a new one!
+                    code: res.registrationCode || a.code,
+                  };
+                }
+                return a;
+              });
+              try {
+                localStorage.setItem('sipandu_assessments', JSON.stringify(newList));
+              } catch {}
+              return newList;
+            });
           }
         })
         .catch((e) => console.error('Direct Google Sheet save error:', e));
@@ -2491,7 +2502,22 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
     );
 
     if (hasGSheet) {
-      directSaveToGoogleSheet(mergedData, effectiveSheetConfig, 'update', target?.code || target?.id).catch((e) =>
+      directSaveToGoogleSheet(mergedData, effectiveSheetConfig, 'update', target?.code || target?.id).then((res: any) => {
+        if (res.success && res.registrationCode) {
+          setAssessments((prev) => {
+            const newList = prev.map((a) => {
+              if (a.id === id) {
+                return { ...a, code: res.registrationCode };
+              }
+              return a;
+            });
+            try {
+              localStorage.setItem('sipandu_assessments', JSON.stringify(newList));
+            } catch {}
+            return newList;
+          });
+        }
+      }).catch((e) =>
         console.error('Direct Google Sheet update error:', e)
       );
     }

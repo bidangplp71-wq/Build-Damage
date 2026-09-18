@@ -406,6 +406,15 @@ export async function directSaveToGoogleSheet(
             message: `Peringatan Google Sheet: ${errMsg}`,
           };
         }
+        
+        // If it succeeded, we return immediately.
+        // Also extract registrationCode if returned by the Apps Script
+        return {
+          success: true,
+          message: proxyData.message || `Data gedung "${assessment.buildingName}" berhasil disinkronkan ke Google Sheet!`,
+          registrationCode: proxyData.registrationCode,
+          folderUrl: cleanFolderId ? `https://drive.google.com/drive/folders/${cleanFolderId}` : undefined,
+        };
       }
     } catch {
       // If server proxy is unavailable (e.g. static Cloudflare hosting), proceed to direct fetch below
