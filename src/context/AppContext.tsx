@@ -398,6 +398,13 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
   // Initialize assessments with persistent deleted IDs filtered out and deduplicated
   const [assessments, setAssessments] = useState<BuildingAssessment[]>(() => {
     try {
+      if (!localStorage.getItem('hard_reset_v2')) {
+        localStorage.removeItem('sipandu_assessments');
+        localStorage.removeItem('sipandu_deleted_assessment_ids');
+        localStorage.setItem('hard_reset_v2', 'true');
+        return [];
+      }
+
       const deletedIds = getStoredDeletedAssessmentIds();
       const saved = localStorage.getItem(STORAGE_KEYS.ASSESSMENTS);
       if (!saved) return INITIAL_ASSESSMENTS.filter((a) => !deletedIds.has(a.id));
@@ -446,9 +453,18 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
   const [googleSheetConfig, setGoogleSheetConfig] = useState<GoogleSheetConfig>(() => {
     let initial = DEFAULT_GOOGLE_SHEET_CONFIG;
     try {
+      if (!localStorage.getItem('hard_reset_config_v2')) {
+        localStorage.removeItem(STORAGE_KEYS.GOOGLE_SHEET);
+        localStorage.setItem('hard_reset_config_v2', 'true');
+        return initial;
+      }
       const saved = localStorage.getItem(STORAGE_KEYS.GOOGLE_SHEET);
       if (saved) {
-        initial = { ...initial, ...JSON.parse(saved) };
+        const parsed = JSON.parse(saved);
+        if (parsed.spreadsheetProfiles) {
+          parsed.spreadsheetProfiles = parsed.spreadsheetProfiles.filter((p) => p.id !== 'profile_primary_2026');
+        }
+        initial = { ...initial, ...parsed };
       }
     } catch {}
 
@@ -750,30 +766,7 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
   useEffect(() => {
     // Load Google Sheet Config dynamically from Firestore (Primary) & Express server (Fallback)
     if (db && !isFirestoreQuotaExceeded) {
-      const unsubConfig = onSnapshot(doc(db, 'system_configs', 'google_sheet'), (snapshot) => {
-        if (snapshot.exists()) {
-          const data = snapshot.data();
-          if (data && (data.spreadsheetUrl || data.webhookUrl || data.driveFolderId || data.spreadsheetProfiles)) {
-            setGoogleSheetConfig((prev) => {
-              const updated = {
-                ...prev,
-                spreadsheetUrl: data.spreadsheetUrl || prev.spreadsheetUrl,
-                webhookUrl: data.webhookUrl || prev.webhookUrl,
-                driveFolderId: data.driveFolderId || prev.driveFolderId,
-                spreadsheetProfiles: data.spreadsheetProfiles || prev.spreadsheetProfiles,
-                activeProfileId: data.activeProfileId || prev.activeProfileId,
-              };
-              try {
-                localStorage.setItem(STORAGE_KEYS.GOOGLE_SHEET, JSON.stringify(updated));
-              } catch {}
-              return updated;
-            });
-          }
-        }
-      }, (err) => {
-        console.warn('Firebase config sync failed, using fallback:', err);
-      });
-      return () => unsubConfig();
+      
     } else {
       // Fallback 1. Load server configuration
       fetch('/api/config')
@@ -917,31 +910,7 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
     let unsubscribeFirestore: (() => void) | undefined;
     if (db && !isFirestoreQuotaExceeded) {
       try {
-        unsubscribeFirestore = onSnapshot(
-          doc(db, 'system_configs', 'google_sheet'),
-          (docSnap) => {
-            if (docSnap.exists()) {
-              const remoteData = docSnap.data() as GoogleSheetConfig;
-              if (remoteData && remoteData.spreadsheetUrl) {
-                setGoogleSheetConfig((prev) => {
-                  if (prev.spreadsheetUrl !== remoteData.spreadsheetUrl || prev.activeProfileId !== remoteData.activeProfileId) {
-                    const updated = { ...prev, ...remoteData };
-                    try {
-                      localStorage.setItem(STORAGE_KEYS.GOOGLE_SHEET, JSON.stringify(updated));
-                    } catch {}
-                    return updated;
-                  }
-                  return prev;
-                });
-              }
-            }
-          },
-          (err) => {
-            if (isQuotaError(err)) {
-              setIsFirestoreQuotaExceeded(true);
-            }
-          }
-        );
+        /* removed google sheet onSnapshot */
       } catch {}
     }
 
@@ -1022,21 +991,7 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
 
       
 
-      getDoc(doc(db, 'system_configs', 'google_sheet')).then((snap) => {
-        if (snap.exists()) {
-          const remoteConfig = snap.data() as GoogleSheetConfig;
-          setGoogleSheetConfig(remoteConfig);
-          try {
-            localStorage.setItem(STORAGE_KEYS.GOOGLE_SHEET, JSON.stringify(remoteConfig));
-          } catch {}
-        }
-      }).catch((err) => {
-        if (isQuotaError(err)) {
-          setIsFirestoreQuotaExceeded(true);
-          pauseFirestoreNetwork().catch(() => {});
-        }
-        console.warn('Firebase google sheet config fetch deferred:', err?.message || err);
-      }),
+      
 
       getDocs(collection(db, 'activity_logs')).then((snapshot) => {
         if (!snapshot.empty) {
@@ -1110,30 +1065,7 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
     return () => unsubscribe();
   }, [db]);
 
-  // Real-time listener for shared Google Sheet configuration across all roles & devices
-  useEffect(() => {
-    if (!db || isFirestoreQuotaExceeded) return;
-    const unsubscribe = onSnapshot(
-      doc(db, 'system_configs', 'google_sheet'),
-      (snap) => {
-        if (snap.exists()) {
-          const remoteConfig = snap.data() as GoogleSheetConfig;
-          setGoogleSheetConfig(remoteConfig);
-          try {
-            localStorage.setItem(STORAGE_KEYS.GOOGLE_SHEET, JSON.stringify(remoteConfig));
-          } catch {}
-        }
-      },
-      (error) => {
-        if (isQuotaError(error)) {
-          setIsFirestoreQuotaExceeded(true);
-          pauseFirestoreNetwork().catch(() => {});
-        }
-        console.warn('Firestore google_sheet real-time listener deferred:', error?.message || error);
-      }
-    );
-    return () => unsubscribe();
-  }, [db, isFirestoreQuotaExceeded]);
+
 
   // Instant Cross-Tab Synchronization (same browser across tabs and role switches)
   useEffect(() => {
@@ -3346,17 +3278,33 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
           }
         });
 
-        // The authoritative dataset from the 7 kecamatan sheets
+        // The authoritative dataset from the configured sheets
         const incomingKeys = new Set<string>();
         const deduplicatedSheetItems: BuildingAssessment[] = [];
+        const itemMap = new Map<string, BuildingAssessment>();
         
         sheetItems.forEach((item) => {
           if (!item.id || !item.code) return;
-          if (incomingKeys.has(item.id) || incomingKeys.has(item.code)) {
-            return;
+          const key = item.id;
+          const existing = itemMap.get(key);
+          if (!existing) {
+            itemMap.set(key, item);
+          } else {
+            if (item.verificationStatus === 'Terverifikasi' && existing.verificationStatus !== 'Terverifikasi') {
+              itemMap.set(key, item);
+            } else if (item.verificationStatus === existing.verificationStatus) {
+              const itemTime = new Date(item.updatedAt || item.createdAt || 0).getTime();
+              const existTime = new Date(existing.updatedAt || existing.createdAt || 0).getTime();
+              if (itemTime > existTime) {
+                itemMap.set(key, item);
+              }
+            }
           }
-          incomingKeys.add(item.id);
-          incomingKeys.add(item.code);
+        });
+        
+        itemMap.forEach((item) => {
+          incomingKeys.add(item.id!);
+          if (item.code) incomingKeys.add(item.code);
           deduplicatedSheetItems.push(item);
         });
 
@@ -3528,14 +3476,32 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
       const incomingKeys = new Set<string>();
       const deduplicatedFetchedItems: BuildingAssessment[] = [];
       
-      // Deduplicate fetched items first (prioritize the first encountered valid item)
+      // Deduplicate fetched items (prioritize the one that is 'Terverifikasi' or most recently updated)
+      const itemMap = new Map<string, BuildingAssessment>();
       allFetchedItems.forEach((item) => {
         if (!item.id || !item.code) return;
-        if (incomingKeys.has(item.id) || incomingKeys.has(item.code)) {
-          return; // Skip duplicates within the fetched payload
+        const key = item.id;
+        const existing = itemMap.get(key);
+        if (!existing) {
+          itemMap.set(key, item);
+        } else {
+          // If the new one is 'Terverifikasi' and existing is not, prefer the new one
+          if (item.verificationStatus === 'Terverifikasi' && existing.verificationStatus !== 'Terverifikasi') {
+            itemMap.set(key, item);
+          } else if (item.verificationStatus === existing.verificationStatus) {
+            // Or if it was updated more recently
+            const itemTime = new Date(item.updatedAt || item.createdAt || 0).getTime();
+            const existTime = new Date(existing.updatedAt || existing.createdAt || 0).getTime();
+            if (itemTime > existTime) {
+              itemMap.set(key, item);
+            }
+          }
         }
-        incomingKeys.add(item.id);
-        incomingKeys.add(item.code);
+      });
+      
+      itemMap.forEach((item) => {
+        incomingKeys.add(item.id!);
+        if (item.code) incomingKeys.add(item.code);
         deduplicatedFetchedItems.push(item);
       });
 
@@ -3941,15 +3907,7 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
       }
 
       if (db && !isFirestoreQuotaExceeded) {
-        setDoc(doc(db, 'system_configs', 'google_sheet'), JSON.parse(JSON.stringify(updated)), { merge: true }).catch(
-          (err) => {
-            if (isQuotaError(err)) {
-              setIsFirestoreQuotaExceeded(true);
-              pauseFirestoreNetwork().catch(() => {});
-            }
-            console.warn('Firebase google_sheet config save deferred:', err);
-          }
-        );
+        /* removed google sheet setDoc */
       }
 
       // Also propagate new spreadsheetUrl to all users so that every user record explicitly carries the active link!

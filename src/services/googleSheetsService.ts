@@ -385,7 +385,7 @@ export async function directSaveToGoogleSheet(
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({
-          assessment: hydratedAssessment,
+          assessment: { ...hydratedAssessment, photos: preparedPhotos },
           action,
           targetSheetName: kecSheetName,
           config,

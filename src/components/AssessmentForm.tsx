@@ -3016,7 +3016,7 @@ export const AssessmentForm: React.FC = () => {
                 </span>
               </h3>
               <p className="text-[11px] text-slate-500">
-                Maksimal {MAX_BUILDING_PHOTOS} foto visual per satu bangunan gedung/rumah. Foto disimpan aman di Firebase Cloud Storage & Firestore. Wajib menentukan bagian kerusakan agar verifikator teknis mengetahui detail lokasi foto.
+                Maksimal {MAX_BUILDING_PHOTOS} foto visual per satu bangunan gedung/rumah. Foto diupload langsung ke Google Drive. Wajib menentukan bagian kerusakan agar verifikator teknis mengetahui detail lokasi foto.
               </p>
               {photos.length > 0 && (
                 <div className="flex flex-wrap items-center gap-2 mt-2 pt-1.5 border-t border-slate-100 text-[11px]">

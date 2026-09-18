@@ -118,7 +118,7 @@ export const GoogleSheetIntegration: React.FC = () => {
     ? googleSheetConfig.spreadsheetProfiles
     : [
         {
-          id: 'profile_primary_2026',
+          id: 'default_placeholder',
           name: 'Spreadsheet Utama SIM-PKBG 2026 (Nagekeo)',
           spreadsheetUrl: googleSheetConfig.spreadsheetUrl || '',
           webhookUrl: googleSheetConfig.webhookUrl || 'https://script.google.com/macros/s/AKfycbyAbubspPnACJi6KTODHJbVeAIppC6e72c8nAo__g8uc67GmY-wc1lOZWZkbLtieds/exec',

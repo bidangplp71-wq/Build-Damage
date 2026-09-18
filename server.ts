@@ -366,9 +366,11 @@ async function forwardAssessmentToGoogleSheet(
         id: p.id || `photo_${idx}`,
         caption: p.caption || '',
         damageLocation: p.damageLocation || `Foto ${idx + 1}`,
-        url: p.url && (p.url.startsWith('http') || p.url.startsWith('/uploads/')) ? p.url : '',
+        url: p.url || '',
+        dataBase64: p.dataBase64 || undefined,
       })) : [],
-      savePhotosToDrive: false,
+      savePhotosToDrive: action !== 'delete' && config.savePhotosToDrive !== false,
+      driveFolderId: config.driveFolderId || undefined,
       timestamp: new Date().toISOString(),
     };
 

@@ -67,9 +67,9 @@ export const SheetBookSelector: React.FC<SheetBookSelectorProps> = ({
     ? googleSheetConfig.spreadsheetProfiles
     : [
         {
-          id: 'profile_primary_2026',
+          id: 'default_placeholder',
           pageNumber: 1,
-          name: 'Buku 1: Spreadsheet Utama SIM-PKBG 2026 (Nagekeo)',
+          name: 'Spreadsheet Kosong (Belum Diatur)',
           spreadsheetUrl: googleSheetConfig.spreadsheetUrl || '',
           webhookUrl: googleSheetConfig.webhookUrl,
           driveFolderId: googleSheetConfig.driveFolderId,
@@ -109,7 +109,7 @@ export const SheetBookSelector: React.FC<SheetBookSelectorProps> = ({
       counts[p.id] = 0;
     });
     // Default profile gets unassigned assessments
-    const defaultId = profiles[0]?.id || 'profile_primary_2026';
+    const defaultId = profiles[0]?.id || '';
     assessments.forEach((a) => {
       const pid = a.targetProfileId || defaultId;
       counts[pid] = (counts[pid] || 0) + 1;

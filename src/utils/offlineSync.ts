@@ -89,30 +89,7 @@ export async function flushOfflineSyncQueue(
   for (const item of queue) {
     let synced = false;
 
-    // 1. Sync to Cloud Firestore directly (for Cloudflare Pages / Static Hosting)
-    if (db) {
-      try {
-        const clean: any = JSON.parse(JSON.stringify(item.assessment));
-        if (Array.isArray(clean.photos)) {
-          clean.photos = clean.photos.map((p: any) => ({
-            id: p.id || '',
-            caption: p.caption || '',
-            damageLocation: p.damageLocation || '',
-            url: p.url && (p.url.startsWith('http://') || p.url.startsWith('https://') || p.url.startsWith('/uploads/')) ? p.url : '',
-            timestamp: p.timestamp || '',
-          }));
-        }
-        await setDoc(doc(db, 'assessments', clean.id), clean, { merge: true });
-        synced = true;
-      } catch (err) {
-        if (isQuotaError(err)) {
-          pauseFirestoreNetwork().catch(() => {});
-        }
-        console.warn('Firestore outbox sync notice:', err);
-      }
-    }
-
-    // 2. Also sync to Express backend if fullstack
+    // 1. Sync to Express backend if fullstack
     try {
       const response = await fetch('/api/assessments', {
         method: 'POST',

@@ -183,36 +183,8 @@ export const DEFAULT_GOOGLE_SHEET_CONFIG: GoogleSheetConfig = {
   lastTestedAt: undefined,
   lastTestStatus: 'idle',
   lastTestMessage: 'Tautan Google Sheet dapat diatur oleh administrator dan otomatis tersinkron ke semua peran pengguna.',
-  activeProfileId: 'profile_primary_2026',
-  spreadsheetProfiles: [
-    {
-      id: 'profile_primary_2026',
-      pageNumber: 1,
-      name: 'Buku 1: Spreadsheet Utama SIM-PKBG 2026 (Nagekeo)',
-      spreadsheetUrl: '',
-      webhookUrl: 'https://script.google.com/macros/s/AKfycbyAbubspPnACJi6KTODHJbVeAIppC6e72c8nAo__g8uc67GmY-wc1lOZWZkbLtieds/exec',
-      driveFolderId: 'https://drive.google.com/drive/folders/1xKF8SYvNY97A9-ga0B42z3jQTbcC_Tk5?usp=sharing',
-      description: 'Spreadsheet dinas utama berisi 7 tab kecamatan dan log pengguna',
-      capacityStatus: 'normal',
-      estimatedRowCount: 0,
-      maxCapacityRows: 200,
-      createdAt: '2026-01-01T00:00:00Z',
-      isDefault: true,
-    },
-    {
-      id: 'profile_backup_new',
-      pageNumber: 2,
-      name: 'Buku 2: Spreadsheet Tahap Lanjutan / Pascabencana',
-      spreadsheetUrl: '',
-      webhookUrl: 'https://script.google.com/macros/s/AKfycbyAbubspPnACJi6KTODHJbVeAIppC6e72c8nAo__g8uc67GmY-wc1lOZWZkbLtieds/exec',
-      description: 'Slot spreadsheet baru untuk arsip periode berikutnya tanpa harus menghapus spreadsheet lama',
-      capacityStatus: 'normal',
-      estimatedRowCount: 0,
-      maxCapacityRows: 200,
-      createdAt: '2026-09-14T00:00:00Z',
-      isDefault: false,
-    }
-  ],
+  activeProfileId: undefined,
+  spreadsheetProfiles: [],
 };
 
 // Seluruh data dummy kependudukan (Dukcapil) dikosongkan (Dimulai dari kondisi bersih)

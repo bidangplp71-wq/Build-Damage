@@ -98,9 +98,9 @@ export const AssessmentTable: React.FC = () => {
     ? googleSheetConfig.spreadsheetProfiles
     : [
         {
-          id: 'profile_primary_2026',
+          id: 'default_placeholder',
           pageNumber: 1,
-          name: 'Buku 1: Spreadsheet Utama SIM-PKBG 2026',
+          name: 'Spreadsheet Kosong (Belum Diatur)',
           spreadsheetUrl: googleSheetConfig.spreadsheetUrl || '',
           webhookUrl: googleSheetConfig.webhookUrl,
           driveFolderId: googleSheetConfig.driveFolderId,
@@ -162,7 +162,7 @@ export const AssessmentTable: React.FC = () => {
   const [verifyNotesInput, setVerifyNotesInput] = useState('');
   const [targetWorksheetInput, setTargetWorksheetInput] = useState<string>('Data_Terverifikasi');
   const [enableSheetSync, setEnableSheetSync] = useState<boolean>(true);
-  const [selectedTargetProfileId, setSelectedTargetProfileId] = useState<string>('profile_primary_2026');
+  const [selectedTargetProfileId, setSelectedTargetProfileId] = useState<string>('');
   const [useCustomSheetUrl, setUseCustomSheetUrl] = useState<boolean>(false);
   const [customSpreadsheetUrl, setCustomSpreadsheetUrl] = useState<string>('');
   const [customWebhookUrl, setCustomWebhookUrl] = useState<string>('');
@@ -173,7 +173,7 @@ export const AssessmentTable: React.FC = () => {
   const [batchVerifyStatus, setBatchVerifyStatus] = useState<VerificationStatus>('Terverifikasi');
   const [batchVerifyNotes, setBatchVerifyNotes] = useState<string>('');
   const [batchTargetWorksheet, setBatchTargetWorksheet] = useState<string>('Data_Terverifikasi');
-  const [batchTargetProfileId, setBatchTargetProfileId] = useState<string>('profile_primary_2026');
+  const [batchTargetProfileId, setBatchTargetProfileId] = useState<string>('');
   const [batchEnableSheetSync, setBatchEnableSheetSync] = useState<boolean>(true);
   const [batchUseCustomSheetUrl, setBatchUseCustomSheetUrl] = useState<boolean>(false);
   const [batchCustomSpreadsheetUrl, setBatchCustomSpreadsheetUrl] = useState<string>('');
@@ -326,7 +326,7 @@ export const AssessmentTable: React.FC = () => {
 
         // Spreadsheet Profile Filter (Daftar Halaman Buku)
         if (selectedProfileFilter && selectedProfileFilter !== 'ALL') {
-          const itemProfileId = item.targetProfileId || (googleSheetConfig.spreadsheetProfiles?.[0]?.id || 'profile_primary_2026');
+          const itemProfileId = item.targetProfileId || (googleSheetConfig.spreadsheetProfiles?.[0]?.id || '');
           if (itemProfileId !== selectedProfileFilter) {
             return false;
           }
@@ -1177,7 +1177,7 @@ export const AssessmentTable: React.FC = () => {
                 onClick={() => {
                   setBatchVerifyStatus('Terverifikasi');
                   setBatchTargetWorksheet(googleSheetConfig.verifiedWorksheetName || 'Data_Terverifikasi');
-                  setBatchTargetProfileId(googleSheetConfig.verifiedSpreadsheetProfileId || googleSheetConfig.activeProfileId || 'profile_primary_2026');
+                  setBatchTargetProfileId(googleSheetConfig.verifiedSpreadsheetProfileId || googleSheetConfig.activeProfileId || '');
                   setBatchEnableSheetSync(true);
                   setBatchUseCustomSheetUrl(false);
                   setShowBatchVerifyModal(true);
@@ -1620,7 +1620,7 @@ export const AssessmentTable: React.FC = () => {
                               setSelectedTargetProfileId(
                                 googleSheetConfig.verifiedSpreadsheetProfileId ||
                                 googleSheetConfig.activeProfileId ||
-                                'profile_primary_2026'
+                                ''
                               );
                               setEnableSheetSync(true);
                               setUseCustomSheetUrl(false);
