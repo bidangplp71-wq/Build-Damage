@@ -488,6 +488,7 @@ export interface SpreadsheetProfile {
   createdAt: string;
   lastUsedAt?: string;
   isDefault?: boolean;
+  isSyncEnabled?: boolean; // Fitur Pelepasan Sync: True = Dimuat saat sync; False = Dilepaskan untuk menghemat beban memori
 }
 
 export interface GoogleSheetConfig {

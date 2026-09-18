@@ -3417,7 +3417,18 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
 
     const profilesList = googleSheetConfig.spreadsheetProfiles || [];
 
-    const validProfiles = profilesList.filter((p) => p.spreadsheetUrl && isConfiguredSheetUrl(p.spreadsheetUrl));
+    // Filter profiles to sync: Sheet Tujuan (activeProfileId) SELALU DIMUAT.
+    // Sheet Arsip/Read-Only hanya dimuat jika isSyncEnabled !== false (tidak dilepaskan)
+    const validProfiles = profilesList.filter(
+      (p) =>
+        p.spreadsheetUrl &&
+        isConfiguredSheetUrl(p.spreadsheetUrl) &&
+        (p.id === googleSheetConfig.activeProfileId || p.isSyncEnabled !== false)
+    );
+    const skippedCount = profilesList.filter(
+      (p) => p.spreadsheetUrl && isConfiguredSheetUrl(p.spreadsheetUrl) && p.id !== googleSheetConfig.activeProfileId && p.isSyncEnabled === false
+    ).length;
+
     if (validProfiles.length === 0) {
       if (googleSheetConfig.spreadsheetUrl && isConfiguredSheetUrl(googleSheetConfig.spreadsheetUrl)) {
         return syncFromGoogleSheet(showToastAlert, forceRefresh);
@@ -3428,7 +3439,8 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
     }
 
     if (showToastAlert) {
-      showToast(`Memulai sinkronisasi data dari seluruh ${validProfiles.length} worksheet/buku...`, 'info');
+      const skippedNote = skippedCount > 0 ? ` (${skippedCount} worksheet dilepaskan hemat beban)` : '';
+      showToast(`Memulai sinkronisasi data dari ${validProfiles.length} worksheet/buku aktif${skippedNote}...`, 'info');
     }
 
     setSheetSyncProgress({
