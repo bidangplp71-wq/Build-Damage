@@ -1,112 +1,35 @@
 const fs = require('fs');
-let code = fs.readFileSync('src/components/GlobalSheetRecapModal.tsx', 'utf8');
 
-const target1 = `  // Calculate matrix data
-  const matrixData = useMemo(() => {
-    return profiles.map(profile => {
-      const profileAssessments = assessments.filter(a => a.targetProfileId === profile.id || (!a.targetProfileId && profile.isDefault));
-      
-      let menunggu = 0;`;
+let code = fs.readFileSync('src/components/AssessmentTable.tsx', 'utf-8');
 
-const replacement1 = `  // Calculate matrix data
-  const matrixData = useMemo(() => {
-    const mappedIds = new Set<string>();
-    const defaultProfile = profiles.find(p => p.isDefault) || profiles[0];
+if (!code.includes('showLiveSheetModal')) {
+  // 1. Add extractSpreadsheetId import
+  code = code.replace(
+    `import { exportAssessmentsToCSV, exportAssessmentsToExcelMultiSheet } from '../services/googleSheetsService';`,
+    `import { exportAssessmentsToCSV, exportAssessmentsToExcelMultiSheet, extractSpreadsheetId } from '../services/googleSheetsService';`
+  );
 
-    const results = profiles.map(profile => {
-      const profileAssessments = assessments.filter(a => {
-        if (a.targetProfileId === profile.id || (!a.targetProfileId && defaultProfile && profile.id === defaultProfile.id)) {
-          if (a.id) mappedIds.add(a.id);
-          return true;
-        }
-        return false;
-      });
-      
-      let menunggu = 0;`;
+  // 2. Add showLiveSheetModal state
+  code = code.replace(
+    `const [showPortfolioModal, setShowPortfolioModal] = useState(false);`,
+    `const [showPortfolioModal, setShowPortfolioModal] = useState(false);\n  const [showLiveSheetModal, setShowLiveSheetModal] = useState(false);`
+  );
 
-let code1 = code.replace(target1, replacement1);
+  // 3. Add Pratinjau Live Sheet button in header button bar
+  const targetButtons = `<a\n                href={googleSheetConfig.spreadsheetUrl}\n                target="_blank"\n                rel="noopener noreferrer"\n                title="Buka dokumen Google Spreadsheet langsung di tab baru"\n                className="flex items-center gap-1.5 px-3 py-2 text-xs font-semibold text-emerald-900 bg-emerald-100/70 hover:bg-emerald-200/80 rounded-xl border border-emerald-300 transition-colors"\n              >\n                <FileSpreadsheet className="w-3.5 h-3.5 text-emerald-700" />\n                <span>Buka Google Sheet</span>\n                <ExternalLink className="w-3 h-3 text-emerald-700" />\n              </a>`;
 
-const target2 = `      return {
-        profile,
-        total: profileAssessments.length,
-        menunggu,
-        terverifikasi,
-        rb,
-        rs,
-        rr,
-        tr,
-        totalAnggaran,
-        buildingDetails
-      };
-    });
-  }, [profiles, assessments]);`;
+  const replaceButtons = `<button\n                type="button"\n                onClick={() => setShowLiveSheetModal(true)}\n                title="Pratinjau langsung isi Google Sheet di dalam web tanpa buka tab baru"\n                className="flex items-center gap-1.5 px-3 py-2 text-xs font-bold text-emerald-950 bg-emerald-400 hover:bg-emerald-300 rounded-xl border border-emerald-500 transition-colors cursor-pointer shadow-2xs"\n              >\n                <Eye className="w-3.5 h-3.5 text-emerald-950" />\n                <span>Pratinjau Live Sheet</span>\n              </button>\n              <a\n                href={googleSheetConfig.spreadsheetUrl}\n                target="_blank"\n                rel="noopener noreferrer"\n                title="Buka dokumen Google Spreadsheet langsung di tab baru"\n                className="flex items-center gap-1.5 px-3 py-2 text-xs font-semibold text-emerald-900 bg-emerald-100/70 hover:bg-emerald-200/80 rounded-xl border border-emerald-300 transition-colors"\n              >\n                <FileSpreadsheet className="w-3.5 h-3.5 text-emerald-700" />\n                <span>Buka di Tab Baru</span>\n                <ExternalLink className="w-3 h-3 text-emerald-700" />\n              </a>`;
 
-const replacement2 = `      return {
-        profile,
-        total: profileAssessments.length,
-        menunggu,
-        terverifikasi,
-        rb,
-        rs,
-        rr,
-        tr,
-        totalAnggaran,
-        buildingDetails
-      };
-    });
+  code = code.replace(targetButtons, replaceButtons);
 
-    // Handle Unmapped Data
-    const unmappedAssessments = assessments.filter(a => a.id && !mappedIds.has(a.id));
-    if (unmappedAssessments.length > 0) {
-      let menunggu = 0, terverifikasi = 0, rb = 0, rs = 0, rr = 0, tr = 0, totalAnggaran = 0;
-      const buildingDetails = unmappedAssessments.map(a => {
-        const costPerM2 = (a.treatmentCostPerM2 || 0) + (a.demolitionCostPerM2 || 0);
-        const totalCost = costPerM2 * (a.totalFloorAreaM2 || 0);
-        totalAnggaran += totalCost;
-        return { ...a, calculatedTotalCost: totalCost };
-      });
-      
-      buildingDetails.sort((a, b) => {
-        if (a.verificationStatus !== b.verificationStatus) return a.verificationStatus === 'Terverifikasi' ? -1 : 1;
-        return (b.totalDamagePercent || 0) - (a.totalDamagePercent || 0);
-      });
+  // 4. Modal append
+  const targetEndModal = `      {/* MODAL CETAK BUKU PORTOFOLIO REKAPITULASI RESMI A4 */}\n      {showPortfolioModal && (\n        <PortfolioRecapModal\n          isOpen={showPortfolioModal}\n          onClose={() => setShowPortfolioModal(false)}\n          assessments={assessments}\n          kecamatans={kecamatans}\n          desas={desas}\n        />\n      )}`;
 
-      unmappedAssessments.forEach(a => {
-        if (a.verificationStatus === 'Terverifikasi') terverifikasi++;
-        else menunggu++;
-        switch (a.damageClassification) {
-          case 'Rusak Berat': rb++; break;
-          case 'Rusak Sedang': rs++; break;
-          case 'Rusak Ringan': rr++; break;
-          case 'Tidak Rusak': tr++; break;
-        }
-      });
+  const modalHtml = `      {/* MODAL CETAK BUKU PORTOFOLIO REKAPITULASI RESMI A4 */}\n      {showPortfolioModal && (\n        <PortfolioRecapModal\n          isOpen={showPortfolioModal}\n          onClose={() => setShowPortfolioModal(false)}\n          assessments={assessments}\n          kecamatans={kecamatans}\n          desas={desas}\n        />\n      )}\n\n      {/* MODAL PRATINJAU LANGSUNG GOOGLE SPREADSHEET (LIVE IN-APP VIEWER) */}\n      {showLiveSheetModal && googleSheetConfig.spreadsheetUrl && (\n        <div className="fixed inset-0 z-50 flex items-center justify-center p-2 sm:p-4 bg-slate-900/70 backdrop-blur-xs animate-in fade-in duration-200">\n          <div className="bg-white rounded-2xl max-w-6xl w-full h-[90vh] flex flex-col shadow-2xl border border-slate-200 overflow-hidden">\n            <div className="p-3.5 sm:p-4 bg-slate-900 text-white flex items-center justify-between gap-3 shrink-0">\n              <div className="flex items-center gap-3">\n                <div className="w-9 h-9 rounded-xl bg-emerald-500 text-slate-950 flex items-center justify-center font-bold">\n                  <FileSpreadsheet className="w-5 h-5" />\n                </div>\n                <div>\n                  <h3 className="font-bold text-sm sm:text-base text-white flex items-center gap-2">\n                    <span>Pratinjau Langsung Google Spreadsheet</span>\n                    <span className="px-2 py-0.5 rounded-full bg-emerald-500/20 text-emerald-300 text-[10px] font-bold border border-emerald-500/30">\n                      Live Web Preview\n                    </span>\n                  </h3>\n                  <p className="text-xs text-slate-400">\n                    Periksa data baris, tab kecamatan, dan rekapitulasi secara instan di dalam web tanpa perlu bolak-balik tab browser.\n                  </p>\n                </div>\n              </div>\n              <div className="flex items-center gap-2">\n                <a\n                  href={googleSheetConfig.spreadsheetUrl}\n                  target="_blank"\n                  rel="noopener noreferrer"\n                  className="hidden sm:inline-flex items-center gap-1.5 px-3 py-1.5 text-xs font-bold bg-emerald-600 hover:bg-emerald-500 text-white rounded-xl transition-colors"\n                >\n                  <span>Buka Tab Baru</span>\n                  <ExternalLink className="w-3.5 h-3.5" />\n                </a>\n                <button\n                  type="button"\n                  onClick={() => setShowLiveSheetModal(false)}\n                  className="p-1.5 text-slate-400 hover:text-white rounded-xl hover:bg-slate-800 transition-colors cursor-pointer"\n                >\n                  <X className="w-5 h-5" />\n                </button>\n              </div>\n            </div>\n            <div className="flex-1 w-full bg-slate-100 relative">\n              {extractSpreadsheetId(googleSheetConfig.spreadsheetUrl) ? (\n                <iframe\n                  src={"https://docs.google.com/spreadsheets/d/" + extractSpreadsheetId(googleSheetConfig.spreadsheetUrl) + "/htmlembed?widget=true&headers=false"}\n                  className="w-full h-full border-0"\n                  title="Google Spreadsheet Live Preview"\n                  allowFullScreen\n                />\n              ) : (\n                <div className="flex items-center justify-center h-full p-6 text-center text-slate-500 text-xs">\n                  URL Google Sheet belum dikonfigurasi dengan benar.\n                </div>\n              )}\n            </div>\n          </div>\n        </div>\n      )}`;
 
-      results.push({
-        profile: { id: 'unmapped', name: 'Data Tidak Terpetakan (Lainnya)', spreadsheetUrl: '' } as any,
-        total: unmappedAssessments.length,
-        menunggu, terverifikasi, rb, rs, rr, tr, totalAnggaran,
-        buildingDetails
-      });
-    }
-
-    return results;
-  }, [profiles, assessments]);`;
-
-code1 = code1.replace(target2, replacement2);
-
-// Fix Print Overlap
-const target3 = `className="fixed inset-0 z-[100] flex items-center justify-center p-4 bg-slate-900/60 backdrop-blur-sm animate-in fade-in duration-200 print:p-0 print:bg-white print:block"`;
-const replacement3 = `className="fixed inset-0 z-[100] flex items-center justify-center p-4 bg-slate-900/60 backdrop-blur-sm animate-in fade-in duration-200 print:relative print:inset-auto print:z-auto print:p-0 print:bg-white print:block print:min-h-screen"`;
-code1 = code1.replace(target3, replacement3);
-
-const target4 = `className="bg-white rounded-2xl w-full max-w-7xl max-h-[90vh] flex flex-col shadow-2xl print:shadow-none print:max-w-none print:max-h-none print:rounded-none"`;
-const replacement4 = `className="bg-white rounded-2xl w-full max-w-7xl max-h-[90vh] flex flex-col shadow-2xl print:shadow-none print:max-w-none print:max-h-none print:rounded-none print:h-auto print:overflow-visible print:block"`;
-code1 = code1.replace(target4, replacement4);
-
-const target5 = `className="p-6 overflow-y-auto print:p-0 print:overflow-visible"`;
-const replacement5 = `className="p-6 overflow-y-auto print:p-0 print:overflow-visible print:h-auto"`;
-code1 = code1.replace(target5, replacement5);
-
-fs.writeFileSync('src/components/GlobalSheetRecapModal.tsx', code1);
-console.log('Fixed Modal');
+  code = code.replace(targetEndModal, modalHtml);
+  fs.writeFileSync('src/components/AssessmentTable.tsx', code);
+  console.log('Successfully updated AssessmentTable with Live Sheet Viewer Modal!');
+} else {
+  console.log('Already updated!');
+}
